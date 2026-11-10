@@ -453,3 +453,287 @@ def sanitize_filename(text: str) -> str:
     safe = _UNSAFE_FILENAME_PATTERN.sub("_", str(text))
     safe = re.sub(r"\s+", " ", safe).rstrip(". ")
     return safe or "untitled"
+
+
+_VORBIS_CLEAR_KEYS = frozenset(
+    {"description", "purl", "synopsis", "comment", "webpage_url"}
+)
+_MP4_CLEAR_FREEFORMS = frozenset({
+    "----:com.apple.iTunes:DESCRIPTION",
+    "----:com.apple.iTunes:PURL",
+    "----:com.apple.iTunes:SYNOPSIS",
+    "----:com.apple.iTunes:COMMENT",
+    "----:com.apple.iTunes:WEBPAGE_URL",
+})
+_MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt"})
+
+
+def _cover_image_bytes(thumbnail_path, is_official):
+    """Return (data, mime, width, height) for the thumbnail to embed."""
+    from PIL import Image
+
+    with Image.open(thumbnail_path) as image:
+        frame = image.convert("RGB")
+        width, height = frame.size
+        if is_official and width > height:
+            side = height
+            left = (width - side) // 2
+            frame = frame.crop((left, 0, left + side, side))
+            width, height = frame.size
+        import io
+
+        buffer = io.BytesIO()
+        frame.save(buffer, "JPEG", quality=90)
+        return buffer.getvalue(), "image/jpeg", width, height
+
+
+def _vorbis_list(meta, *keys):
+    values = []
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                _append_unique(values, str(item))
+        elif value:
+            for part in str(value).split(";"):
+                _append_unique(values, part)
+    return values
+
+
+def _vorbis_single(meta, *keys):
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, (list, tuple)):
+            cleaned = [str(item).strip() for item in value if str(item).strip()]
+            if cleaned:
+                return cleaned[0]
+        elif str(value or "").strip():
+            return str(value).strip()
+    return ""
+
+
+def _tag_vorbis_comments(audio, meta, cover):
+    if audio.tags is None:
+        audio.add_tags()
+    tags = audio.tags
+    for key in list(tags.keys()):
+        if key.lower() in _VORBIS_CLEAR_KEYS:
+            del tags[key]
+
+    single_map = {
+        "title": _vorbis_single(meta, "title"),
+        "artist": _vorbis_single(meta, "artist"),
+        "album": _vorbis_single(meta, "album"),
+        "albumartist": _vorbis_single(meta, "albumartist"),
+        "date": _vorbis_single(meta, "date"),
+        "originaldate": _vorbis_single(meta, "originaldate"),
+        "recordingdate": _vorbis_single(meta, "recordingdate"),
+        "copyright": _vorbis_single(meta, "copyright"),
+        "publisher": _vorbis_single(meta, "publisher"),
+        "isrc": _vorbis_single(meta, "isrc"),
+        "genre": _vorbis_single(meta, "genre"),
+        "studio": _vorbis_single(meta, "studio"),
+        "label": _vorbis_single(meta, "label"),
+        "distributor": _vorbis_single(meta, "distributor"),
+    }
+    multi_map = {
+        "artists": _vorbis_list(meta, "artists"),
+        "composer": _vorbis_list(meta, "composers", "composer"),
+        "lyricist": _vorbis_list(meta, "lyricists"),
+        "producer": _vorbis_list(meta, "producers"),
+        "arranger": _vorbis_list(meta, "arrangers"),
+        "conductor": _vorbis_list(meta, "conductors"),
+        "engineer": _vorbis_list(meta, "engineers"),
+        "performer": _vorbis_list(meta, "performers"),
+        "instrument": _vorbis_list(meta, "instruments"),
+    }
+    # A single credited artist lives in `artist`; `artists` is multi-value only.
+    # An empty value deletes any stale tag from a previous tagging pass.
+
+    for key, value in single_map.items():
+        if value:
+            tags[key] = [value]
+        elif key in tags:
+            del tags[key]
+    for key, values in multi_map.items():
+        if key == "artists" and len(values) < 2:
+            values = []
+        if values:
+            tags[key] = list(values)
+        elif key in tags:
+            del tags[key]
+
+    # Re-clear in case the source file stored junk under odd casing.
+    for key in list(tags.keys()):
+        if key.lower() in _VORBIS_CLEAR_KEYS:
+            del tags[key]
+
+    if cover is not None:
+        import base64
+
+        from mutagen.flac import Picture
+
+        data, mime, width, height = cover
+        picture = Picture()
+        picture.type = 3
+        picture.mime = mime
+        picture.desc = ""
+        picture.width = width
+        picture.height = height
+        picture.data = data
+        tags["metadata_block_picture"] = [
+            base64.b64encode(picture.write()).decode("ascii")
+        ]
+
+
+def _mp4_freeform(text):
+    from mutagen.mp4 import MP4FreeForm
+
+    if isinstance(text, bytes):
+        raw = text
+    else:
+        raw = str(text).encode("utf-8")
+    return MP4FreeForm(raw, dataformat=MP4FreeForm.FORMAT_TEXT)
+
+
+def _tag_mp4_atoms(audio, meta, cover):
+    from mutagen.mp4 import MP4Cover
+
+    for key in list(audio.keys()):
+        if key in _MP4_CLEAR_ATOMS or key in _MP4_CLEAR_FREEFORMS:
+            del audio[key]
+
+    def set_atom(key, value):
+        if value:
+            audio[key] = [value]
+        elif key in audio:
+            del audio[key]
+
+    composer = _vorbis_single(meta, "composer") or "; ".join(
+        _vorbis_list(meta, "composers")
+    )
+    set_atom("\xa9nam", _vorbis_single(meta, "title"))
+    set_atom("\xa9ART", _vorbis_single(meta, "artist"))
+    set_atom("\xa9alb", _vorbis_single(meta, "album"))
+    set_atom("\xa9day", _vorbis_single(meta, "date"))
+    set_atom("aART", _vorbis_single(meta, "albumartist"))
+    set_atom("\xa9wrt", composer)
+    set_atom("\xa9gen", _vorbis_single(meta, "genre"))
+    set_atom("cprt", _vorbis_single(meta, "copyright"))
+
+    freeform_map = {
+        "----:com.apple.iTunes:ARTISTS": _vorbis_list(meta, "artists"),
+        "----:com.apple.iTunes:LYRICIST": _vorbis_list(meta, "lyricists"),
+        "----:com.apple.iTunes:PRODUCER": _vorbis_list(meta, "producers"),
+        "----:com.apple.iTunes:ENGINEER": _vorbis_list(meta, "engineers"),
+        "----:com.apple.iTunes:LABEL": (
+            [_vorbis_single(meta, "label")] if _vorbis_single(meta, "label") else []
+        ),
+        "----:com.apple.iTunes:ORIGINALDATE": (
+            [_vorbis_single(meta, "originaldate")]
+            if _vorbis_single(meta, "originaldate")
+            else []
+        ),
+        "----:com.apple.iTunes:ARRANGER": _vorbis_list(meta, "arrangers"),
+        "----:com.apple.iTunes:CONDUCTOR": _vorbis_list(meta, "conductors"),
+        "----:com.apple.iTunes:PERFORMER": _vorbis_list(meta, "performers"),
+        "----:com.apple.iTunes:PUBLISHER": (
+            [_vorbis_single(meta, "publisher")]
+            if _vorbis_single(meta, "publisher")
+            else []
+        ),
+        "----:com.apple.iTunes:ISRC": (
+            [_vorbis_single(meta, "isrc")] if _vorbis_single(meta, "isrc") else []
+        ),
+    }
+    if len(freeform_map["----:com.apple.iTunes:ARTISTS"]) < 2:
+        freeform_map["----:com.apple.iTunes:ARTISTS"] = []
+    for key, values in freeform_map.items():
+        if values:
+            audio[key] = [_mp4_freeform(value) for value in values]
+        elif key in audio:
+            del audio[key]
+
+    if cover is not None:
+        data, _, _, _ = cover
+        audio["covr"] = [
+            MP4Cover(data, imageformat=MP4Cover.FORMAT_JPEG)
+        ]
+
+
+def _tag_id3_frames(audio, meta, cover):
+    from mutagen.id3 import APIC, TCOM, TCON, TCOP, TDRC, TIT2, TPE1, TPE2, TALB, TXXX
+
+    if audio.tags is None:
+        audio.add_tags()
+    tags = audio.tags
+    for frame in list(tags.getall("COMM")):
+        del tags[frame.HashKey]
+
+    def set_text(frame_class, value):
+        if not value:
+            return
+        tags.delall(f"{frame_class.__name__}:")
+        tags.add(frame_class(encoding=3, text=value))
+
+    artists = _vorbis_list(meta, "artists")
+    set_text(TIT2, _vorbis_single(meta, "title"))
+    set_text(TPE1, _vorbis_single(meta, "artist"))
+    set_text(TALB, _vorbis_single(meta, "album"))
+    set_text(TPE2, _vorbis_single(meta, "albumartist"))
+    set_text(TDRC, _vorbis_single(meta, "date"))
+    set_text(
+        TCOM,
+        _vorbis_single(meta, "composer")
+        or "; ".join(_vorbis_list(meta, "composers")),
+    )
+    set_text(TCON, _vorbis_single(meta, "genre"))
+    set_text(TCOP, _vorbis_single(meta, "copyright"))
+    if len(artists) >= 2:
+        tags.delall("TXXX:ARTISTS")
+        tags.add(TXXX(encoding=3, desc="ARTISTS", text=list(artists)))
+    else:
+        tags.delall("TXXX:ARTISTS")
+    if cover is not None:
+        data, mime, _, _ = cover
+        tags.delall("APIC:")
+        tags.add(
+            APIC(encoding=3, mime=mime, type=3, desc="", data=data)
+        )
+
+
+def tag_audio_file(filepath, meta, thumbnail_path=None) -> None:
+    """Write container-native music tags and front-cover art in place."""
+    import os
+
+    suffix = os.path.splitext(str(filepath))[1].lower()
+    cover = None
+    if thumbnail_path:
+        cover = _cover_image_bytes(thumbnail_path, bool((meta or {}).get("is_tagged")))
+
+    if suffix == ".opus":
+        from mutagen.oggopus import OggOpus
+
+        audio = OggOpus(filepath)
+        _tag_vorbis_comments(audio, meta or {}, cover)
+        audio.save()
+    elif suffix == ".ogg":
+        from mutagen.oggvorbis import OggVorbis
+
+        audio = OggVorbis(filepath)
+        _tag_vorbis_comments(audio, meta or {}, cover)
+        audio.save()
+    elif suffix in {".m4a", ".mp4", ".m4b"}:
+        from mutagen.mp4 import MP4
+
+        audio = MP4(filepath)
+        _tag_mp4_atoms(audio, meta or {}, cover)
+        audio.save()
+    elif suffix == ".mp3":
+        from mutagen.mp3 import MP3
+
+        audio = MP3(filepath)
+        _tag_id3_frames(audio, meta or {}, cover)
+        audio.save()
+    else:
+        raise ValueError(f"Unsupported audio container: {filepath!r}")

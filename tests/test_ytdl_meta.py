@@ -1,10 +1,12 @@
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
-from ytdl_meta import parse_info, sanitize_filename
+from ytdl_meta import parse_info, sanitize_filename, tag_audio_file
 
 
 OFFICIAL_DESCRIPTION = """Provided to YouTube by Sony
@@ -203,6 +205,133 @@ class SanitizeFilenameTests(unittest.TestCase):
         self.assertFalse(any(character in sanitized for character in '/\\:*?"<>|'))
         self.assertEqual(sanitized, sanitized.rstrip(". "))
         self.assertEqual(sanitize_filename("name.  "), "name")
+
+
+def _make_silence_opus(path):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1",
+         "-c:a", "libopus", path],
+        check=True,
+    )
+
+
+def _make_silence_m4a(path):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1",
+         "-c:a", "aac", path],
+        check=True,
+    )
+
+
+def _make_thumbnail(path, size=(1280, 720)):
+    from PIL import Image
+
+    Image.new("RGB", size, (200, 30, 30)).save(path, "JPEG")
+
+
+class TagAudioFileTests(unittest.TestCase):
+    def test_opus_tags_are_multivalue_and_artwork_is_cropped_square(self):
+        from mutagen.oggopus import OggOpus
+
+        meta = parse_info({
+            "description": OFFICIAL_DESCRIPTION,
+            "title": "Stay (feat. Earth, Wind & Fire)",
+            "duration": 240,
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "track.opus")
+            thumb = os.path.join(tmp, "thumb.jpg")
+            _make_silence_opus(src)
+            _make_thumbnail(thumb)
+            seed = OggOpus(src)
+            seed["description"] = ["seeded description"]
+            seed["comment"] = ["seeded comment"]
+            seed["webpage_url"] = ["https://example.invalid/seed"]
+            seed.save()
+
+            tag_audio_file(src, meta, thumb)
+
+            tagged = OggOpus(src)
+            tags = tagged.tags
+            self.assertIsInstance(tags["artist"], list)
+            self.assertEqual(tags["artist"], ["Rihanna feat. Earth, Wind & Fire"])
+            self.assertEqual(tags["artists"], ["Rihanna", "Earth, Wind & Fire"])
+            self.assertEqual(tags["album"], ["Unapologetic"])
+            self.assertEqual(tags["albumartist"], ["Rihanna"])
+            self.assertEqual(tags["date"], ["2012-11-19"])
+            self.assertEqual(tags["originaldate"], ["1979"])
+            self.assertEqual(tags["composer"], ["Mikky Ekko", "Justin Parker"])
+            self.assertEqual(tags["lyricist"], ["Mikky Ekko"])
+            self.assertEqual(tags["producer"], ["Mikky Ekko"])
+            self.assertEqual(tags["engineer"], ["Manny Marroquin"])
+            self.assertIsInstance(tags["label"], list)
+            self.assertEqual(tags["label"], ["Def Jam Recordings"])
+            lowered = {key.lower() for key in tags.keys()}
+            for cleared in ("description", "purl", "synopsis", "comment", "webpage_url"):
+                self.assertNotIn(cleared, lowered)
+
+            self.assertIn("metadata_block_picture", tags)
+            import base64
+
+            from mutagen.flac import Picture
+
+            picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
+            self.assertEqual(picture.type, 3)
+            self.assertEqual((picture.width, picture.height), (720, 720))
+
+    def test_m4a_tags_standard_atoms_freeform_artists_and_cover(self):
+        from mutagen.mp4 import MP4
+
+        meta = parse_info({
+            "description": OFFICIAL_DESCRIPTION,
+            "title": "Stay (feat. Earth, Wind & Fire)",
+            "duration": 240,
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "track.m4a")
+            thumb = os.path.join(tmp, "thumb.jpg")
+            _make_silence_m4a(src)
+            _make_thumbnail(thumb)
+
+            tag_audio_file(src, meta, thumb)
+
+            tagged = MP4(src)
+            self.assertEqual(tagged["\xa9nam"], ["Stay"])
+            self.assertEqual(tagged["\xa9ART"], ["Rihanna feat. Earth, Wind & Fire"])
+            self.assertEqual(tagged["\xa9alb"], ["Unapologetic"])
+            self.assertEqual(tagged["\xa9day"], ["2012-11-19"])
+            freeforms = tagged["----:com.apple.iTunes:ARTISTS"]
+            decoded = [bytes(value).decode("utf-8") for value in freeforms]
+            self.assertEqual(decoded, ["Rihanna", "Earth, Wind & Fire"])
+            self.assertIn("covr", tagged)
+            self.assertTrue(len(bytes(tagged["covr"][0])) > 0)
+
+    def test_fallback_single_artist_omits_artists_and_keeps_landscape(self):
+        from mutagen.oggopus import OggOpus
+
+        meta = parse_info({"title": "Cool Track", "channel": "Main Act - Topic"})
+        self.assertEqual(meta["artists"], ["Main Act"])
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "track.opus")
+            thumb = os.path.join(tmp, "thumb.jpg")
+            _make_silence_opus(src)
+            _make_thumbnail(thumb)
+
+            tag_audio_file(src, meta, thumb)
+
+            tagged = OggOpus(src)
+            tags = tagged.tags
+            lowered = {key.lower() for key in tags.keys()}
+            self.assertNotIn("artists", lowered)
+            self.assertEqual(tags["artist"], ["Main Act"])
+            import base64
+
+            from mutagen.flac import Picture
+
+            picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
+            self.assertEqual((picture.width, picture.height), (1280, 720))
 
 
 if __name__ == "__main__":
