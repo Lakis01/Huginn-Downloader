@@ -112,7 +112,9 @@
 - Create: `tests/test_youtube_buttons.js`
 
 - [ ] Test userscript URL encoding, current-watch URL selection, button de-duplication, and route/re-render reattachment with a lightweight DOM test harness.
-- [ ] A simulated watch page has one persistent button group after subscribe and before the like/dislike actions; repeated route events and DOM mutations do not duplicate it, and each click creates the correct audio/video/cut URI with the current canonical watch URL.
+- [ ] A simulated `ytd-watch-metadata #top-row` with `#owner #subscribe-button` followed by `#actions` has exactly one custom control group between owner and actions. Buttons have names `Download audio`, `Download video`, and `Cut audio`, with accessible labels, keyboard focus, inline SVG icons, and hover/focus states.
+- [ ] Each button click emits the exact scheme mode and percent-encodes the current canonical watch URL. Repeated `yt-navigate-finish`, `yt-page-data-updated`, and observed DOM mutations do not duplicate controls; leaving a watch page removes the group.
+- [ ] A `contextmenu` event on a YouTube sidebar/feed card records that card's `/watch` or `/shorts/` link for External Application Launcher; a right-click outside a card falls back to current `location.href`.
 - [ ] Implement Tampermonkey controls between Subscribe and Like/Dislike, inline icons, SPA listeners, and a debounced mutation observer.
 - [ ] Make each direct user click navigate to a URI in the documented `yt-dlp://` format.
 - [ ] Document safe manual External Application Launcher setup for the three existing apps with YouTube page/frame/link/image/audio/video contexts and no destructive partial import; document Tampermonkey import and Firefox's URI confirmation.
