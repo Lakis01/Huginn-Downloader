@@ -34,7 +34,7 @@
 ### Task 1: Parse Art Track and fallback metadata
 
 **Files:**
-- Create: `bin/ytdl_meta.py`
+- Create: `bin/ytdl_meta.py` (porting the user's existing parser)
 - Create: `tests/test_ytdl_meta.py`
 
 **Interfaces:**
@@ -63,7 +63,7 @@
 ### Task 3: Finalize audio, video, and cut downloads
 
 **Files:**
-- Create: `bin/yt-dlp-wrapper.py`
+- Create: `bin/yt-dlp-wrapper.py` (porting the user's existing wrapper)
 - Modify: `tests/test_ytdl_meta.py`
 
 **Interfaces:**
@@ -85,6 +85,8 @@
 **Interfaces:**
 - Shortcut mode resolution: explicit URL/URI first; otherwise validated primary selection, Plasma Browser Integration MPRIS active-media URL, then clipboard.
 - URI format: `yt-dlp://<audio|video|cut>?url=<percent-encoded-YouTube-URL>`.
+- Installer stages `bin/ytdl_meta.py`, `bin/yt-dlp-wrapper.py`, and `bin/yt-dlp-shortcut.sh` into `~/.local/bin`, and all four desktop entries into `~/.local/share/applications`.
+- Installation is dry-run by default; `--install` makes timestamped backups before replacing/deploying files.
 
 - [ ] Test mode/URI parsing, valid YouTube URL filtering, apostrophes and ampersands, MPRIS extraction, and clipboard fallback.
 - [ ] Fix desktop `Exec=` paths to absolute paths and add the custom URL protocol entry.
