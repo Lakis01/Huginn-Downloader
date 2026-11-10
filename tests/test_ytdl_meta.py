@@ -1,12 +1,28 @@
 import os
+import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 from ytdl_meta import parse_info, sanitize_filename, tag_audio_file
+
+
+WRAPPER_PATH = os.path.join(os.path.dirname(__file__), "..", "bin", "yt-dlp-wrapper.py")
+
+
+def _load_wrapper(test_case):
+    test_case.assertTrue(os.path.isfile(WRAPPER_PATH), "wrapper module is not implemented")
+    spec = importlib.util.spec_from_file_location("yt_dlp_wrapper", WRAPPER_PATH)
+    wrapper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wrapper)
+    return wrapper
 
 
 OFFICIAL_DESCRIPTION = """Provided to YouTube by Sony
@@ -381,6 +397,240 @@ class TagAudioFileTests(unittest.TestCase):
 
             picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
             self.assertEqual((picture.width, picture.height), (1280, 720))
+
+
+class WrapperTests(unittest.TestCase):
+    @staticmethod
+    def _write_download_sidecars(media_path, info):
+        media_path = Path(media_path)
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(b"downloaded audio")
+        Path(f"{media_path}.info.json").write_text(json.dumps(info), encoding="utf-8")
+        thumbnail_path = media_path.with_suffix(".jpg")
+        thumbnail_path.write_bytes(b"thumbnail")
+        return thumbnail_path
+
+    @staticmethod
+    def _metadata():
+        return parse_info({"title": "Track", "channel": "Artist", "duration": 100})
+
+    def test_finalize_uses_appended_info_sidecar_renames_without_overwrite_and_runs_rsgain_once(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            moved_media = Path(tmp) / "post-move-name.opus"
+            thumbnail = self._write_download_sidecars(
+                moved_media, {"title": "Track", "channel": "Artist", "duration": 100}
+            )
+            existing_target = Path(tmp) / "Artist - Track.opus"
+            existing_target.write_bytes(b"keep existing file")
+            tagged_paths = []
+
+            def tag_copy(path, meta, thumbnail_path=None):
+                tagged_paths.append((path, meta, thumbnail_path))
+                with open(path, "ab") as tagged_file:
+                    tagged_file.write(b"+tagged")
+
+            with mock.patch.object(wrapper, "tag_audio_file", side_effect=tag_copy):
+                with mock.patch.object(wrapper.subprocess, "run") as run:
+                    result = wrapper.finalize_audio_download(str(moved_media))
+
+            expected_target = Path(tmp) / "Artist - Track (1).opus"
+            self.assertEqual(Path(result), expected_target)
+            self.assertEqual(tagged_paths[0][1]["artist"], "Artist")
+            self.assertEqual(tagged_paths[0][2], str(thumbnail))
+            self.assertNotEqual(tagged_paths[0][0], str(moved_media))
+            self.assertEqual(expected_target.read_bytes(), b"downloaded audio+tagged")
+            self.assertEqual(existing_target.read_bytes(), b"keep existing file")
+            self.assertFalse(moved_media.exists())
+            self.assertFalse(Path(f"{moved_media}.info.json").exists())
+            self.assertFalse(thumbnail.exists())
+            run.assert_called_once_with(
+                ["rsgain", "custom", "-s", "i", str(expected_target)], check=True
+            )
+
+    def test_failed_retag_preserves_download_and_sidecars_and_skips_rsgain(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media_path = Path(tmp) / "original.opus"
+            thumbnail = self._write_download_sidecars(
+                media_path, {"title": "Track", "channel": "Artist"}
+            )
+            original_bytes = media_path.read_bytes()
+
+            with mock.patch.object(
+                wrapper, "tag_audio_file", side_effect=RuntimeError("tagging failed")
+            ):
+                with mock.patch.object(wrapper.subprocess, "run") as run:
+                    with self.assertRaisesRegex(RuntimeError, "tagging failed"):
+                        wrapper.finalize_audio_download(str(media_path))
+
+            self.assertEqual(media_path.read_bytes(), original_bytes)
+            self.assertTrue(Path(f"{media_path}.info.json").exists())
+            self.assertTrue(thumbnail.exists())
+            self.assertEqual(list(Path(tmp).glob(".*tagging*")), [])
+            run.assert_not_called()
+
+    def test_thumbnail_discovery_does_not_treat_remote_thumbnail_url_as_a_sidecar(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media_path = Path(tmp) / "post-move-name.opus"
+            expected_thumbnail = self._write_download_sidecars(
+                media_path,
+                {
+                    "title": "Track",
+                    "channel": "Artist",
+                    "thumbnail": "https://i.ytimg.com/vi/example/mqdefault.jpg",
+                },
+            )
+            misleading_thumbnail = Path(tmp) / "mqdefault.jpg"
+            misleading_thumbnail.write_bytes(b"unrelated image")
+            used_thumbnails = []
+
+            with mock.patch.object(
+                wrapper,
+                "tag_audio_file",
+                side_effect=lambda _path, _meta, thumbnail_path=None: used_thumbnails.append(
+                    thumbnail_path
+                ),
+            ):
+                with mock.patch.object(wrapper.subprocess, "run"):
+                    wrapper.finalize_audio_download(str(media_path))
+
+            self.assertEqual(used_thumbnails, [str(expected_thumbnail)])
+
+    def test_finalize_never_uses_or_deletes_thumbnail_paths_outside_download_directory(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            download_dir = Path(tmp) / "downloads"
+            outside_dir = Path(tmp) / "unrelated"
+            outside_dir.mkdir()
+            outside_thumbnail = outside_dir / "cover.jpg"
+            outside_thumbnail.write_bytes(b"not a download sidecar")
+            media_path = download_dir / "post-move-name.opus"
+            expected_thumbnail = self._write_download_sidecars(
+                media_path,
+                {
+                    "title": "Track",
+                    "channel": "Artist",
+                    "thumbnail_filepath": str(outside_thumbnail),
+                },
+            )
+            used_thumbnails = []
+
+            with mock.patch.object(
+                wrapper,
+                "tag_audio_file",
+                side_effect=lambda _path, _meta, thumbnail_path=None: used_thumbnails.append(
+                    thumbnail_path
+                ),
+            ):
+                with mock.patch.object(wrapper.subprocess, "run"):
+                    wrapper.finalize_audio_download(str(media_path))
+
+            self.assertEqual(used_thumbnails, [str(expected_thumbnail)])
+            self.assertTrue(outside_thumbnail.exists())
+
+    def test_audio_download_uses_post_move_filepath_and_sidecars_without_embed_metadata(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            moved_media = Path(tmp) / "yt-dlp-post-move.opus"
+            run_calls = []
+            tagged_thumbnails = []
+
+            def fake_run(command, **kwargs):
+                run_calls.append((command, kwargs))
+                if command[0] == "yt-dlp":
+                    self._write_download_sidecars(
+                        moved_media,
+                        {"title": "Track", "channel": "Artist", "duration": 100},
+                    )
+                    return SimpleNamespace(stdout=f"{moved_media}\n", returncode=0)
+                return SimpleNamespace(stdout="", returncode=0)
+
+            def tag_copy(path, meta, thumbnail_path=None):
+                tagged_thumbnails.append(thumbnail_path)
+
+            with mock.patch.object(wrapper, "parse_audio", return_value=self._metadata()):
+                with mock.patch.object(wrapper, "tag_audio_file", side_effect=tag_copy):
+                    with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                        wrapper.download_audio("https://example.invalid/watch?v=audio")
+
+            command = run_calls[0][0]
+            self.assertNotIn("--embed-metadata", command)
+            self.assertIn("--write-info-json", command)
+            self.assertIn("--write-thumbnail", command)
+            self.assertIn("--print", command)
+            print_index = command.index("--print")
+            self.assertEqual(command[print_index + 1], "after_move:filepath")
+            self.assertNotIn("--ignore-config", command)
+            self.assertEqual(tagged_thumbnails, [str(moved_media.with_suffix(".jpg"))])
+            self.assertTrue((Path(tmp) / "Artist - Track.opus").exists())
+            self.assertEqual(
+                [call[0][:5] for call in run_calls if call[0][0] == "rsgain"],
+                [["rsgain", "custom", "-s", "i", str(Path(tmp) / "Artist - Track.opus")]],
+            )
+
+    def test_cut_keeps_requested_ffmpeg_options_and_finalizes_without_embed_metadata(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            moved_media = Path(tmp) / "cut-after-move.opus"
+            run_calls = []
+
+            def fake_run(command, **kwargs):
+                run_calls.append((command, kwargs))
+                if command[0] == "yt-dlp":
+                    self._write_download_sidecars(
+                        moved_media,
+                        {"title": "Track", "channel": "Artist", "duration": 100},
+                    )
+                    return SimpleNamespace(stdout=f"{moved_media}\n", returncode=0)
+                return SimpleNamespace(stdout="", returncode=0)
+
+            with mock.patch.object(wrapper, "parse_audio", return_value=self._metadata()):
+                with mock.patch(
+                    "builtins.input", side_effect=["0:10", "0:50", "160", "1", "voip"]
+                ):
+                    with mock.patch.object(wrapper, "tag_audio_file"):
+                        with mock.patch.object(
+                            wrapper.subprocess, "run", side_effect=fake_run
+                        ):
+                            wrapper.interactive_cut("https://example.invalid/watch?v=cut")
+
+            command = run_calls[0][0]
+            self.assertNotIn("--embed-metadata", command)
+            self.assertIn("--write-info-json", command)
+            self.assertIn("--write-thumbnail", command)
+            self.assertIn("--download-sections", command)
+            self.assertIn("*10.0-50.0", command)
+            postprocessor_args = command[command.index("--postprocessor-args") + 1]
+            self.assertEqual(
+                postprocessor_args,
+                "ExtractAudio:-b:a 160k -vbr on -ac 1 -application voip",
+            )
+            self.assertTrue((Path(tmp) / "Artist - Track_cut_10_50.opus").exists())
+            rsgain_calls = [call[0] for call in run_calls if call[0][0] == "rsgain"]
+            self.assertEqual(
+                rsgain_calls,
+                [[
+                    "rsgain", "custom", "-s", "i",
+                    str(Path(tmp) / "Artist - Track_cut_10_50.opus"),
+                ]],
+            )
+
+    def test_video_mode_preserves_stream_and_thumbnail_behavior_without_rsgain(self):
+        wrapper = _load_wrapper(self)
+        with mock.patch.object(wrapper.subprocess, "run") as run:
+            wrapper.download_video("https://example.invalid/watch?v=video")
+
+        command = run.call_args.args[0]
+        self.assertIn("bestvideo+bestaudio/best", command)
+        self.assertIn("--merge-output-format", command)
+        self.assertIn("mkv", command)
+        self.assertIn("--embed-thumbnail", command)
+        self.assertIn("--convert-thumbnails", command)
+        self.assertIn("webp", command)
+        self.assertIn("--embed-metadata", command)
+        self.assertEqual(run.call_count, 1)
 
 
 if __name__ == "__main__":
