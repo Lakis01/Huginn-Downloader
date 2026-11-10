@@ -88,20 +88,24 @@ individual names are stored as multi-value `artists`. `&` inside a name
 
 ### Date precedence
 
-`date` and `originaldate` are always `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`:
+`date` and `originaldate` are always `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`.
+Official Art Tracks and ordinary uploads follow different rules:
 
-1. `Released on:` value from an official description wins.
-2. Otherwise the video upload/release date (yt-dlp's `YYYYMMDD` is expanded).
-3. Otherwise a bare ℗ year (e.g. `℗ 2004 Example Label` → `2004`).
-4. A distinct earlier ℗ year alongside a later release date is stored as
-   `originaldate` (e.g. release `2012-11-19` + `℗ 1979` → `originaldate`
-   `1979`).
+- **Official Art Track:** `date` is the `Released on:` value when present;
+  otherwise the ℗ year when present (e.g. `℗ 2004 Example Label` →
+  `2004`); when neither is present, `date` stays blank. Upload/release
+  dates are never used. A distinct earlier ℗ year alongside a later release
+  date is stored as `originaldate` (e.g. release `2012-11-19` + `℗ 1979` →
+  `originaldate` `1979`).
+- **Ordinary upload (fallback):** `date` is the video's upload date, or its
+  release date when no upload date exists (yt-dlp's `YYYYMMDD` is expanded
+  to `YYYY-MM-DD`).
 
 ### ReplayGain behavior
 
 `rsgain custom -s i` runs once per finished audio/cut file, in
 individual-track write mode. rsgain's default ReplayGain/Opus mode is kept;
-the optional `-o r` (album-gain) mode is deliberately not used. Video-mode
+the optional `-o r` (R128 tag) mode is deliberately not used. Video-mode
 downloads never run `rsgain`.
 
 ### yt-to-forerunner compatibility
@@ -140,17 +144,29 @@ What `--install` does:
 
 ### Rollback
 
+Before installing, record the current URI handler so it can be restored:
+
+```sh
+xdg-mime query default x-scheme-handler/yt-dlp
+```
+
 Before replacing any existing destination file, the installer copies it to
-`<name>.bak.<YYYYMMDD-HHMMSS>` (with a numeric suffix on collision, e.g.
-`yt-dlp-shortcut.sh.bak.20261110-120000.1`) and prints each backup path.
-To roll back, move the `.bak.*` file back over the installed file and
-re-run `xdg-mime` only if URI handling changed:
+`<name>.bak.<YYYYMMDD-HHMMSS>` (with a numeric suffix on collision) and
+prints each backup path. To roll back, list the backups, then move the exact
+backup path back over the installed file — for example:
 
 ```sh
 ls ~/.local/bin/*.bak.* ~/.local/share/applications/*.bak.*
-mv ~/.local/bin/yt-dlp-shortcut.sh.bak.<timestamp> ~/.local/bin/yt-dlp-shortcut.sh
-HOME="$HOME" xdg-mime default net.local.yt-dlp-uri.desktop x-scheme-handler/yt-dlp
+mv ~/.local/bin/yt-dlp-shortcut.sh.bak.20261110-120000 ~/.local/bin/yt-dlp-shortcut.sh
 ```
+
+(substitute the real timestamped path printed by `ls`; the name above is
+only an example). Then restore the URI association: if the pre-install
+query returned a handler, re-select it, e.g.
+`xdg-mime default <that-handler> x-scheme-handler/yt-dlp`. If the query
+was empty (no custom handler before), do not select the new handler again —
+instead remove the association in KDE **System Settings → Applications →
+File Associations**, under `x-scheme-handler/yt-dlp`.
 
 To fully uninstall, delete the seven installed files (plus any `.bak.*`
 copies you no longer want) and remove the MIME registration with your
