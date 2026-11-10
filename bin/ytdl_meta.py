@@ -17,6 +17,22 @@ _CLEAN_SUFFIX_PATTERNS = (
     ),
     re.compile(r"\s+\[?(?:4k|8k|1080p|720p)\]?\s*$", re.IGNORECASE),
 )
+_INSTRUMENT_ROLES = {
+    "accordion", "acoustic guitar", "backing vocals", "bass", "bass guitar",
+    "cello", "drums", "electric guitar", "guitar", "keyboard", "keyboards",
+    "organ", "piano", "saxophone", "strings", "synthesizer", "violin", "vocals",
+}
+_ART_TRACK_ROLE_LABELS = {
+    "composer", "composer lyricist", "composer music", "composition", "lyricist",
+    "lyrics", "lyric writer", "writer", "producer", "co-producer",
+    "executive producer", "associate producer", "arranger", "conductor",
+    "recording engineer", "mixing engineer", "mastering engineer", "engineer",
+    "audio engineer", "performer", "associated performer", "artist", "instrument",
+} | _INSTRUMENT_ROLES
+_ART_TRACK_METADATA_LABELS = {
+    "isrc", "genre", "recording date", "recordingdate", "studio", "label",
+    "music publisher", "publisher",
+}
 
 
 def _normalize_date(value):
@@ -120,12 +136,6 @@ def _description_credits(lines):
     copyright_lines = []
     p_line = ""
 
-    instrument_roles = {
-        "accordion", "acoustic guitar", "backing vocals", "bass", "bass guitar",
-        "cello", "drums", "electric guitar", "guitar", "keyboard", "keyboards",
-        "organ", "piano", "saxophone", "strings", "synthesizer", "violin", "vocals",
-    }
-
     for line in lines:
         stripped = line.strip()
         lower = stripped.casefold()
@@ -213,7 +223,7 @@ def _description_credits(lines):
                 recognized_roles = True
                 for instrument in people:
                     _append_unique(credits["instruments"], instrument)
-            elif role in instrument_roles:
+            elif role in _INSTRUMENT_ROLES:
                 recognized_roles = True
                 _append_unique(credits["instruments"], label_parts[-1].title())
                 for person in people:
@@ -221,7 +231,7 @@ def _description_credits(lines):
 
         if "associated performer" in roles:
             for role in roles:
-                if role in instrument_roles:
+                if role in _INSTRUMENT_ROLES:
                     _append_unique(credits["instruments"], role.title())
         if "writer" in roles:
             recognized_roles = True
@@ -289,6 +299,22 @@ def _set_artist_metadata(result, display, entities):
         result["albumartist"] = result["artists"][0]
 
 
+def _is_art_track_metadata_line(line):
+    if line.startswith(("℗", "©", "Released on:")):
+        return True
+    if ":" not in line:
+        return False
+
+    label = line.split(":", 1)[0].casefold().strip()
+    label_parts = [part.strip() for part in label.split(",") if part.strip()]
+    if label in _ART_TRACK_METADATA_LABELS or label.startswith("studio personnel"):
+        return True
+    return any(
+        part in _ART_TRACK_ROLE_LABELS or part in _ART_TRACK_METADATA_LABELS
+        for part in label_parts
+    )
+
+
 def _parse_art_track(info, result, description):
     lines = [line.strip() for line in description.splitlines() if line.strip()]
     distributor_match = re.search(r"Provided to YouTube by\s+([^\r\n]+)", description)
@@ -331,26 +357,21 @@ def _parse_art_track(info, result, description):
         primary = primary_entities[0] if primary_entities else primary_display
         if feature_phrase:
             display = f"{primary} {feature_phrase}"
-        elif len(artist_entities) > 1:
-            display = f"{primary} feat. {' feat. '.join(artist_entities[1:])}"
         else:
-            display = primary_display
-        # Any additional credited entities not already in the display remain visible.
-        displayed_entities = _artist_entities(display)
-        for entity in artist_entities:
-            if entity.casefold() not in {item.casefold() for item in displayed_entities}:
-                display += f" feat. {entity}"
-                displayed_entities.append(entity)
+            # Keep the source's co-credit separator instead of inventing a feature.
+            display = " · ".join(artist_displays)
+        if feature_phrase:
+            # Any additional co-credits stay distinct from the explicit feature.
+            displayed_entities = _artist_entities(display)
+            for entity in artist_entities:
+                if entity.casefold() not in {item.casefold() for item in displayed_entities}:
+                    display += f" · {entity}"
+                    displayed_entities.append(entity)
         _set_artist_metadata(result, display, artist_entities)
 
     album = ""
     for line in content_lines[title_line_index + 1:] if title_line_index >= 0 else []:
-        if line.startswith(("℗", "©", "Released on:")):
-            continue
-        if ":" in line and line.split(":", 1)[0].casefold() in {
-            "composer", "composer, lyricist", "composer lyricist", "composer music", "writer",
-            "producer", "lyricist", "isrc", "genre", "studio", "recording date",
-        }:
+        if _is_art_track_metadata_line(line):
             continue
         album = line
         break
