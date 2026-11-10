@@ -662,7 +662,8 @@ def _tag_mp4_atoms(audio, meta, cover):
 
 
 def _tag_id3_frames(audio, meta, cover):
-    from mutagen.id3 import APIC, TCOM, TCON, TCOP, TDRC, TIT2, TPE1, TPE2, TALB, TXXX
+    from mutagen.id3 import APIC, TCOM, TCON, TCOP, TDOR, TDRC, TEXT, TIT2
+    from mutagen.id3 import TIPL, TPE1, TPE2, TALB, TPUB, TXXX
 
     if audio.tags is None:
         audio.add_tags()
@@ -671,24 +672,33 @@ def _tag_id3_frames(audio, meta, cover):
         del tags[frame.HashKey]
 
     def set_text(frame_class, value):
-        if not value:
-            return
-        tags.delall(f"{frame_class.__name__}:")
-        tags.add(frame_class(encoding=3, text=value))
+        tags.delall(frame_class.__name__)
+        if value:
+            tags.add(frame_class(encoding=3, text=value))
 
     artists = _vorbis_list(meta, "artists")
+    involved = [["producer", name] for name in _vorbis_list(meta, "producers")]
+    involved += [["engineer", name] for name in _vorbis_list(meta, "engineers")]
     set_text(TIT2, _vorbis_single(meta, "title"))
     set_text(TPE1, _vorbis_single(meta, "artist"))
     set_text(TALB, _vorbis_single(meta, "album"))
     set_text(TPE2, _vorbis_single(meta, "albumartist"))
     set_text(TDRC, _vorbis_single(meta, "date"))
+    set_text(TDOR, _vorbis_single(meta, "originaldate"))
     set_text(
         TCOM,
         _vorbis_single(meta, "composer")
         or "; ".join(_vorbis_list(meta, "composers")),
     )
+    set_text(TEXT, _vorbis_list(meta, "lyricists"))
+    set_text(
+        TPUB, _vorbis_single(meta, "label") or _vorbis_single(meta, "publisher")
+    )
     set_text(TCON, _vorbis_single(meta, "genre"))
     set_text(TCOP, _vorbis_single(meta, "copyright"))
+    tags.delall("TIPL")
+    if involved:
+        tags.add(TIPL(encoding=3, people=involved))
     if len(artists) >= 2:
         tags.delall("TXXX:ARTISTS")
         tags.add(TXXX(encoding=3, desc="ARTISTS", text=list(artists)))

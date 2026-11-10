@@ -225,6 +225,15 @@ def _make_silence_m4a(path):
     )
 
 
+def _make_silence_mp3(path):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1",
+         "-c:a", "libmp3lame", path],
+        check=True,
+    )
+
+
 def _make_thumbnail(path, size=(1280, 720)):
     from PIL import Image
 
@@ -247,6 +256,8 @@ class TagAudioFileTests(unittest.TestCase):
             _make_thumbnail(thumb)
             seed = OggOpus(src)
             seed["description"] = ["seeded description"]
+            seed["purl"] = ["https://example.invalid/purl"]
+            seed["synopsis"] = ["seeded synopsis"]
             seed["comment"] = ["seeded comment"]
             seed["webpage_url"] = ["https://example.invalid/seed"]
             seed.save()
@@ -307,6 +318,44 @@ class TagAudioFileTests(unittest.TestCase):
             self.assertEqual(decoded, ["Rihanna", "Earth, Wind & Fire"])
             self.assertIn("covr", tagged)
             self.assertTrue(len(bytes(tagged["covr"][0])) > 0)
+
+    def test_mp3_tags_dates_credits_and_retag_clears_stale_frames(self):
+        from mutagen.mp3 import MP3
+
+        meta = parse_info({
+            "description": OFFICIAL_DESCRIPTION,
+            "title": "Stay (feat. Earth, Wind & Fire)",
+            "duration": 240,
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "track.mp3")
+            thumb = os.path.join(tmp, "thumb.jpg")
+            _make_silence_mp3(src)
+            _make_thumbnail(thumb)
+
+            tag_audio_file(src, meta, thumb)
+
+            tagged = MP3(src).tags
+            self.assertEqual(
+                [str(value) for value in tagged["TDRC"].text], ["2012-11-19"]
+            )
+            self.assertEqual(
+                [str(value) for value in tagged["TDOR"].text], ["1979"]
+            )
+            self.assertEqual(list(tagged["TEXT"].text), ["Mikky Ekko"])
+            self.assertIn(["producer", "Mikky Ekko"], tagged["TIPL"].people)
+            self.assertIn(["engineer", "Manny Marroquin"], tagged["TIPL"].people)
+            self.assertEqual(list(tagged["TPUB"].text), ["Def Jam Recordings"])
+            pictures = tagged.getall("APIC")
+            self.assertEqual(len(pictures), 1)
+            self.assertEqual(pictures[0].type, 3)
+
+            tag_audio_file(src, {})
+            retagged = MP3(src).tags
+            for stale in ("TIT2", "TPE1", "TALB", "TPE2", "TDRC", "TDOR",
+                          "TCOM", "TEXT", "TIPL", "TPUB", "TCON", "TCOP",
+                          "TXXX:ARTISTS"):
+                self.assertNotIn(stale, retagged.keys())
 
     def test_fallback_single_artist_omits_artists_and_keeps_landscape(self):
         from mutagen.oggopus import OggOpus
