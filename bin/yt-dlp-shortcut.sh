@@ -168,18 +168,28 @@ import re
 import sys
 
 metadata = sys.argv[1]
-key_pattern = re.compile(r"[\"']xesam:url[\"']")
+field_pattern = re.compile(r'''^\s*(?:QString\s+)?["']?xesam:url["']?\s*:\s*(.*?)\s*$''')
+json_string = re.compile(r'"(?:\\.|[^"\\])*"')
+
 for line in metadata.splitlines():
-    key = key_pattern.search(line)
-    if not key:
+    field = field_pattern.match(line)
+    if not field:
         continue
-    value = re.search(r'"(?:\\.|[^"\\])*"', line[key.end():])
-    if value:
+
+    value = field.group(1)
+    if value.startswith("QVariant"):
+        quoted = json_string.search(value)
+        if not quoted:
+            break
+        value = quoted.group(0)
+    if value.startswith('"'):
         try:
-            print(json.loads(value.group(0)), end="")
+            value, _ = json.JSONDecoder().raw_decode(value)
         except (ValueError, json.JSONDecodeError):
-            pass
-        break
+            break
+
+    print(value, end="")
+    break
 PY
         )
         if [[ -n $mpris_url ]] && is_youtube_url "$mpris_url"; then

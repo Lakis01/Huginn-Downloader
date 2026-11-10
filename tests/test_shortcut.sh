@@ -116,6 +116,13 @@ PRIMARY_SELECTION='https://youtube.com.evil.invalid/watch?v=bad' \
 assert_launch cut 'https://www.youtube.com/watch?v=mpris123' 'MPRIS fallback'
 pass 'rejects bad primary selections and extracts xesam:url from MPRIS metadata'
 
+live_mpris_url='https://www.youtube.com/watch?v=WQF8jqYn7xw'
+PRIMARY_SELECTION='not a URL' \
+    MPRIS_OUTPUT="xesam:url: $live_mpris_url" \
+    CLIPBOARD_SELECTION="$valid_url" run_shortcut video
+assert_launch video "$live_mpris_url" 'plain-text qdbus MPRIS output'
+pass 'extracts a plain-text xesam:url field from qdbus6 metadata'
+
 PRIMARY_SELECTION='not a URL' MPRIS_OUTPUT='no active media' \
     CLIPBOARD_SELECTION="$other_url" run_shortcut audio
 assert_launch audio "$other_url" 'clipboard fallback'
