@@ -94,6 +94,44 @@ run_shortcut --uri "$uri"
 assert_launch cut "$uri_url" 'URI decoding'
 pass 'decodes supported yt-dlp URI mode and URL'
 
+symlink_home="$TMP/symlink-home"
+outside_directory="$TMP/outside-destination"
+mkdir -p "$symlink_home/.local/bin" "$symlink_home/.local/share/applications" "$outside_directory"
+ln -s "$outside_directory" "$symlink_home/.local/bin/ytdl_meta.py"
+if HOME="$symlink_home" "$INSTALLER" --install > "$TMP/symlink.out" 2>&1; then
+    fail 'installer unexpectedly accepted a symlink to a directory destination'
+fi
+[[ ! -e "$symlink_home/.local/bin/yt-dlp-wrapper.py" ]] \
+    || fail 'installer wrote earlier files before detecting a symlinked directory destination'
+[[ -z "$(find "$outside_directory" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+    || fail 'installer wrote through a symlink-to-directory destination'
+assert_file_contains "$TMP/symlink.out" 'is a directory' 'symlink destination conflict report'
+pass 'installer rejects symlink-to-directory destinations before writing through them'
+
+for malformed_uri in \
+    'yt-dlp://cut?url=%ZZ' \
+    'yt-dlp://audio?url=https%3A%2F%2Fexample.invalid%2Fwatch' \
+    'yt-dlp://unknown?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dbad'; do
+    if PRIMARY_SELECTION=$other_url \
+        MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
+        CLIPBOARD_SELECTION="$valid_url" \
+        run_shortcut --uri "$malformed_uri" > "$TMP/malformed.out" 2>&1; then
+            fail "malformed explicit URI unexpectedly succeeded: $malformed_uri"
+    fi
+    [[ ! -e "$CALL_ARGS" ]] || fail "malformed explicit URI launched Konsole: $malformed_uri"
+    assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'explicit URI error report'
+done
+for malformed_uri in 'yt-dlp://cut?url=%ZZ' 'yt-dlp://bad-mode?url=https%3A%2F%2Fwww.youtube.com'; do
+    if PRIMARY_SELECTION=$other_url \
+        MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
+        CLIPBOARD_SELECTION="$valid_url" \
+        run_shortcut "$malformed_uri" > "$TMP/malformed.out" 2>&1; then
+            fail "malformed custom-scheme URI unexpectedly succeeded: $malformed_uri"
+    fi
+    [[ ! -e "$CALL_ARGS" ]] || fail "malformed custom URI launched Konsole: $malformed_uri"
+done
+pass 'rejects malformed explicit and custom-scheme URIs without trying valid fallbacks'
+
 shell_payload="https://www.youtube.com/watch?v=1&title=O'Brien&next=\$(touch\${IFS}$TMP/injected)"
 run_shortcut video "$shell_payload"
 assert_launch video "$shell_payload" 'shell metacharacter URL'

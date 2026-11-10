@@ -131,7 +131,10 @@ PY
 }
 
 if [[ -n $URI_ARGUMENT ]]; then
-    parse_uri "$URI_ARGUMENT" || EXPLICIT_URL=
+    if ! parse_uri "$URI_ARGUMENT"; then
+        printf 'Invalid yt-dlp URI: %s\n' "$URI_ARGUMENT" >&2
+        exit 2
+    fi
 fi
 
 URL=

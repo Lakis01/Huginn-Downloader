@@ -463,9 +463,25 @@ _MP4_CLEAR_FREEFORMS = frozenset({
     "----:com.apple.iTunes:PURL",
     "----:com.apple.iTunes:SYNOPSIS",
     "----:com.apple.iTunes:COMMENT",
+    "----:com.apple.iTunes:URL",
     "----:com.apple.iTunes:WEBPAGE_URL",
+    "----:com.apple.iTunes:ARTISTS",
+    "----:com.apple.iTunes:LYRICIST",
+    "----:com.apple.iTunes:PRODUCER",
+    "----:com.apple.iTunes:ENGINEER",
+    "----:com.apple.iTunes:LABEL",
+    "----:com.apple.iTunes:ORIGINALDATE",
+    "----:com.apple.iTunes:ARRANGER",
+    "----:com.apple.iTunes:CONDUCTOR",
+    "----:com.apple.iTunes:PERFORMER",
+    "----:com.apple.iTunes:PUBLISHER",
+    "----:com.apple.iTunes:ISRC",
+    "----:com.apple.iTunes:DISTRIBUTOR",
+    "----:com.apple.iTunes:RECORDINGDATE",
+    "----:com.apple.iTunes:STUDIO",
+    "----:com.apple.iTunes:INSTRUMENT",
 })
-_MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt"})
+_MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt", "purl", "©url"})
 
 
 def _cover_image_bytes(thumbnail_path, is_official):
@@ -604,20 +620,22 @@ def _tag_mp4_atoms(audio, meta, cover):
             del audio[key]
 
     def set_atom(key, value):
-        if value:
-            audio[key] = [value]
+        if isinstance(value, (list, tuple)):
+            values = [item for item in value if str(item).strip()]
+        else:
+            values = [value] if value else []
+        if values:
+            audio[key] = values
         elif key in audio:
             del audio[key]
 
-    composer = _vorbis_single(meta, "composer") or "; ".join(
-        _vorbis_list(meta, "composers")
-    )
+    composers = _vorbis_list(meta, "composers", "composer")
     set_atom("\xa9nam", _vorbis_single(meta, "title"))
     set_atom("\xa9ART", _vorbis_single(meta, "artist"))
     set_atom("\xa9alb", _vorbis_single(meta, "album"))
     set_atom("\xa9day", _vorbis_single(meta, "date"))
     set_atom("aART", _vorbis_single(meta, "albumartist"))
-    set_atom("\xa9wrt", composer)
+    set_atom("\xa9wrt", composers)
     set_atom("\xa9gen", _vorbis_single(meta, "genre"))
     set_atom("cprt", _vorbis_single(meta, "copyright"))
 
@@ -642,9 +660,23 @@ def _tag_mp4_atoms(audio, meta, cover):
             if _vorbis_single(meta, "publisher")
             else []
         ),
+        "----:com.apple.iTunes:DISTRIBUTOR": (
+            [_vorbis_single(meta, "distributor")]
+            if _vorbis_single(meta, "distributor")
+            else []
+        ),
         "----:com.apple.iTunes:ISRC": (
             [_vorbis_single(meta, "isrc")] if _vorbis_single(meta, "isrc") else []
         ),
+        "----:com.apple.iTunes:RECORDINGDATE": (
+            [_vorbis_single(meta, "recordingdate")]
+            if _vorbis_single(meta, "recordingdate")
+            else []
+        ),
+        "----:com.apple.iTunes:STUDIO": (
+            [_vorbis_single(meta, "studio")] if _vorbis_single(meta, "studio") else []
+        ),
+        "----:com.apple.iTunes:INSTRUMENT": _vorbis_list(meta, "instruments"),
     }
     if len(freeform_map["----:com.apple.iTunes:ARTISTS"]) < 2:
         freeform_map["----:com.apple.iTunes:ARTISTS"] = []
@@ -662,7 +694,7 @@ def _tag_mp4_atoms(audio, meta, cover):
 
 
 def _tag_id3_frames(audio, meta, cover):
-    from mutagen.id3 import APIC, TCOM, TCON, TCOP, TDOR, TDRC, TEXT, TIT2
+    from mutagen.id3 import APIC, TCOM, TCON, TCOP, TDOR, TDRC, TEXT, TIT2, TSRC
     from mutagen.id3 import TIPL, TPE1, TPE2, TALB, TPUB, TXXX
 
     if audio.tags is None:
@@ -670,40 +702,63 @@ def _tag_id3_frames(audio, meta, cover):
     tags = audio.tags
     for frame in list(tags.getall("COMM")):
         del tags[frame.HashKey]
+    for frame_id in (
+        "WXXX", "WCOM", "WCOP", "WOAF", "WOAR", "WOAS", "WORS", "WPAY",
+        "WPUB", "WFED",
+    ):
+        tags.delall(frame_id)
+
+    user_descriptions = {
+        "ARTISTS", "LABEL", "DISTRIBUTOR", "RECORDINGDATE", "STUDIO", "INSTRUMENT",
+        "DESCRIPTION", "URL", "SYNOPSIS", "COMMENT", "PURL", "WEBPAGE_URL",
+    }
+    for frame in list(tags.getall("TXXX")):
+        if str(frame.desc).strip().upper() in user_descriptions:
+            del tags[frame.HashKey]
 
     def set_text(frame_class, value):
         tags.delall(frame_class.__name__)
         if value:
-            tags.add(frame_class(encoding=3, text=value))
+            text = list(value) if isinstance(value, (list, tuple)) else [value]
+            tags.add(frame_class(encoding=3, text=text))
+
+    def set_user_text(description, values):
+        values = [str(value).strip() for value in values if str(value).strip()]
+        if values:
+            tags.add(TXXX(encoding=3, desc=description, text=values))
 
     artists = _vorbis_list(meta, "artists")
     involved = [["producer", name] for name in _vorbis_list(meta, "producers")]
+    involved += [["arranger", name] for name in _vorbis_list(meta, "arrangers")]
+    involved += [["conductor", name] for name in _vorbis_list(meta, "conductors")]
     involved += [["engineer", name] for name in _vorbis_list(meta, "engineers")]
+    involved += [["performer", name] for name in _vorbis_list(meta, "performers")]
     set_text(TIT2, _vorbis_single(meta, "title"))
     set_text(TPE1, _vorbis_single(meta, "artist"))
     set_text(TALB, _vorbis_single(meta, "album"))
     set_text(TPE2, _vorbis_single(meta, "albumartist"))
     set_text(TDRC, _vorbis_single(meta, "date"))
     set_text(TDOR, _vorbis_single(meta, "originaldate"))
-    set_text(
-        TCOM,
-        _vorbis_single(meta, "composer")
-        or "; ".join(_vorbis_list(meta, "composers")),
-    )
+    set_text(TCOM, _vorbis_list(meta, "composers", "composer"))
     set_text(TEXT, _vorbis_list(meta, "lyricists"))
-    set_text(
-        TPUB, _vorbis_single(meta, "label") or _vorbis_single(meta, "publisher")
-    )
+    set_text(TPUB, _vorbis_single(meta, "publisher"))
     set_text(TCON, _vorbis_single(meta, "genre"))
     set_text(TCOP, _vorbis_single(meta, "copyright"))
+    set_text(TSRC, _vorbis_single(meta, "isrc"))
     tags.delall("TIPL")
     if involved:
         tags.add(TIPL(encoding=3, people=involved))
     if len(artists) >= 2:
-        tags.delall("TXXX:ARTISTS")
-        tags.add(TXXX(encoding=3, desc="ARTISTS", text=list(artists)))
-    else:
-        tags.delall("TXXX:ARTISTS")
+        set_user_text("ARTISTS", artists)
+    user_fields = {
+        "LABEL": _vorbis_single(meta, "label"),
+        "DISTRIBUTOR": _vorbis_single(meta, "distributor"),
+        "RECORDINGDATE": _vorbis_single(meta, "recordingdate"),
+        "STUDIO": _vorbis_single(meta, "studio"),
+    }
+    for description, value in user_fields.items():
+        set_user_text(description, [value] if value else [])
+    set_user_text("INSTRUMENT", _vorbis_list(meta, "instruments"))
     if cover is not None:
         data, mime, _, _ = cover
         tags.delall("APIC:")

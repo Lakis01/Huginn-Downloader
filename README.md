@@ -144,10 +144,12 @@ What `--install` does:
 
 ### Rollback
 
-Before installing, record the current URI handler so it can be restored:
+Before installing, record the current URI handler in the shell where you will
+install, so the same saved value can be used during rollback:
 
 ```sh
-xdg-mime query default x-scheme-handler/yt-dlp
+previous_handler=$(xdg-mime query default x-scheme-handler/yt-dlp)
+printf 'Previous URI handler: %s\n' "${previous_handler:-none}"
 ```
 
 Before replacing any existing destination file, the installer copies it to
@@ -161,17 +163,27 @@ mv ~/.local/bin/yt-dlp-shortcut.sh.bak.20261110-120000 ~/.local/bin/yt-dlp-short
 ```
 
 (substitute the real timestamped path printed by `ls`; the name above is
-only an example). Then restore the URI association: if the pre-install
-query returned a handler, re-select it, e.g.
-`xdg-mime default <that-handler> x-scheme-handler/yt-dlp`. If the query
-was empty (no custom handler before), do not select the new handler again —
-instead remove the association in KDE **System Settings → Applications →
-File Associations**, under `x-scheme-handler/yt-dlp`.
+only an example). Then restore the URI association to the handler recorded
+before installation:
+
+```sh
+if [ -n "$previous_handler" ]; then
+    xdg-mime default "$previous_handler" x-scheme-handler/yt-dlp
+else
+    printf '%s\n' 'No prior handler was recorded; remove the association in KDE System Settings.'
+fi
+```
+
+If the saved query was empty, remove the association in KDE **System Settings
+→ Applications → File Associations**, under `x-scheme-handler/yt-dlp`; do not
+select the newly installed handler as a substitute. Keep the shell open until
+the association is restored, or save the recorded handler value elsewhere.
 
 To fully uninstall, delete the seven installed files (plus any `.bak.*`
 copies you no longer want) and remove the MIME registration with your
 desktop's default-applications settings. The installer refuses to run if a
-destination path is a directory, and it writes nothing before that check.
+destination resolves to a directory (including through a symlink), and it
+writes nothing before that check.
 
 ## KDE shortcuts
 

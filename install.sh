@@ -61,7 +61,7 @@ fi
 
 check_destination() {
     local destination=$1
-    if [[ -d $destination && ! -L $destination ]]; then
+    if [[ -d $destination ]]; then
         printf 'Destination is a directory: %s\n' "$destination" >&2
         return 1
     fi

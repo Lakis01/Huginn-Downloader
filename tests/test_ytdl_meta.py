@@ -33,7 +33,14 @@ Released on: 2012-11-19
 Composer, Lyricist: Mikky Ekko
 Writer: Justin Parker   BMI
 Producer: Mikky Ekko
+Lyricist: Another Lyricist
+Producer: Additional Producer
+Arranger: Jane Doe; Another Arranger
+Conductor: John Doe; Another Conductor
+Associated Performer: Alice Example; Bob Example
+Instrument: Guitar; Piano
 Mixing Engineer: Manny Marroquin
+Recording Engineer: Additional Engineer
 Music Publisher: Kobalt Music Publishing
 ISRC: USUM71212345
 Genre: Pop
@@ -63,10 +70,10 @@ class ParseInfoTests(unittest.TestCase):
         self.assertEqual(result["copyright"], "℗ 1979 Def Jam Recordings")
         self.assertEqual(result["distributor"], "Sony")
         self.assertEqual(result["composers"], ["Mikky Ekko", "Justin Parker"])
-        self.assertEqual(result["lyricists"], ["Mikky Ekko"])
+        self.assertEqual(result["lyricists"], ["Mikky Ekko", "Another Lyricist"])
         self.assertEqual(result["composer"], "Mikky Ekko; Justin Parker")
-        self.assertEqual(result["producers"], ["Mikky Ekko"])
-        self.assertEqual(result["engineers"], ["Manny Marroquin"])
+        self.assertEqual(result["producers"], ["Mikky Ekko", "Additional Producer"])
+        self.assertEqual(result["engineers"], ["Manny Marroquin", "Additional Engineer"])
         self.assertEqual(result["publisher"], "Kobalt Music Publishing")
         self.assertEqual(result["isrc"], "USUM71212345")
         self.assertEqual(result["genre"], "Pop")
@@ -289,10 +296,21 @@ class TagAudioFileTests(unittest.TestCase):
             self.assertEqual(tags["albumartist"], ["Rihanna"])
             self.assertEqual(tags["date"], ["2012-11-19"])
             self.assertEqual(tags["originaldate"], ["1979"])
+            self.assertEqual(tags["copyright"], ["℗ 1979 Def Jam Recordings"])
+            self.assertEqual(tags["distributor"], ["Sony"])
+            self.assertEqual(tags["publisher"], ["Kobalt Music Publishing"])
+            self.assertEqual(tags["isrc"], ["USUM71212345"])
+            self.assertEqual(tags["genre"], ["Pop"])
+            self.assertEqual(tags["recordingdate"], ["2012"])
+            self.assertEqual(tags["studio"], ["Example Studios"])
             self.assertEqual(tags["composer"], ["Mikky Ekko", "Justin Parker"])
-            self.assertEqual(tags["lyricist"], ["Mikky Ekko"])
-            self.assertEqual(tags["producer"], ["Mikky Ekko"])
-            self.assertEqual(tags["engineer"], ["Manny Marroquin"])
+            self.assertEqual(tags["lyricist"], ["Mikky Ekko", "Another Lyricist"])
+            self.assertEqual(tags["producer"], ["Mikky Ekko", "Additional Producer"])
+            self.assertEqual(tags["arranger"], ["Jane Doe", "Another Arranger"])
+            self.assertEqual(tags["conductor"], ["John Doe", "Another Conductor"])
+            self.assertEqual(tags["engineer"], ["Manny Marroquin", "Additional Engineer"])
+            self.assertEqual(tags["performer"], ["Alice Example", "Bob Example"])
+            self.assertEqual(tags["instrument"], ["Guitar", "Piano"])
             self.assertIsInstance(tags["label"], list)
             self.assertEqual(tags["label"], ["Def Jam Recordings"])
             lowered = {key.lower() for key in tags.keys()}
@@ -309,7 +327,7 @@ class TagAudioFileTests(unittest.TestCase):
             self.assertEqual((picture.width, picture.height), (720, 720))
 
     def test_m4a_tags_standard_atoms_freeform_artists_and_cover(self):
-        from mutagen.mp4 import MP4
+        from mutagen.mp4 import MP4, MP4FreeForm
 
         meta = parse_info({
             "description": OFFICIAL_DESCRIPTION,
@@ -322,6 +340,22 @@ class TagAudioFileTests(unittest.TestCase):
             _make_silence_m4a(src)
             _make_thumbnail(thumb)
 
+            seed = MP4(src)
+            seed["desc"] = ["old description"]
+            seed["purl"] = ["https://example.invalid/old"]
+            seed["©cmt"] = ["old comment"]
+            for descriptor, value in (
+                ("DESCRIPTION", "old description"),
+                ("URL", "https://example.invalid/old"),
+                ("SYNOPSIS", "old synopsis"),
+                ("COMMENT", "old comment"),
+                ("WEBPAGE_URL", "https://example.invalid/old"),
+            ):
+                seed[f"----:com.apple.iTunes:{descriptor}"] = [
+                    MP4FreeForm(value.encode(), dataformat=MP4FreeForm.FORMAT_TEXT)
+                ]
+            seed.save()
+
             tag_audio_file(src, meta, thumb)
 
             tagged = MP4(src)
@@ -329,14 +363,64 @@ class TagAudioFileTests(unittest.TestCase):
             self.assertEqual(tagged["\xa9ART"], ["Rihanna feat. Earth, Wind & Fire"])
             self.assertEqual(tagged["\xa9alb"], ["Unapologetic"])
             self.assertEqual(tagged["\xa9day"], ["2012-11-19"])
-            freeforms = tagged["----:com.apple.iTunes:ARTISTS"]
-            decoded = [bytes(value).decode("utf-8") for value in freeforms]
-            self.assertEqual(decoded, ["Rihanna", "Earth, Wind & Fire"])
+            self.assertEqual(tagged["aART"], ["Rihanna"])
+            self.assertEqual(tagged["\xa9wrt"], ["Mikky Ekko", "Justin Parker"])
+            self.assertEqual(tagged["\xa9gen"], ["Pop"])
+            self.assertEqual(tagged["cprt"], ["℗ 1979 Def Jam Recordings"])
+
+            def freeform_values(key):
+                return [bytes(value).decode("utf-8") for value in tagged[key]]
+
+            expected_freeforms = {
+                "ARTISTS": ["Rihanna", "Earth, Wind & Fire"],
+                "LYRICIST": ["Mikky Ekko", "Another Lyricist"],
+                "PRODUCER": ["Mikky Ekko", "Additional Producer"],
+                "ARRANGER": ["Jane Doe", "Another Arranger"],
+                "CONDUCTOR": ["John Doe", "Another Conductor"],
+                "ENGINEER": ["Manny Marroquin", "Additional Engineer"],
+                "PERFORMER": ["Alice Example", "Bob Example"],
+                "INSTRUMENT": ["Guitar", "Piano"],
+                "LABEL": ["Def Jam Recordings"],
+                "DISTRIBUTOR": ["Sony"],
+                "PUBLISHER": ["Kobalt Music Publishing"],
+                "ISRC": ["USUM71212345"],
+                "ORIGINALDATE": ["1979"],
+                "RECORDINGDATE": ["2012"],
+                "STUDIO": ["Example Studios"],
+            }
+            for descriptor, expected in expected_freeforms.items():
+                self.assertEqual(
+                    freeform_values(f"----:com.apple.iTunes:{descriptor}"), expected
+                )
+            for stale in (
+                "desc", "purl", "©cmt", "----:com.apple.iTunes:DESCRIPTION",
+                "----:com.apple.iTunes:URL", "----:com.apple.iTunes:SYNOPSIS",
+                "----:com.apple.iTunes:COMMENT", "----:com.apple.iTunes:WEBPAGE_URL",
+            ):
+                self.assertNotIn(stale, tagged)
             self.assertIn("covr", tagged)
             self.assertTrue(len(bytes(tagged["covr"][0])) > 0)
 
+            tag_audio_file(src, {})
+            retagged = MP4(src)
+            for stale in (
+                "\xa9nam", "\xa9ART", "\xa9alb", "\xa9day", "aART", "\xa9wrt",
+                "\xa9gen", "cprt", "desc", "purl", "\xa9cmt",
+                "----:com.apple.iTunes:ARTISTS", "----:com.apple.iTunes:LYRICIST",
+                "----:com.apple.iTunes:PRODUCER", "----:com.apple.iTunes:ARRANGER",
+                "----:com.apple.iTunes:CONDUCTOR", "----:com.apple.iTunes:ENGINEER",
+                "----:com.apple.iTunes:PERFORMER", "----:com.apple.iTunes:INSTRUMENT",
+                "----:com.apple.iTunes:LABEL", "----:com.apple.iTunes:DISTRIBUTOR",
+                "----:com.apple.iTunes:PUBLISHER", "----:com.apple.iTunes:ISRC",
+                "----:com.apple.iTunes:ORIGINALDATE", "----:com.apple.iTunes:RECORDINGDATE",
+                "----:com.apple.iTunes:STUDIO", "----:com.apple.iTunes:SYNOPSIS",
+                "----:com.apple.iTunes:WEBPAGE_URL",
+            ):
+                self.assertNotIn(stale, retagged)
+
     def test_mp3_tags_dates_credits_and_retag_clears_stale_frames(self):
         from mutagen.mp3 import MP3
+        from mutagen.id3 import COMM, TXXX, WXXX, WOAR
 
         meta = parse_info({
             "description": OFFICIAL_DESCRIPTION,
@@ -349,25 +433,76 @@ class TagAudioFileTests(unittest.TestCase):
             _make_silence_mp3(src)
             _make_thumbnail(thumb)
 
+            seeded = MP3(src)
+            if seeded.tags is None:
+                seeded.add_tags()
+            seeded.tags.add(COMM(encoding=3, lang="eng", desc="", text="old comment"))
+            seeded.tags.add(TXXX(encoding=3, desc="DESCRIPTION", text="old description"))
+            seeded.tags.add(TXXX(encoding=3, desc="URL", text="old URL"))
+            seeded.tags.add(TXXX(encoding=3, desc="SYNOPSIS", text="old synopsis"))
+            seeded.tags.add(TXXX(encoding=3, desc="COMMENT", text="old comment"))
+            seeded.tags.add(TXXX(encoding=3, desc="PURL", text="old podcast URL"))
+            seeded.tags.add(TXXX(encoding=3, desc="WEBPAGE_URL", text="old URL"))
+            seeded.tags.add(WXXX(encoding=3, desc="", url="https://example.invalid/old"))
+            seeded.tags.add(WOAR(url="https://example.invalid/artist"))
+            seeded.save()
+
             tag_audio_file(src, meta, thumb)
 
             tagged = MP3(src).tags
+            self.assertEqual(list(tagged["TIT2"].text), ["Stay"])
+            self.assertEqual(list(tagged["TPE1"].text), ["Rihanna feat. Earth, Wind & Fire"])
+            self.assertEqual(list(tagged["TALB"].text), ["Unapologetic"])
+            self.assertEqual(list(tagged["TPE2"].text), ["Rihanna"])
             self.assertEqual(
                 [str(value) for value in tagged["TDRC"].text], ["2012-11-19"]
             )
             self.assertEqual(
                 [str(value) for value in tagged["TDOR"].text], ["1979"]
             )
-            self.assertEqual(list(tagged["TEXT"].text), ["Mikky Ekko"])
+            self.assertEqual(list(tagged["TEXT"].text), ["Mikky Ekko", "Another Lyricist"])
+            self.assertEqual(list(tagged["TCOM"].text), ["Mikky Ekko", "Justin Parker"])
+            self.assertEqual(list(tagged["TCON"].text), ["Pop"])
+            self.assertEqual(list(tagged["TCOP"].text), ["℗ 1979 Def Jam Recordings"])
+            self.assertEqual(list(tagged["TSRC"].text), ["USUM71212345"])
+            self.assertEqual(list(tagged["TPUB"].text), ["Kobalt Music Publishing"])
+            artists = tagged.getall("TXXX:ARTISTS")
+            self.assertEqual(len(artists), 1)
+            self.assertEqual(list(artists[0].text), ["Rihanna", "Earth, Wind & Fire"])
             self.assertIn(["producer", "Mikky Ekko"], tagged["TIPL"].people)
+            self.assertIn(["producer", "Additional Producer"], tagged["TIPL"].people)
+            self.assertIn(["arranger", "Jane Doe"], tagged["TIPL"].people)
+            self.assertIn(["arranger", "Another Arranger"], tagged["TIPL"].people)
+            self.assertIn(["conductor", "John Doe"], tagged["TIPL"].people)
+            self.assertIn(["conductor", "Another Conductor"], tagged["TIPL"].people)
             self.assertIn(["engineer", "Manny Marroquin"], tagged["TIPL"].people)
-            self.assertEqual(list(tagged["TPUB"].text), ["Def Jam Recordings"])
+            self.assertIn(["engineer", "Additional Engineer"], tagged["TIPL"].people)
+            self.assertIn(["performer", "Alice Example"], tagged["TIPL"].people)
+            self.assertIn(["performer", "Bob Example"], tagged["TIPL"].people)
+            txxx = {frame.desc: list(frame.text) for frame in tagged.getall("TXXX")}
+            self.assertEqual(txxx["LABEL"], ["Def Jam Recordings"])
+            self.assertEqual(txxx["DISTRIBUTOR"], ["Sony"])
+            self.assertEqual(txxx["RECORDINGDATE"], ["2012"])
+            self.assertEqual(txxx["STUDIO"], ["Example Studios"])
+            self.assertEqual(txxx["INSTRUMENT"], ["Guitar", "Piano"])
+            self.assertNotIn("DESCRIPTION", txxx)
+            self.assertNotIn("URL", txxx)
+            self.assertNotIn("SYNOPSIS", txxx)
+            self.assertNotIn("COMMENT", txxx)
+            self.assertNotIn("PURL", txxx)
+            self.assertNotIn("WEBPAGE_URL", txxx)
+            self.assertEqual(tagged.getall("COMM"), [])
+            self.assertEqual(tagged.getall("WXXX"), [])
+            self.assertEqual(tagged.getall("WOAR"), [])
             pictures = tagged.getall("APIC")
             self.assertEqual(len(pictures), 1)
             self.assertEqual(pictures[0].type, 3)
 
             tag_audio_file(src, {})
             retagged = MP3(src).tags
+            self.assertEqual(retagged.getall("COMM"), [])
+            self.assertEqual(retagged.getall("WXXX"), [])
+            self.assertEqual(retagged.getall("WOAR"), [])
             for stale in ("TIT2", "TPE1", "TALB", "TPE2", "TDRC", "TDOR",
                           "TCOM", "TEXT", "TIPL", "TPUB", "TCON", "TCOP",
                           "TXXX:ARTISTS"):

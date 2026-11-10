@@ -25,7 +25,7 @@
 1. DDEX artists such as `Simon & Garfunkel` must remain one artist; a feature such as `Artist A feat. Artist B` must preserve its display string and expose individual `artists` values (Task 1 tests).
 2. `Released on:` wins over ℗ and upload dates, partial dates stay partial, and an earlier ℗ year maps to `originaldate` (Task 1 tests).
 3. Credits with multiple roles and PRO suffixes must map to the right multi-value tags without duplication (Task 1 tests).
-4. Container-specific free-form fields and front-cover image dimensions must be correct for Opus and M4A (Task 2 tests).
+4. Every structured `parse_info()` field must be retained in Vorbis/Opus, MP4/M4A, and ID3/MP3, with distinct list values preserved and stale description/URL/synopsis/comment/mapped values cleared on retagging (Task 2 generated-media tests).
 5. Failed downloads, filename collisions, apostrophes in URLs, custom-scheme URLs, and unavailable MPRIS must fail safely or use the documented fallback (Tasks 3-4 tests).
 6. Repeated YouTube SPA navigation must not duplicate buttons; a direct click must encode the current watch URL into the custom scheme (Task 5 tests).
 
@@ -61,8 +61,8 @@
 **Interfaces:**
 - Produces `tag_audio_file(filepath, meta, thumbnail_path=None) -> None`.
 
-- [ ] Add generated-media tests for Vorbis/Opus and M4A tags, including multivalue `artists` and credits, clean comment/URL fields, and front-cover metadata.
-- [ ] In Opus, assert `artist`, `artists`, `album`, `albumartist`, normalized dates, `composer`, `lyricist`, `producer`, `engineer`, and `label` are true multi-value Vorbis comments; verify description/purl/synopsis/comment/webpage_url are absent and an official 1280×720 thumbnail embeds as 720×720. In M4A, assert standard title/artist/album/date atoms, artists as `----:com.apple.iTunes:ARTISTS` freeforms, and `covr` exists.
+- [ ] Add generated-media tests for Vorbis/Opus, M4A, and MP3 covering `artists`, albumartist, dates, label/copyright, distributor, publisher, ISRC, genre, recordingdate, studio, composers, lyricists, producers, arrangers, conductors, engineers, performers, and instruments; assert true multi-value storage and stale description/URL/synopsis/comment/mapped-value cleanup after retagging.
+- [ ] Assert Opus keeps native multi-value tags and clears description/purl/synopsis/comment/webpage_url, plus a square crop for official landscape Art Track thumbnails. For M4A and MP3, assert native atoms/frames where available, descriptive freeform/TXXX storage for remaining fields, preservation of all distinct values, stale-value cleanup, and front-cover metadata.
 - [ ] For a fallback non-Art-Track file, assert a 1280×720 thumbnail remains uncropped and single-artist metadata omits an `artists` field.
 - [ ] Run the focused tests and confirm they fail before implementation.
 - [ ] Implement native Mutagen tag mappings for Vorbis comments, MP4 free-form tags, and ID3 where available; center-crop only official landscape Art Track thumbnails.
@@ -97,11 +97,12 @@
 - Installer stages `bin/ytdl_meta.py`, `bin/yt-dlp-wrapper.py`, and `bin/yt-dlp-shortcut.sh` into `~/.local/bin`, and all four desktop entries into `~/.local/share/applications`.
 - Installation is dry-run by default; `--install` makes timestamped backups before replacing/deploying files.
 
-- [ ] Test mode/URI parsing, valid YouTube URL filtering, apostrophes and ampersands, MPRIS extraction, and clipboard fallback.
+- [ ] Test mode/URI parsing, valid YouTube URL filtering, apostrophes and ampersands, MPRIS extraction, clipboard fallback, and nonzero failure for malformed explicit URIs without trying fallback sources.
 - [ ] Shortcut URL precedence is explicit URL/URI, validated primary selection, Plasma Browser Integration MPRIS `xesam:url`, then validated clipboard; verify bad primary/clipboard values fall through and shell arguments are never evaluated.
 - [ ] Fix desktop `Exec=` paths to absolute paths and add the custom URL protocol entry.
 - [ ] Implement safe argument passing without shell interpolation, active-media URL lookup, and one-time backup installation behavior.
 - [ ] Verify `bash -n`, `desktop-file-validate`, and the shell tests.
+- [ ] Verify installer preflight rejects real and symlink-to-directory destinations before writing any files.
 - [ ] Document the available KDE shortcuts `Meta+Alt+A`, `Meta+Alt+V`, and `Meta+Alt+C`; do not silently change KDE bindings.
 
 ### Task 5: Firefox context menu and persistent player buttons
