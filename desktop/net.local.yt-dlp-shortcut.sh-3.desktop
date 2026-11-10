@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=YouTube Interactive Cut Audio
+Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh cut
+NoDisplay=true
+Terminal=false
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true

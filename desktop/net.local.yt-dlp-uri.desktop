@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=YouTube Downloader URI Handler
+Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh --uri %u
+NoDisplay=true
+Terminal=false
+StartupNotify=false
+MimeType=x-scheme-handler/yt-dlp;
