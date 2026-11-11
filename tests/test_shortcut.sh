@@ -6,6 +6,7 @@ SHORTCUT="$ROOT/bin/yt-dlp-shortcut.sh"
 INSTALLER="$ROOT/install.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT
+unset XDG_CONFIG_HOME
 
 PASS=0
 fail() {
@@ -418,6 +419,14 @@ pass 'staged desktop entries validate and use absolute launcher paths'
 dry_home="$TMP/dry-home"
 HOME="$dry_home" "$INSTALLER" > "$TMP/dry-run.out"
 assert_file_contains "$TMP/dry-run.out" 'Dry run' 'installer dry-run message'
+for planned_file in ytdl_config.py ytdl_meta.py yt-dlp-wrapper.py yt-dlp-shortcut.sh yt-dlp-native-host.py; do
+    assert_file_contains "$TMP/dry-run.out" "$planned_file" "installer dry-run lists $planned_file"
+done
+assert_file_contains "$TMP/dry-run.out" '.mozilla/native-messaging-hosts/firefox_youtube_downloader.json' \
+    'installer dry-run lists home native-messaging manifest'
+assert_file_contains "$TMP/dry-run.out" '.config/mozilla/native-messaging-hosts/firefox_youtube_downloader.json' \
+    'installer dry-run lists XDG native-messaging manifest'
+assert_file_contains "$TMP/dry-run.out" 'dist/firefox-youtube-downloader.xpi' 'installer dry-run lists XPI target'
 [[ ! -e "$dry_home/.local/bin" ]] || fail 'default installer invocation created the bin directory'
 [[ ! -e "$dry_home/.local/share/applications" ]] || fail 'default installer invocation created the applications directory'
 [[ ! -e "$XDG_MIME_ARGS" ]] || fail 'default installer invocation registered a MIME handler'
@@ -451,6 +460,53 @@ fi
 assert_file_contains "$TMP/conflict.out" 'is a directory' 'installer destination conflict report'
 pass 'installer detects conflicting destination directories before making changes'
 
+assert_installer_preflight_conflict() {
+    local label=$1 home=$2 conflict_destination=$3 xdg_config_home=${4:-}
+    local xpi_before xpi_existed=false
+    if [[ -e "$ROOT/dist/firefox-youtube-downloader.xpi" ]]; then
+        xpi_existed=true
+        xpi_before=$(sha256sum "$ROOT/dist/firefox-youtube-downloader.xpi")
+    fi
+    mkdir -p -- "$conflict_destination"
+    if HOME="$home" XDG_CONFIG_HOME="$xdg_config_home" "$INSTALLER" --install --yes > "$TMP/preflight.out" 2>&1; then
+        fail "$label unexpectedly accepted a directory destination"
+    fi
+    assert_file_contains "$TMP/preflight.out" 'is a directory' "$label conflict report"
+    [[ ! -e "$home/.local/bin" ]] || fail "$label wrote binaries before preflight completed"
+    if $xpi_existed; then
+        assert_eq "$xpi_before" "$(sha256sum "$ROOT/dist/firefox-youtube-downloader.xpi")" "$label did not rebuild XPI before preflight"
+    else
+        [[ ! -e "$ROOT/dist/firefox-youtube-downloader.xpi" ]] || fail "$label built XPI before preflight"
+    fi
+}
+
+home_manifest_conflict_home="$TMP/home-manifest-conflict"
+assert_installer_preflight_conflict 'home manifest preflight' "$home_manifest_conflict_home" \
+    "$home_manifest_conflict_home/.mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
+pass 'installer preflights home native-messaging manifest before writes or XPI build'
+
+xdg_manifest_conflict_home="$TMP/xdg-manifest-conflict"
+assert_installer_preflight_conflict 'XDG manifest preflight' "$xdg_manifest_conflict_home" \
+    "$xdg_manifest_conflict_home/.config/mozilla/native-messaging-hosts/firefox_youtube_downloader.json" \
+    "$xdg_manifest_conflict_home/.config"
+pass 'installer preflights XDG native-messaging manifest before writes or XPI build'
+
+plugin_config_conflict_home="$TMP/plugin-config-conflict"
+assert_installer_preflight_conflict 'plugin config preflight' "$plugin_config_conflict_home" \
+    "$plugin_config_conflict_home/.config/youtube-downloader/config.json"
+pass 'installer preflights plugin config before writes or XPI build'
+
+deduplicated_manifest_home="$TMP/deduplicated-manifest-home"
+mkdir -p "$deduplicated_manifest_home/.config" "$deduplicated_manifest_home/.mozilla/native-messaging-hosts"
+ln -s ../.mozilla "$deduplicated_manifest_home/.config/mozilla"
+HOME="$deduplicated_manifest_home" XDG_CONFIG_HOME="$deduplicated_manifest_home/.config" \
+    "$INSTALLER" --install --yes > "$TMP/deduplicated-manifest.out"
+assert_eq 1 "$(grep -c 'Installed .*firefox_youtube_downloader.json' "$TMP/deduplicated-manifest.out")" \
+    'deduplicated native-messaging manifest write count'
+[[ -f "$deduplicated_manifest_home/.mozilla/native-messaging-hosts/firefox_youtube_downloader.json" ]] \
+    || fail 'deduplicated native-messaging manifest was not installed'
+pass 'installer deduplicates native-messaging manifest destinations resolving to the same path'
+
 config_home="$TMP/config-home"
 mkdir -p "$config_home/.config/yt-dlp"
 printf -- '--no-mtime\n-o ~/Downloads/%%(title)s.%%(ext)s\n' > "$config_home/.config/yt-dlp/config"
@@ -461,9 +517,162 @@ cmp -s "$TMP/yt-dlp-config.orig" "$config_home/.config/yt-dlp/config" \
 pass 'installer preserves a pre-existing yt-dlp config byte-for-byte'
 
 fresh_home="$TMP/fresh-home"
-HOME="$fresh_home" "$INSTALLER" --install > "$TMP/fresh-config.out"
+HOME="$fresh_home" "$INSTALLER" --install --yes > "$TMP/fresh-config.out"
 [[ ! -e "$fresh_home/.config/yt-dlp/config" ]] \
     || fail 'installer created a yt-dlp config in a fresh HOME'
 pass 'installer creates no yt-dlp config in a fresh HOME'
+
+config_install_home="$TMP/config-install-home"
+HOME="$config_install_home" "$INSTALLER" --install --yes > "$TMP/config-install.out"
+python3 - "$config_install_home" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+config = json.loads((home / ".config/youtube-downloader/config.json").read_text())
+assert config == {
+    "download_dir": "~/Music/Youtube Downloads",
+    "auto_tag": True,
+    "rsgain": False,
+}, config
+for manifest in (
+    home / ".mozilla/native-messaging-hosts/firefox_youtube_downloader.json",
+    home / ".config/mozilla/native-messaging-hosts/firefox_youtube_downloader.json",
+):
+    value = json.loads(manifest.read_text())
+    assert value == {
+        "name": "firefox_youtube_downloader",
+        "description": "Native Messaging host for Firefox YouTube Downloader Plugin",
+        "path": str(home / ".local/bin/yt-dlp-native-host.py"),
+        "type": "stdio",
+        "allowed_extensions": ["firefox-youtube-downloader@lakis01.github.io"],
+    }, value
+PY
+[[ -s "$ROOT/dist/firefox-youtube-downloader.xpi" ]] || fail 'installer did not build the XPI'
+python3 - "$ROOT/dist/firefox-youtube-downloader.xpi" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert archive.testzip() is None
+    assert "manifest.json" in archive.namelist()
+PY
+[[ ! -e "$config_install_home/.config/yt-dlp/config" ]] \
+    || fail 'installer created a yt-dlp config during the fresh install'
+pass 'fresh --yes install saves defaults, installs both manifests, builds XPI, and leaves yt-dlp config untouched'
+
+interactive_home="$TMP/interactive-home"
+python3 - "$INSTALLER" "$interactive_home" <<'PY'
+import json
+import os
+import pty
+import select
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+installer, home = sys.argv[1:]
+environment = os.environ.copy()
+environment["HOME"] = home
+environment.pop("XDG_CONFIG_HOME", None)
+master, slave = pty.openpty()
+process = subprocess.Popen(
+    [installer, "--install"], stdin=slave, stdout=slave, stderr=slave,
+    env=environment, close_fds=True,
+)
+os.close(slave)
+transcript = bytearray()
+answers = [
+    (b"[3] Custom path", b"2\n"),
+    (b"Automatic tag extraction", b"n\n"),
+    (b"ReplayGain", b"y\n"),
+]
+deadline = time.monotonic() + 45
+try:
+    for expected, answer in answers:
+        while expected not in transcript:
+            if time.monotonic() > deadline:
+                raise AssertionError(f"installer did not prompt for {expected!r}: {transcript.decode(errors='replace')}")
+            ready, _, _ = select.select([master], [], [], 0.2)
+            if ready:
+                try:
+                    transcript.extend(os.read(master, 4096))
+                except OSError:
+                    break
+            if process.poll() is not None:
+                break
+        if expected not in transcript:
+            raise AssertionError(f"installer exited before {expected!r}: {transcript.decode(errors='replace')}")
+        os.write(master, answer)
+    while process.poll() is None:
+        ready, _, _ = select.select([master], [], [], 0.2)
+        if ready:
+            try:
+                transcript.extend(os.read(master, 4096))
+            except OSError:
+                break
+    process.wait(timeout=5)
+finally:
+    if process.poll() is None:
+        process.kill()
+        process.wait()
+    os.close(master)
+
+output = transcript.decode(errors="replace")
+if process.returncode != 0:
+    raise AssertionError(f"interactive installer failed ({process.returncode}): {output}")
+config = json.loads((Path(home) / ".config/youtube-downloader/config.json").read_text())
+assert config == {
+    "download_dir": "~/Downloads/Youtube",
+    "auto_tag": False,
+    "rsgain": True,
+}, config
+PY
+pass 'interactive TTY installer accepts download-dir, auto-tag, and ReplayGain choices'
+
+existing_ytdlp_home="$TMP/existing-ytdlp-home"
+mkdir -p "$existing_ytdlp_home/.config/yt-dlp"
+printf -- '--no-mtime\n-o ~/Archive/%%(title)s.%%(ext)s\n' > "$existing_ytdlp_home/.config/yt-dlp/config"
+cp -- "$existing_ytdlp_home/.config/yt-dlp/config" "$TMP/existing-ytdlp.orig"
+HOME="$existing_ytdlp_home" "$INSTALLER" --install --yes > "$TMP/existing-ytdlp.out"
+cmp -s "$TMP/existing-ytdlp.orig" "$existing_ytdlp_home/.config/yt-dlp/config" \
+    || fail 'installer modified the existing yt-dlp config with --yes'
+python3 - "$existing_ytdlp_home/.config/youtube-downloader/config.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    config = json.load(stream)
+assert config["download_dir"] is None, config
+assert config["auto_tag"] is True, config
+assert config["rsgain"] is False, config
+PY
+HOME="$existing_ytdlp_home" "$INSTALLER" --install --yes \
+    --download-dir=ytdlp-default --auto-tag=true --rsgain=true > "$TMP/existing-ytdlp-overrides.out"
+python3 - "$existing_ytdlp_home/.config/youtube-downloader/config.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    config = json.load(stream)
+assert config == {"download_dir": None, "auto_tag": True, "rsgain": True}, config
+PY
+cmp -s "$TMP/existing-ytdlp.orig" "$existing_ytdlp_home/.config/yt-dlp/config" \
+    || fail 'installer modified existing yt-dlp config while applying overrides'
+pass 'existing yt-dlp config remains byte-identical and ytdlp-default plus explicit flags are honored'
+
+deps_home="$TMP/deps-home"
+rm -f -- "$XDG_MIME_ARGS"
+HOME="$deps_home" "$INSTALLER" --check-deps > "$TMP/check-deps.out"
+assert_file_contains "$TMP/check-deps.out" 'Desktop session:' '--check-deps desktop detection'
+assert_file_contains "$TMP/check-deps.out" 'Display server:' '--check-deps display detection'
+assert_file_contains "$TMP/check-deps.out" 'Debian 13.7 (GNOME)' '--check-deps Debian instructions'
+assert_file_contains "$TMP/check-deps.out" 'LMDE 7 (Cinnamon)' '--check-deps LMDE instructions'
+[[ ! -e "$deps_home/.local" && ! -e "$deps_home/.config" && ! -e "$deps_home/.mozilla" ]] \
+    || fail '--check-deps wrote files into HOME'
+[[ ! -e "$XDG_MIME_ARGS" ]] || fail '--check-deps registered a MIME handler'
+pass '--check-deps detects session prerequisites without writing files'
 
 printf '1..%s\n' "$PASS"

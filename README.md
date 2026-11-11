@@ -1,366 +1,227 @@
-# YouTube Downloader
+# Firefox-Youtube-Downloader-Plugin
 
-Maintained source for the yt-dlp audio/video/interactive-cut workflow:
-description-derived music tags, individual-track ReplayGain, KDE launchers
-with global shortcuts, and Firefox integration (External Application Launcher
-context actions plus Tampermonkey player buttons via an OS URL handler).
+A Firefox WebExtension and user-level Linux companion for downloading YouTube
+audio, video, or a selected audio cut with `yt-dlp`. The extension provides a
+YouTube context-menu submenu, watch-page download controls, and a settings
+popup. Its Python Native Messaging host starts the existing download wrapper
+without an external-application confirmation dialog.
 
-The implementation plan is in `docs/superpowers/plans/2026-11-10-youtube-downloader.md`;
-its design is in `docs/superpowers/specs/2026-11-10-youtube-downloader-design.md`.
+The source tree is self-contained: build the XPI from `extension/`, then
+install the companion with `install.sh`. The installer uses per-user paths and
+does not modify Firefox profiles or `~/.config/yt-dlp/config`.
 
-Source lives here; nothing is used from this checkout until `install.sh`
-deploys it (see Installation).
+## Features
 
-## Command prerequisites
+- Context menu: **YouTube Downloader → Audio / Video / Cut Audio**.
+- Watch-page segmented controls for Audio, Video, and Cut.
+- Popup settings for default download directory, automatic tag extraction,
+  and ReplayGain (`rsgain`) normalization.
+- A standard Native Messaging host and manifests for Firefox.
+- Fast, single-pass audio downloads, stage/progress reporting, metadata and
+  cover-art handling, and optional ReplayGain processing.
+- Desktop-independent shortcut launcher with terminal, clipboard, selection,
+  and MPRIS auto-detection.
 
-Required on PATH:
+## Prerequisites and porting
 
-- `yt-dlp` — downloads, thumbnails, and info JSON.
-- `ffmpeg` — audio extraction/conversion and cover-art handling (used by
-  yt-dlp postprocessors and the tagging tests).
-- `rsgain` — ReplayGain for audio and cut outputs.
-- `python3` with system packages `mutagen` and `Pillow` — metadata parsing
-  and container-native tagging. No `pip install` is needed or performed.
-- `konsole` — the shortcut launcher opens the wrapper in a held Konsole window.
-- `notify-send` — start/failure notifications (best effort; failures are silent).
-- `wl-paste` — clipboard/primary-selection URL fallbacks (Wayland).
-- `qdbus6` (or `qdbus`) — reads the active media URL from Plasma
-  Browser Integration / MPRIS.
-- `xdg-mime` — registers the `yt-dlp://` URI handler during install.
-
-Desktop entries are validated with `desktop-file-validate` (package
-`desktop-file-utils` on most distros).
-
-Firefox side (add-ons, not PATH commands):
-
-- External Application Launcher (signed add-on, already installed) for
-  right-click context actions.
-- Tampermonkey for the on-page Audio / Video / Cut buttons.
-
-### Fresh-install dependency matrix (LMDE/Debian GNOME/Cinnamon)
-
-Common on every desktop — provide the executable/library, whatever Debian
-package name supplies it on that release:
-
-- `ffmpeg` — audio extraction/conversion and cover-art handling.
-- Python 3 with the `mutagen` and `Pillow` libraries — metadata parsing
-  and container-native tagging (no `pip install` performed).
-- `rsgain` — per-track ReplayGain for audio/cut outputs.
-- A JavaScript runtime for yt-dlp (e.g. Node.js) — yt-dlp needs one for
-  some extractors.
-
-Desktop/session-dependent roles — one implementation per role; rows name
-the capability required, not a guaranteed identical Debian package name:
-
-| Role | This (KDE Plasma / Wayland) setup | GNOME/Cinnamon or X11 equivalent |
-| --- | --- | --- |
-| Held terminal for the shortcut launcher | `konsole` | A GNOME/Cinnamon terminal (the launcher Exec assumes `konsole`; adjust when porting) |
-| Clipboard/primary-selection reader | `wl-paste` (Wayland) | `xclip` / `xsel` (X11) |
-| Active-media (MPRIS) reader | Plasma Browser Integration via `qdbus6` (or `qdbus`) | `playerctl` |
-| Notifications | `notify-send` | `notify-send` (same role) |
-| URI-handler registration | `xdg-mime` (xdg-utils role) | same |
-| Desktop entry validation | `desktop-file-validate` (desktop-file-utils role) | same |
-| Right-click actions | External Application Launcher plus its native host | same |
-| On-page buttons | Tampermonkey | same |
-
-## What each mode does
-
-All downloads land in `~/Downloads` (via the user's existing yt-dlp config;
-the wrapper never passes `--ignore-config`).
-
-- `audio` — downloads best audio, writes description-derived tags and front
-  cover art, renames to `Artist - Title.<ext>`, deletes the `.info.json` and
-  thumbnail sidecars, then runs ReplayGain.
-- `video` — downloads best video+audio merged to MKV with embedded thumbnail
-  and yt-dlp metadata. Tags are **not** rewritten and `rsgain` is **not** run.
-- `cut` — prompts for start/end times plus Opus encoding settings (bitrate,
-  channels, voip/audio application), downloads only that section as Opus,
-  then tags, renames (`Artist - Title_cut_<start>_<end>.opus`), cleans up
-  sidecars, and runs ReplayGain like `audio`.
-
-Usage:
+The installer can inspect the current desktop and session without installing
+anything:
 
 ```sh
-yt-dlp-wrapper.py [audio|video|cut] <url>
-yt-dlp-shortcut.sh [audio|video|cut] [URL]
-yt-dlp-shortcut.sh --uri 'yt-dlp://<audio|video|cut>?url=<percent-encoded-URL>'
+./install.sh --check-deps
 ```
 
-## Metadata rules
+It reports available and missing commands and prints these suggested package
+commands. Review the list first; the installer never runs `apt` for you:
 
-### Official Art Tracks
+```sh
+# Debian 13.7 (GNOME)
+sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin wl-clipboard xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
 
-A description counts as an official Art Track only when it contains **both**
-`Provided to YouTube by` and `Auto-generated by YouTube.`
+# LMDE 7 (Cinnamon)
+sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin wl-clipboard xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
+```
 
-Parsed fields: title and primary/collaborating artists (from the
-`Title · Artist · ...` line), album (first non-credit line after it),
-`Released on:` date, ℗/© lines, distributor (`Provided to YouTube by ...`),
-ISRC, genre, recording date, studio, and role-labelled credits
-(composer/writer, lyricist, producer, performer/instrument, arranger,
-conductor, publisher, label, recording/mixing/mastering engineering roles).
+The downloader also needs `ffmpeg`, Python 3 with `mutagen` and Pillow,
+`yt-dlp`, and a JavaScript runtime such as Node.js. `rsgain` is optional; it
+is needed only when ReplayGain normalization is enabled. `desktop-file-utils`
+provides `desktop-file-validate`. Package availability and names can vary
+between Debian-family releases, so use the package manager for your release.
 
-### Ordinary uploads (fallback)
+Runtime selection is automatic:
 
-Artist is the leading `Artist - Title` prefix when present, otherwise the
-cleaned channel/uploader name (`- Topic`, `VEVO`, and
-`- Official Artist Channel` suffixes stripped). The title has video-suffix
-clutter removed (`(Official Music Video)`, `[4K]`, `(Lyrics)`, …).
-A trailing featuring credit is preserved verbatim in `artist`
-(`Artist A featuring Artist B` / `Artist A feat. Artist B`) while the
-individual names are stored as multi-value `artists`. `&` inside a name
-(e.g. `Simon & Garfunkel`) is never split. Date is the video's upload
-(or release) date.
+- **Terminals:** prefers `konsole` on KDE, `ptyxis`, `kgx`, then
+  `gnome-terminal` on GNOME, and `xfce4-terminal` or `mate-terminal` for those
+  desktops. It falls back through supported installed terminals. Set
+  `YTDL_TERMINAL` to choose a specific supported executable.
+- **Wayland:** uses `wl-paste` for clipboard and primary selection.
+- **X11:** uses `xclip` or `xsel` for clipboard and primary selection.
+- **MPRIS:** reads the active media URL with `playerctl`, then tries the
+  `qdbus6` / `qdbus` Plasma Browser Integration interface.
 
-### Date precedence
+For a new GNOME or Cinnamon keyboard shortcut, open **Settings → Keyboard →
+Keyboard Shortcuts → Custom Shortcuts** (the wording can vary by release) and
+add these commands, assigning any unused key combinations:
 
-`date` and `originaldate` are always `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`.
-Official Art Tracks and ordinary uploads follow different rules:
+```sh
+~/.local/bin/yt-dlp-shortcut.sh audio
+~/.local/bin/yt-dlp-shortcut.sh video
+~/.local/bin/yt-dlp-shortcut.sh cut
+```
 
-- **Official Art Track:** `date` is the `Released on:` value when present;
-  otherwise the ℗ year when present (e.g. `℗ 2004 Example Label` →
-  `2004`); when neither is present, `date` stays blank. Upload/release
-  dates are never used. A distinct earlier ℗ year alongside a later release
-  date is stored as `originaldate` (e.g. release `2012-11-19` + `℗ 1979` →
-  `originaldate` `1979`).
-- **Ordinary upload (fallback):** `date` is the video's upload date, or its
-  release date when no upload date exists (yt-dlp's `YYYYMMDD` is expanded
-  to `YYYY-MM-DD`).
+KDE users can add the installed **YouTube Audio Download**, **YouTube Video
+Download**, and **YouTube Interactive Cut Audio** desktop launchers under
+**System Settings → Keyboard → Shortcuts → Custom Shortcuts**. The shortcut
+uses the active media URL first, then selection/clipboard fallbacks; use the
+Firefox context menu for a specific hovered video card.
 
-### ReplayGain behavior
+## Build and install
 
-`rsgain custom -s i` runs once per finished audio/cut file, in
-individual-track write mode. rsgain's default ReplayGain/Opus mode is kept;
-the optional `-o r` (R128 tag) mode is deliberately not used. Video-mode
-downloads never run `rsgain`.
+### 1. Install the Firefox extension
 
-### yt-to-forerunner compatibility
+Build `dist/firefox-youtube-downloader.xpi` from the checked-out extension
+source:
 
-`parse_info()` keeps the keys `~/.local/bin/yt-to-forerunner` relies on:
-`artist`, `title`, `album`, `date`, `composer`, `is_tagged`, and `duration`
-(plus the extended structured fields). The forerunner script itself is
-untouched; only this repo's shared parser contract matters.
+```sh
+./scripts/build-xpi.sh
+```
 
-## Installation
+Firefox Release requires Mozilla signing before a packaged XPI can be
+permanently installed. Signing through Mozilla Add-ons (AMO) is free. For an
+AMO-distributed release, submit the add-on for signing; for an unlisted XPI,
+use Mozilla's signing API with `web-ext` and your AMO API credentials, for
+example:
 
-Dry run first (default; changes nothing):
+```sh
+npx web-ext sign --source-dir extension \
+  --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+```
+
+The signed XPI can then be installed in Firefox Release. `npx web-ext sign`
+uses the free signing service; it does not mean an add-on is automatically
+listed in the AMO catalog. Firefox Nightly is useful for development and
+temporary loading through `about:debugging`. Debian's `firefox-esr` and LMDE's
+Firefox ESR can also be used for development/policy-managed installs; a
+normally distributed, permanent XPI should still be Mozilla-signed.
+
+### 2. Install the Linux companion
+
+Preview all planned paths first. A plain invocation is a no-write dry run:
 
 ```sh
 ./install.sh
 ```
 
-This lists the files that would be installed and the URI registration that
-would be applied.
-
-Install:
+Then install the companion and configure a fresh setup:
 
 ```sh
 ./install.sh --install
 ```
 
-What `--install` does:
-
-1. Copies `bin/ytdl_meta.py`, `bin/yt-dlp-wrapper.py`, and
-   `bin/yt-dlp-shortcut.sh` to `~/.local/bin` (mode 755).
-2. Stages the four `desktop/*.desktop` files with the real
-   `~/.local/bin/yt-dlp-shortcut.sh` Exec path rewritten in, then installs
-   them to `~/.local/share/applications` (mode 644).
-3. Registers `net.local.yt-dlp-uri.desktop` as the handler for
-   `x-scheme-handler/yt-dlp` via `xdg-mime`.
-
-### yt-dlp config policy
-
-The installer never creates or overwrites `~/.config/yt-dlp/config`: it
-only touches `~/.local/bin`, `~/.local/share/applications`, and the
-`x-scheme-handler/yt-dlp` MIME registration. Downloads resolve through
-the user's existing yt-dlp config (currently `~/Downloads`); the wrapper
-never passes `--ignore-config`. Setup on future machines must preserve an
-existing config and create one only if absent.
-
-### Download directory portability
-
-The requested `~/Music/Youtube Downloads` directory for other hosts is
-future portability scope, not a current installer option. This checkout
-keeps the current `~/Downloads` behavior; no other machine's config is
-created here.
-
-### Rollback
-
-Before installing, record the current URI handler in the shell where you will
-install, so the same saved value can be used during rollback:
+On a fresh interactive terminal, the installer asks for a download directory,
+automatic tagging, and ReplayGain. For automation, `--yes` accepts defaults;
+individual settings can be supplied explicitly:
 
 ```sh
-previous_handler=$(xdg-mime query default x-scheme-handler/yt-dlp)
-printf 'Previous URI handler: %s\n' "${previous_handler:-none}"
+./install.sh --install --yes \
+  --download-dir='~/Downloads/Youtube' --auto-tag=true --rsgain=false
 ```
 
-Before replacing any existing destination file, the installer copies it to
-`<name>.bak.<YYYYMMDD-HHMMSS>` (with a numeric suffix on collision) and
-prints each backup path. To roll back, list the backups, then move the exact
-backup path back over the installed file — for example:
+Use `--download-dir=ytdlp-default` to defer to an existing yt-dlp config.
+The installer makes timestamped `.bak.*` copies of replaced files, builds the
+XPI, installs binaries and desktop entries under `~/.local`, writes the
+Firefox Native Messaging manifest to both `~/.mozilla/native-messaging-hosts/`
+and `${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/native-messaging-hosts/`, and
+registers the `yt-dlp://` URI desktop handler. If both manifest paths resolve
+to the same file, it installs that file once.
 
-```sh
-ls ~/.local/bin/*.bak.* ~/.local/share/applications/*.bak.*
-mv ~/.local/bin/yt-dlp-shortcut.sh.bak.20261110-120000 ~/.local/bin/yt-dlp-shortcut.sh
-```
+Before writing anything or building the XPI, it checks all target files for
+directory conflicts, including symlinks that resolve to directories. The
+default dry run does not build the XPI or write configuration, binaries,
+manifests, desktop entries, or MIME registrations.
 
-(substitute the real timestamped path printed by `ls`; the name above is
-only an example). Then restore the URI association to the handler recorded
-before installation:
+## Configuration
 
-```sh
-if [ -n "$previous_handler" ]; then
-    xdg-mime default "$previous_handler" x-scheme-handler/yt-dlp
-else
-    printf '%s\n' 'No prior handler was recorded; remove the association in KDE System Settings.'
-fi
-```
+The companion and extension share
+`~/.config/youtube-downloader/config.json` (or the equivalent under
+`$XDG_CONFIG_HOME`). Supported fields:
 
-If the saved query was empty, remove the association in KDE **System Settings
-→ Applications → File Associations**, under `x-scheme-handler/yt-dlp`; do not
-select the newly installed handler as a substitute. Keep the shell open until
-the association is restored, or save the recorded handler value elsewhere.
+| Field | Fresh-install default | Meaning |
+| --- | --- | --- |
+| `download_dir` | `"~/Music/Youtube Downloads"` when there is no yt-dlp config; otherwise `null` | A custom path, or `null` to let yt-dlp choose its configured path. `~/Downloads/Youtube` is the other interactive quick choice. |
+| `auto_tag` | `true` | Extract description-derived tags and attach cover art for audio/cut downloads. |
+| `rsgain` | `false` | Run `rsgain` on finished audio/cut files. |
 
-To fully uninstall, delete the seven installed files (plus any `.bak.*`
-copies you no longer want) and remove the MIME registration with your
-desktop's default-applications settings. The installer refuses to run if a
-destination resolves to a directory (including through a symlink), and it
-writes nothing before that check.
+An explicit `--download-dir=ytdlp-default` stores `null`. If the plugin config
+already exists, `--install` preserves it byte-for-byte unless one or more
+configuration flags are provided. The installer never creates or modifies
+`~/.config/yt-dlp/config` (including when it exists already). If that yt-dlp
+config exists and the plugin config is fresh, the default `download_dir` is
+`null` so yt-dlp's existing destination rules remain in control.
 
-## KDE shortcuts
+## Retiring the previous Firefox setup
 
-The installer does **not** change KDE key bindings — set these yourself in
-System Settings so nothing you already use is silently overwritten:
+Do this only after confirming the new XPI and native host work. Keep unrelated
+Firefox extensions and userscripts.
 
-1. Open **System Settings → Keyboard → Shortcuts → Custom Shortcuts**.
-2. Add each of the three installed launchers (**YouTube Audio Download**,
-   **YouTube Video Download**, **YouTube Interactive Cut Audio**) as a
-   Global Shortcut → Command/URL trigger.
-3. Assign, in order: `Meta+Alt+A` (audio), `Meta+Alt+V` (video),
-   `Meta+Alt+C` (cut). Any free combination works; these three are chosen
-   because they do not collide with the launchers' legacy `Ctrl+Alt`
-   bindings.
+### External Application Launcher
 
-Rationale: a KDE global shortcut cannot know which feed/sidebar card the
-pointer hovers — it resolves the **active media** URL (Plasma Browser
-Integration via MPRIS), falling back to primary selection then clipboard.
-Right-click menu actions instead capture the **hovered card** link (see
-below). Use the shortcut for the video currently playing, and the
-right-click menu when you want a specific card in a feed or sidebar.
+- [ ] Remove the old **External Application Launcher** add-on from Firefox.
+- [ ] Retire its native host only after checking no other extension uses it.
+      Its shared system files are commonly located at
+      `/usr/share/com.add0n.node` and
+      `/usr/share/com.add0n.node/com.add0n.node.json`; remove the package or
+      files through the mechanism that installed them rather than deleting
+      files blindly.
+- [ ] Remove the old YouTube application entries/settings from the add-on if
+      you are keeping it for another purpose.
 
-## Firefox setup
+**`ff2mpv` / *Play in MPV* is separate and unaffected.** Do not uninstall its
+Firefox add-on or native host as part of retiring External Application
+Launcher.
 
-### External Application Launcher (complete settings import)
+### Tampermonkey
 
-Use the generated complete settings export at
-`~/Downloads/external-application-button-preferences-fixed.json`.
-In the add-on's options, choose **Import Settings** and select that file.
-Importing replaces all extension settings, so **never import a partial or
-hand-built export**. This one complete import configures all three existing
-apps while preserving unrelated settings and icons; only one full import is
-needed.
+- [ ] Verify the new extension's on-page controls on a YouTube watch page.
+- [ ] Remove or disable only the old YouTube downloader userscript in
+      Tampermonkey. Keep Tampermonkey and unrelated scripts if you still use
+      them.
+- [ ] Uninstall Tampermonkey only if it is no longer needed for any other
+      userscripts.
 
-The three YouTube apps use these arguments:
+## Troubleshooting and rollback
 
-| Existing app | Arguments |
-| --- | --- |
-| Audio | `audio "[PRE_SCRIPT]" "[HREF]"` |
-| Video | `video "[PRE_SCRIPT]" "[HREF]"` |
-| Cut | `cut "[PRE_SCRIPT]" "[HREF]"` |
+- **No host connection in the popup:** confirm both manifests exist, their
+  `path` points to `~/.local/bin/yt-dlp-native-host.py`, and that file is
+  executable. Re-run `./install.sh --install` if needed.
+- **Shortcut reports no supported terminal:** install a supported terminal or
+  set `YTDL_TERMINAL` to its executable name.
+- **No clipboard/MPRIS fallback:** install the matching Wayland/X11 clipboard
+  tool and `playerctl` (or Plasma's `qdbus6` / `qdbus` integration).
+- **Missing tag or ReplayGain stage:** check `auto_tag` and `rsgain` in the
+  plugin popup/config and verify `mutagen`, Pillow, and `rsgain` are installed.
 
-The imported settings configure each app as follows:
-
-1. Keep its current executable (`yt-dlp-shortcut.sh`) and enable the `page`,
-   `frame`, `link`, `image`, `audio`, and `video` contexts.
-2. Leave the target pattern (upper field) empty or broad (`*`). Do **not**
-   narrow it to `https:` — image/video previews can use `blob:` URLs even
-   though the containing document is YouTube.
-3. Set the document/page URL filter (lower field) to YouTube domains, including
-   `https://www.youtube.com/*`, `https://music.youtube.com/*`,
-   `https://youtube.com/*`, and `https://m.youtube.com/*`.
-4. Enter this exact one-line expression in the app's **Pre JavaScript** field:
-
-   ```javascript
-   document.currentScript.output = window.__ytdlLastContextHref || location.href;
-   ```
-
-`[PRE_SCRIPT]` is replaced with that output: a right-click on a card uses
-that card's `/watch` or `/shorts/` link; a right-click elsewhere uses the
-current page URL. Firefox may group the entries under the add-on's submenu
-rather than showing them top-level.
-
-### Tampermonkey player buttons
-
-1. Save `firefox/youtube-ytdlp-buttons.user.js` as a local `.user.js` file.
-2. In Firefox open the Tampermonkey toolbar menu → **Dashboard**.
-3. Open the **Utilities** tab → **Import from file**, select the saved
-   userscript, choose **Import**.
-4. Review it in the editor, choose **Install**, and confirm it is enabled.
-5. Reload a YouTube or YouTube Music watch page. Compact **Download audio**,
-   **Download video**, and **Cut audio** links appear between Subscribe and
-   the Like/Dislike controls and survive SPA navigation via a debounced
-   mutation observer.
-
-### External URI confirmation
-
-Clicking a player button navigates to
-`yt-dlp://<audio|video|cut>?url=<percent-encoded-watch-URL>`, which the OS
-routes to `yt-dlp-shortcut.sh --uri ...`. On first use Firefox asks whether
-to open the external application: confirm the YouTube Downloader /
-`yt-dlp://` handler (remember the choice only if desired). If Firefox offers
-no handler, re-run `./install.sh --install` and confirm
-`xdg-mime query default x-scheme-handler/yt-dlp` returns
-`net.local.yt-dlp-uri.desktop` before changing browser settings.
-
-## Troubleshooting
-
-- **"No valid YouTube URL found" notification:** the explicit URL, primary
-  selection, MPRIS active media, and clipboard were all empty or
-  non-YouTube. Copy a `youtube.com` / `youtu.be` / `music.youtube.com` link
-  first. Non-HTTP(S) schemes, URLs with userinfo or non-standard ports, and
-  lookalike hosts (`youtube.com.evil.invalid`) are rejected on purpose.
-- **Shortcut runs but nothing downloads:** check Konsole output — the
-  wrapper holds the window open. Common causes: `yt-dlp` network failure,
-  missing `rsgain`, or a full `~/Downloads`.
-- **Wrong video downloaded via shortcut:** expected limitation — global
-  shortcuts resolve the *active* media, not the hovered card. Use the
-  right-click menu for feed/sidebar cards.
-- **Player buttons missing:** confirm the userscript is installed *and*
-  enabled in the Tampermonkey Dashboard, then reload a `/watch`, `/shorts/`,
-  or `/live/` page. Buttons only render on YouTube watch routes.
-- **`yt-dlp://` links do nothing:** the URI handler isn't registered.
-  Reinstall (`./install.sh --install`) and re-check the `xdg-mime` query
-  above, then click again and accept Firefox's confirmation dialog.
-- **`desktop-file-validate` failures after editing:** keep `Exec=` absolute
-  and the `MimeType=x-scheme-handler/yt-dlp;` line (with trailing
-  semicolon) intact on the URI desktop file.
-- **Restore after a bad install:** see Rollback — every replaced file has a
-  timestamped `.bak.*` copy next to it.
-
-## Known limitation
-
-Live Firefox rendering of the player buttons was **not** verified: the
-Firefox automation process closes on startup in this environment, so only
-the dependency-free Node DOM fixture (`tests/test_youtube_buttons.js`),
-syntax checks, and the Impeccable detector (clean) cover the userscript.
-After importing it, manually confirm button placement, the three launch
-URIs, and the external-application confirmation on a real watch page.
+Replaced files are backed up beside their destinations as
+`<name>.bak.<YYYYMMDD-HHMMSS>` (with a numeric suffix if necessary). To roll
+back, restore the exact backup files and remove the two Native Messaging
+manifests if they did not previously exist. Restore the previous
+`x-scheme-handler/yt-dlp` association in your desktop's default-application
+settings if necessary. No Firefox profile database or yt-dlp config needs to
+be edited.
 
 ## Verification
 
+Run the repository checks from its root:
+
 ```sh
-python3 -m unittest discover -s tests   # 37 tests: parser, tagging, wrapper, EAL settings
-node tests/test_youtube_buttons.js      # userscript DOM fixture
-node --check firefox/youtube-ytdlp-buttons.user.js
-node --check tests/test_youtube_buttons.js
-bash tests/test_shortcut.sh             # 25 checks: launcher, desktop files, installer
-bash -n bin/yt-dlp-shortcut.sh && bash -n install.sh
-python3 -m py_compile bin/ytdl_meta.py bin/yt-dlp-wrapper.py
+python3 -m unittest discover -s tests -v  # 71 tests
+bash tests/test_shortcut.sh               # 42 checks: launcher, desktop entries, installer
+node tests/test_firefox_extension.js
+node tests/test_youtube_buttons.js
+bash -n install.sh bin/yt-dlp-shortcut.sh tests/test_shortcut.sh
 desktop-file-validate desktop/*.desktop
-./install.sh                            # dry run: must change nothing
-python3 bin/yt-dlp-wrapper.py --help    # usage line (exits 1 by design)
+./install.sh                              # no-write dry run
 ```
 
-`yt-to-forerunner --help` still prints its usage (the installed script is
-untouched); compatibility is via the shared `parse_info()` keys asserted in
-`tests/test_ytdl_meta.py`.
+The browser-facing fixtures are Node DOM tests; manually confirm installation
+and behavior in Firefox on the target desktop after porting.
