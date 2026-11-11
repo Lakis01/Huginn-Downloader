@@ -1115,6 +1115,38 @@ class WrapperTests(unittest.TestCase):
         self.assertNotIn("--cookies-from-browser", byte_error_commands[0])
         self.assertIn("--cookies-from-browser", byte_error_commands[1])
 
+    def test_metadata_command_places_separator_before_url_and_ies_for_youtube(self):
+        wrapper = _load_wrapper(self)
+        for url, expect_ies in (
+            ("https://www.youtube.com/watch?v=meta", True),
+            ("https://soundcloud.com/artist/track", False),
+        ):
+            with self.subTest(url=url):
+                commands = []
+
+                def fake_run(command, **kwargs):
+                    commands.append(command)
+                    return SimpleNamespace(
+                        stdout=json.dumps({"title": "Track", "channel": "Artist"})
+                    )
+
+                with mock.patch.object(
+                    wrapper.subprocess, "run", side_effect=fake_run
+                ):
+                    meta = wrapper.parse_audio(url)
+
+                self.assertEqual(meta["title"], "Track")
+                self.assertEqual(len(commands), 1)
+                self.assertEqual(commands[0][-2:], ["--", url])
+                if expect_ies:
+                    self.assertIn("--ies", commands[0])
+                    self.assertEqual(
+                        commands[0][commands[0].index("--ies") + 1],
+                        "youtube,youtube:tab",
+                    )
+                else:
+                    self.assertNotIn("--ies", commands[0])
+
     def test_cut_download_reuses_browser_cookies_after_auth_metadata_retry(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:

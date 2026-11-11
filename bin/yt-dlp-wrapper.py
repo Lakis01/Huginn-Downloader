@@ -95,7 +95,9 @@ def _metadata_command(url, browser=None):
     command = ["yt-dlp"]
     if browser:
         command.extend(["--cookies-from-browser", browser])
-    command.extend(["--dump-json", "--no-warnings", "--no-playlist", url])
+    if is_youtube_url(url):
+        command.extend(["--ies", "youtube,youtube:tab"])
+    command.extend(["--dump-json", "--no-warnings", "--no-playlist", "--", url])
     return command
 
 
