@@ -61,15 +61,17 @@ function testIcons() {
   }
   const plugin = readFile('extension/icons/plugin.svg');
   assert.match(plugin, /rounded|rx=/i, 'plugin badge is rounded');
-  for (const name of ['audio.svg', 'video.svg', 'cut.svg']) {
+  const badgeFills = { 'audio.svg': '#0b6bcb', 'video.svg': '#7c3aed', 'cut.svg': '#b45309' };
+  for (const [name, fill] of Object.entries(badgeFills)) {
     const raw = readFile(`extension/icons/${name}`);
-    assert.ok(raw.includes('24'), `${name} is sized 24`);
+    assert.ok(raw.includes('32'), `${name} is sized 32`);
     assert.ok(raw.includes('viewBox'), `${name} has a viewBox`);
     assert.ok(raw.includes('stroke-width'), `${name} uses strokes`);
-    assert.ok(raw.includes('stroke-width="2"') || raw.includes("stroke-width='2'") || raw.includes('stroke-width:2') || raw.includes('stroke-width: 2'), `${name} uses stroke-width 2`);
-    assert.ok(raw.includes('prefers-color-scheme'), `${name} adapts to light/dark menus`);
-    assert.ok(raw.includes('#15141a'), `${name} has light-menu color`);
-    assert.ok(raw.includes('#fbfbfe'), `${name} has dark-menu color`);
+    assert.ok(raw.includes('<rect'), `${name} has a solid badge rect`);
+    assert.ok(raw.toLowerCase().includes(fill), `${name} badge fill is ${fill}`);
+    assert.ok(raw.includes('#fff') || raw.includes('#ffffff'), `${name} foreground is white for dark-menu contrast`);
+    assert.ok(!raw.includes('prefers-color-scheme'), `${name} needs no media query: badge contrast is theme-independent`);
+    assert.ok(!raw.includes('#15141a'), `${name} has no dark-on-dark stroke`);
   }
   assert.ok(!/<text/i.test(readFile('extension/icons/audio.svg')), 'audio icon is drawn paths, not text');
 }
@@ -270,8 +272,8 @@ function testContentCss() {
   const css = readFile('extension/content.css');
   assertAsciiNoEmoji('extension/content.css', css);
   assert.ok(css.includes('[data-ytdl-controls]'), 'pill selector present');
-  assert.ok(css.includes('38px'), 'pill height is 38px');
-  assert.ok(css.includes('19px'), 'pill radius is 19px');
+  assert.ok(css.includes('40px'), 'pill height is 40px');
+  assert.ok(css.includes('20px'), 'pill radius is 20px');
   assert.ok(css.includes('rgba(0, 0, 0, 0.05)') || css.includes('rgba(0,0,0,0.05)') || css.includes('rgba(0, 0, 0, .05)'), 'light pill surface');
   assert.ok(css.includes('#f2f2f2'), 'light fallback #f2f2f2');
   assert.ok(css.includes('rgba(255, 255, 255, 0.1)') || css.includes('rgba(255,255,255,0.1)') || css.includes('rgba(255, 255, 255, .1)'), 'dark pill surface');
@@ -282,7 +284,8 @@ function testContentCss() {
   assert.ok(css.includes(':focus-visible'), 'focus-visible ring');
   assert.ok(css.includes('data-launching'), 'launching confirmation state');
   assert.ok(css.includes('500') && css.includes('14px'), '500 14px segment type');
-  assert.ok(css.includes('15px'), '0 15px horizontal padding');
+  assert.ok(css.includes('0 16px'), '0 16px button padding');
+  assert.ok(/gap:\s*7px/.test(css), '7px icon-label gap');
   assert.ok(css.includes('18px'), '18px dividers');
 }
 
