@@ -10,6 +10,8 @@ class FixtureEvent {
   constructor(type, options = {}) {
     this.type = type;
     this.target = options.target || null;
+    this.clientX = options.clientX || 0;
+    this.clientY = options.clientY || 0;
     this.bubbles = Boolean(options.bubbles);
     this.defaultPrevented = false;
   }
@@ -194,6 +196,8 @@ class FixtureMutationObserver {
 
 function createFixture() {
   FixtureMutationObserver.instances = [];
+  let hitStack = [];
+  let lastHitTestPoint = null;
   const document = new FixtureElement('#document');
   document.nodeType = 9;
   document.listeners = new Map();
@@ -201,6 +205,10 @@ function createFixture() {
   document.createElementNS = (_namespace, tag) => new FixtureElement(tag);
   document.createTextNode = (value) => new FixtureText(value);
   document.getElementById = (id) => document.querySelector(`#${id}`);
+  document.elementsFromPoint = (x, y) => {
+    lastHitTestPoint = { x, y };
+    return hitStack;
+  };
   document.documentElement = new FixtureElement('html');
   document.head = new FixtureElement('head');
   document.body = new FixtureElement('body');
@@ -247,6 +255,10 @@ function createFixture() {
     document,
     location,
     window,
+    setHitStack(elements) {
+      hitStack = elements;
+    },
+    lastHitTestPoint: () => lastHitTestPoint,
     topRow: () => document.querySelector('ytd-watch-metadata')?.querySelector('#top-row') || null,
     flushTimers() {
       while (timers.size) {
@@ -333,8 +345,19 @@ function testGroupPlacementAccessibilityAndUriLaunch() {
   const style = fixture.document.head.querySelector('style')?.textContent || '';
   assert.match(style, /:hover/);
   assert.match(style, /:focus-visible/);
-  assert.match(style, /currentColor/);
-  assert.match(style, /18px/);
+  assert.match(style, /outline:\s*2px solid currentColor/);
+  assert.match(style, /height:\s*40px/);
+  assert.match(style, /min-height:\s*40px/);
+  assert.match(style, /padding:\s*0\s+16px/);
+  assert.match(style, /border-radius:\s*20px/);
+  assert.match(style, /width:\s*20px/);
+  assert.match(style, /height:\s*20px/);
+  assert.match(style, /--yt-spec-badge-chip-background,\s*#f2f2f2/i);
+  assert.match(style, /--yt-spec-text-primary,\s*#0f0f0f/i);
+  assert.match(style, /html\[dark\][^{]*\{[^}]*--yt-spec-badge-chip-background,\s*#272727/is);
+  assert.match(style, /html\[dark\][^{]*\{[^}]*--yt-spec-text-primary,\s*#f1f1f1/is);
+  assert.match(style, /rgba\(0,\s*0,\s*0,\s*\.1\)/);
+  assert.match(style, /rgba\(255,\s*255,\s*255,\s*\.1\)/);
 }
 
 function testNavigationAndMutationsDoNotDuplicateAndReattach() {
@@ -411,7 +434,59 @@ function testContextMenuCapturesHoveredCardOrCurrentPage() {
   );
 }
 
+function testContextMenuHitTestingFindsLockupUnderVideoPreview() {
+  const fixture = createFixture();
+  const card = fixture.document.createElement('yt-lockup-view-model');
+  const watchLink = fixture.document.createElement('a');
+  watchLink.href = '/watch?v=lockup123&list=PLoverlay';
+  card.appendChild(watchLink);
+  fixture.document.body.appendChild(card);
+
+  const preview = fixture.document.createElement('ytd-video-preview');
+  fixture.document.body.appendChild(preview);
+  fixture.setHitStack([preview, card]);
+  preview.dispatchEvent(new FixtureEvent('contextmenu', {
+    bubbles: true,
+    clientX: 64,
+    clientY: 96,
+  }));
+
+  assert.equal(
+    fixture.window.__ytdlLastContextHref,
+    'https://www.youtube.com/watch?v=lockup123&list=PLoverlay',
+    'hit-testing skips a video-preview overlay and selects the underlying lockup recommendation',
+  );
+  assert.deepEqual(fixture.lastHitTestPoint(), { x: 64, y: 96 });
+}
+
+function testContextMenuSupportsPlaylistAndMusicVideoCards() {
+  const fixture = createFixture();
+  const cardCases = [
+    ['ytd-playlist-video-renderer', '/watch?v=playlist123', 'https://www.youtube.com/watch?v=playlist123'],
+    ['ytd-playlist-panel-video-renderer', '/shorts/shortPlaylist', 'https://www.youtube.com/shorts/shortPlaylist'],
+    ['ytmusic-two-row-item-renderer', '/watch?v=music123', 'https://www.youtube.com/watch?v=music123'],
+    ['ytmusic-responsive-list-item-renderer', '/watch?v=musicList123', 'https://www.youtube.com/watch?v=musicList123'],
+  ];
+
+  for (const [tagName, href, expectedHref] of cardCases) {
+    const card = fixture.document.createElement(tagName);
+    const link = fixture.document.createElement('a');
+    link.href = href;
+    card.appendChild(link);
+    fixture.document.body.appendChild(card);
+    link.dispatchEvent(new FixtureEvent('contextmenu', { bubbles: true }));
+
+    assert.equal(
+      fixture.window.__ytdlLastContextHref,
+      expectedHref,
+      `${tagName} captures its YouTube video destination`,
+    );
+  }
+}
+
+testContextMenuHitTestingFindsLockupUnderVideoPreview();
 testGroupPlacementAccessibilityAndUriLaunch();
 testNavigationAndMutationsDoNotDuplicateAndReattach();
 testContextMenuCapturesHoveredCardOrCurrentPage();
+testContextMenuSupportsPlaylistAndMusicVideoCards();
 console.log('YouTube userscript fixture tests passed');

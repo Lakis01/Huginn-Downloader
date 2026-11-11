@@ -23,6 +23,11 @@
     'ytd-rich-grid-media',
     'ytd-reel-item-renderer',
     'ytd-reel-video-renderer',
+    'yt-lockup-view-model',
+    'ytd-playlist-video-renderer',
+    'ytd-playlist-panel-video-renderer',
+    'ytmusic-two-row-item-renderer',
+    'ytmusic-responsive-list-item-renderer',
   ].join(', ');
   const MODES = [
     { mode: 'audio', label: 'Download audio', icon: 'audio' },
@@ -61,31 +66,41 @@
       [data-ytdl-controls] a {
         box-sizing: border-box;
         display: inline-flex;
-        min-height: 36px;
+        height: 40px;
+        min-height: 40px;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        padding: 0 12px;
+        gap: 8px;
+        padding: 0 16px;
         border: 0;
-        border-radius: 18px;
-        background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, .08));
-        color: var(--yt-spec-text-primary, currentColor);
+        border-radius: 20px;
+        background: var(--yt-spec-badge-chip-background, #f2f2f2);
+        color: var(--yt-spec-text-primary, #0f0f0f);
         font: 500 14px Roboto, Arial, sans-serif;
         line-height: 20px;
         text-decoration: none;
         white-space: nowrap;
       }
       [data-ytdl-controls] a:hover {
-        background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .12));
+        background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1));
       }
       [data-ytdl-controls] a:focus-visible {
+        background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, .1));
         outline: 2px solid currentColor;
         outline-offset: 2px;
       }
+      html[dark] [data-ytdl-controls] a {
+        background: var(--yt-spec-badge-chip-background, #272727);
+        color: var(--yt-spec-text-primary, #f1f1f1);
+      }
+      html[dark] [data-ytdl-controls] a:hover,
+      html[dark] [data-ytdl-controls] a:focus-visible {
+        background: var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .1));
+      }
       [data-ytdl-controls] svg {
-        width: 18px;
-        height: 18px;
-        flex: 0 0 18px;
+        width: 20px;
+        height: 20px;
+        flex: 0 0 20px;
         fill: none;
         stroke: currentColor;
         stroke-width: 1.8;
@@ -194,11 +209,20 @@
 
   function captureContextHref(event) {
     let href = window.location.href;
-    const card = event.target && event.target.closest
-      ? event.target.closest(CARD_SELECTOR)
-      : null;
+    const cards = [];
+    const addCardFor = (element) => {
+      const card = element && element.closest ? element.closest(CARD_SELECTOR) : null;
+      if (card && !cards.includes(card)) cards.push(card);
+    };
 
-    if (card) {
+    if (typeof document.elementsFromPoint === 'function') {
+      for (const element of document.elementsFromPoint(event.clientX, event.clientY)) {
+        addCardFor(element);
+      }
+    }
+    addCardFor(event.target);
+
+    for (const card of cards) {
       const link = Array.from(card.querySelectorAll('a')).find((candidate) => {
         const rawHref = candidate.getAttribute('href');
         if (!rawHref) return false;
@@ -212,7 +236,10 @@
         }
       });
 
-      if (link) href = new URL(link.getAttribute('href'), window.location.href).href;
+      if (link) {
+        href = new URL(link.getAttribute('href'), window.location.href).href;
+        break;
+      }
     }
 
     window.__ytdlLastContextHref = href;
