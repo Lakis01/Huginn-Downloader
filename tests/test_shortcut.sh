@@ -161,6 +161,10 @@ run_shortcut audio '' "$other_url"
 assert_launch audio "$other_url" 'empty first candidate fallback'
 pass 'empty first candidate falls through to valid second candidate'
 
+run_shortcut audio "$valid_url" "$other_url"
+assert_launch audio "$valid_url" 'first valid candidate ordering'
+pass 'first valid candidate wins over a different valid second candidate'
+
 second_payload="https://www.youtube.com/watch?v=2&title=O'Brien&x=1"
 run_shortcut video 'not a URL' "$second_payload"
 assert_launch video "$second_payload" 'second candidate shell metacharacters'
@@ -176,6 +180,16 @@ fi
 [[ ! -e "$CALL_ARGS" ]] || fail 'invalid custom-scheme first candidate launched Konsole'
 assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'candidate URI error report'
 pass 'invalid custom-scheme first candidate remains fail-closed'
+
+if PRIMARY_SELECTION=$other_url \
+    MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
+    CLIPBOARD_SELECTION="$valid_url" \
+    run_shortcut audio 'not a URL' 'yt-dlp://cut?url=%ZZ' > "$TMP/malformed-second.out" 2>&1; then
+    fail 'invalid custom-scheme second candidate unexpectedly succeeded'
+fi
+[[ ! -e "$CALL_ARGS" ]] || fail 'invalid custom-scheme second candidate launched Konsole'
+assert_file_contains "$TMP/malformed-second.out" 'Invalid yt-dlp URI' 'second candidate URI error report'
+pass 'malformed second custom-scheme candidate remains fail-closed after an invalid first'
 
 PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
     CLIPBOARD_SELECTION="$valid_url" run_shortcut video

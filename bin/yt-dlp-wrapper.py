@@ -29,7 +29,6 @@ _AUTH_ERROR_MARKERS = (
     "login required",
     "log in to",
     "authentication required",
-    "not a bot",
 )
 
 
@@ -52,7 +51,7 @@ def _is_auth_error(error):
     if not isinstance(error, subprocess.CalledProcessError):
         return False
     message = "\n".join(
-        str(output)
+        output.decode(errors="replace") if isinstance(output, bytes) else str(output)
         for output in (getattr(error, "stderr", None), getattr(error, "output", None))
         if output
     ).lower()

@@ -250,31 +250,35 @@ right-click menu when you want a specific card in a feed or sidebar.
 
 ## Firefox setup
 
-### External Application Launcher (manual per-app edits)
+### External Application Launcher (complete settings import)
 
-Do **not** import a settings export: its import replaces *all* extension
-settings, wiping unrelated apps. Edit the three existing **Audio**,
-**Video**, and **Cut** apps individually in the add-on's options:
+Use the generated complete settings export at
+`/home/gratis01/Downloads/external-application-button-preferences-fixed.json`.
+In the add-on's options, choose **Import Settings** and select that file.
+Importing replaces all extension settings, so **never import a partial or
+hand-built export**. This one complete import configures all three existing
+apps while preserving unrelated settings and icons; only one full import is
+needed.
+
+The three YouTube apps use these arguments:
 
 | Existing app | Arguments |
 | --- | --- |
-| Audio | `audio [PRE_SCRIPT]` |
-| Video | `video [PRE_SCRIPT]` |
-| Cut | `cut [PRE_SCRIPT]` |
+| Audio | `audio "[PRE_SCRIPT]" "[HREF]"` |
+| Video | `video "[PRE_SCRIPT]" "[HREF]"` |
+| Cut | `cut "[PRE_SCRIPT]" "[HREF]"` |
 
-For each app:
+The imported settings configure each app as follows:
 
-1. Keep its current executable (the installed `yt-dlp-shortcut.sh`); set
-   only the arguments column as above.
-2. Enable the `page`, `frame`, `link`, `image`, `audio`, and `video`
-   contexts.
-3. Set the document/page URL filter to YouTube pages, including
-   `https://www.youtube.com/*` and `https://music.youtube.com/*` (add
-   `https://youtube.com/*` / `https://m.youtube.com/*` if you use them).
-4. Leave the target pattern broad (default `*`). Do **not** narrow it to
-   `https:` — image/video previews can use `blob:` URLs even though the
-   containing document is YouTube.
-5. Enter this exact one-line expression in the app's **Pre JavaScript** field:
+1. Keep its current executable (`yt-dlp-shortcut.sh`) and enable the `page`,
+   `frame`, `link`, `image`, `audio`, and `video` contexts.
+2. Leave the target pattern (upper field) empty or broad (`*`). Do **not**
+   narrow it to `https:` — image/video previews can use `blob:` URLs even
+   though the containing document is YouTube.
+3. Set the document/page URL filter (lower field) to YouTube domains, including
+   `https://www.youtube.com/*`, `https://music.youtube.com/*`,
+   `https://youtube.com/*`, and `https://m.youtube.com/*`.
+4. Enter this exact one-line expression in the app's **Pre JavaScript** field:
 
    ```javascript
    document.currentScript.output = window.__ytdlLastContextHref || location.href;
@@ -345,7 +349,7 @@ URIs, and the external-application confirmation on a real watch page.
 ## Verification
 
 ```sh
-python3 -m unittest discover -s tests   # 36 tests: parser, tagging, wrapper, EAL settings
+python3 -m unittest discover -s tests   # 37 tests: parser, tagging, wrapper, EAL settings
 node tests/test_youtube_buttons.js      # userscript DOM fixture
 node --check firefox/youtube-ytdlp-buttons.user.js
 node --check tests/test_youtube_buttons.js

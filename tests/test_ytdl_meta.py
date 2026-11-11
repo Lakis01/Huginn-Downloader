@@ -284,6 +284,7 @@ class TagAudioFileTests(unittest.TestCase):
             seed["purl"] = ["https://example.invalid/purl"]
             seed["synopsis"] = ["seeded synopsis"]
             seed["comment"] = ["seeded comment"]
+            seed["url"] = ["https://example.invalid/legacy-url"]
             seed["webpage_url"] = ["https://example.invalid/seed"]
             seed.save()
 
@@ -316,7 +317,9 @@ class TagAudioFileTests(unittest.TestCase):
             self.assertIsInstance(tags["label"], list)
             self.assertEqual(tags["label"], ["Def Jam Recordings"])
             lowered = {key.lower() for key in tags.keys()}
-            for cleared in ("description", "purl", "synopsis", "comment", "webpage_url"):
+            for cleared in (
+                "description", "purl", "synopsis", "comment", "url", "webpage_url"
+            ):
                 self.assertNotIn(cleared, lowered)
 
             self.assertIn("metadata_block_picture", tags)
@@ -594,6 +597,8 @@ class WrapperTests(unittest.TestCase):
                 {"title": "wrong fallback", "channel": "Wrong Artist"},
             )
             stem_info_path = media_path.with_suffix(".info.json")
+            appended_info_path = Path(f"{media_path}.info.json")
+            appended_content = appended_info_path.read_text(encoding="utf-8")
             stem_info_path.write_text(
                 json.dumps({"title": "The Liam Lawson problem", "channel": "Tommo"}),
                 encoding="utf-8",
@@ -613,6 +618,8 @@ class WrapperTests(unittest.TestCase):
             self.assertEqual(tagged_metadata[0]["title"], "The Liam Lawson problem")
             self.assertEqual(tagged_metadata[0]["artist"], "Tommo")
             self.assertFalse(stem_info_path.exists())
+            self.assertTrue(appended_info_path.exists())
+            self.assertEqual(appended_info_path.read_text(encoding="utf-8"), appended_content)
             self.assertFalse(thumbnail.exists())
 
     def test_failed_retag_preserves_download_and_sidecars_and_skips_rsgain(self):
@@ -778,6 +785,32 @@ class WrapperTests(unittest.TestCase):
                 "firefox",
             )
             self.assertEqual(finalize.call_args.args[0], str(moved_media))
+        marker = "café sign-in challenge"
+        byte_error_commands = []
+
+        def fake_run(command, **kwargs):
+            byte_error_commands.append(command)
+            if len(byte_error_commands) == 1:
+                raise subprocess.CalledProcessError(
+                    1, command, stderr=marker.encode("utf-8")
+                )
+            return SimpleNamespace(stdout=json.dumps({"title": "Track"}))
+
+        with mock.patch.object(wrapper, "_AUTH_ERROR_MARKERS", (marker,)):
+            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                try:
+                    byte_info, byte_used_cookies = wrapper._parse_audio_with_access(
+                        "https://example.invalid/watch?v=bytes-auth"
+                    )
+                except wrapper._YtDlpError:
+                    byte_info, byte_used_cookies = None, False
+
+        self.assertIsNotNone(byte_info, "byte-valued auth stderr was not classified")
+        self.assertEqual(byte_info["title"], "Track")
+        self.assertTrue(byte_used_cookies)
+        self.assertEqual(len(byte_error_commands), 2)
+        self.assertNotIn("--cookies-from-browser", byte_error_commands[0])
+        self.assertIn("--cookies-from-browser", byte_error_commands[1])
 
     def test_cut_download_reuses_browser_cookies_after_auth_metadata_retry(self):
         wrapper = _load_wrapper(self)
@@ -848,12 +881,11 @@ class WrapperTests(unittest.TestCase):
     def test_non_auth_metadata_error_is_not_retried_with_browser_cookies(self):
         wrapper = _load_wrapper(self)
         calls = []
+        message = "ERROR: Unable to download webpage: HTTP Error 500"
 
         def fail_metadata(command, **kwargs):
             calls.append(command)
-            raise subprocess.CalledProcessError(
-                1, command, stderr="ERROR: Unable to download webpage: HTTP Error 500"
-            )
+            raise subprocess.CalledProcessError(1, command, stderr=message)
 
         with mock.patch.object(wrapper.subprocess, "run", side_effect=fail_metadata):
             with mock.patch("sys.stderr", new_callable=io.StringIO):
@@ -866,6 +898,17 @@ class WrapperTests(unittest.TestCase):
                         result = None
 
         self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("--cookies-from-browser", calls[0])
+
+        message = "A forum post says this scraper is not a bot."
+        calls.clear()
+        with mock.patch.object(wrapper.subprocess, "run", side_effect=fail_metadata):
+            with self.assertRaises(wrapper._YtDlpError):
+                wrapper._parse_audio_with_access(
+                    "https://example.invalid/watch?v=unrelated-not-a-bot"
+                )
+
         self.assertEqual(len(calls), 1)
         self.assertNotIn("--cookies-from-browser", calls[0])
 

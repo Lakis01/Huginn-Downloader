@@ -456,7 +456,7 @@ def sanitize_filename(text: str) -> str:
 
 
 _VORBIS_CLEAR_KEYS = frozenset(
-    {"description", "purl", "synopsis", "comment", "webpage_url"}
+    {"description", "purl", "synopsis", "comment", "url", "webpage_url"}
 )
 _MP4_CLEAR_FREEFORMS = frozenset({
     "----:com.apple.iTunes:DESCRIPTION",
