@@ -250,8 +250,14 @@ def finalize_audio_download(media_path, filename_suffix=""):
     """Tag an audio download transactionally, rename it, clean sidecars, gain."""
     media_path = Path(media_path).expanduser().resolve()
     info_path = _info_sidecar_path(media_path)
-    with info_path.open("r", encoding="utf-8") as sidecar:
-        info = json.load(sidecar)
+    try:
+        with info_path.open("r", encoding="utf-8") as sidecar:
+            info = json.load(sidecar)
+    except OSError as error:
+        reason = error.strerror or str(error)
+        raise _YtDlpError(
+            f"Unable to read yt-dlp info sidecar '{info_path}': {reason}"
+        ) from None
     meta = parse_info(info)
     thumbnail_path = _find_thumbnail(media_path, info)
 
@@ -299,7 +305,7 @@ def _download_audio_and_finalize(command, filename_suffix=""):
         raise _YtDlpError(_yt_dlp_error_text(error)) from None
     lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
     if not lines:
-        raise RuntimeError("yt-dlp did not report the post-move media filepath")
+        raise _YtDlpError("yt-dlp did not report the post-move media filepath")
     return finalize_audio_download(lines[-1], filename_suffix)
 
 
@@ -349,7 +355,10 @@ def download_video(url):
         "-o", "%(title)s.%(ext)s",
         url,
     ]
-    subprocess.run(command)
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as error:
+        raise _YtDlpError(_yt_dlp_error_text(error)) from None
 
 
 def interactive_cut(url):

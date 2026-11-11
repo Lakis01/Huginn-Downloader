@@ -868,6 +868,56 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("--cookies-from-browser", calls[0])
 
+    def test_main_reports_missing_post_move_filepath_without_traceback(self):
+        wrapper = _load_wrapper(self)
+
+        with mock.patch.object(
+            wrapper, "_parse_audio_with_access", return_value=(self._metadata(), False)
+        ):
+            with mock.patch.object(
+                wrapper.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=""),
+            ):
+                with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                    with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                        result = wrapper.main(
+                            ["yt-dlp-wrapper.py", "audio", "https://example.invalid/no-path"]
+                        )
+
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(result, 1)
+        self.assertIn("post-move media filepath", output)
+        self.assertNotIn("Traceback", output)
+
+    def test_main_reports_missing_info_sidecar_without_traceback(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media_path = Path(tmp) / "download-without-sidecar.opus"
+
+            def fake_download(command, **kwargs):
+                media_path.write_bytes(b"temporary generated media")
+                return SimpleNamespace(stdout=f"{media_path}\n")
+
+            with mock.patch.object(
+                wrapper, "_parse_audio_with_access", return_value=(self._metadata(), False)
+            ):
+                with mock.patch.object(
+                    wrapper.subprocess, "run", side_effect=fake_download
+                ):
+                    with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                            result = wrapper.main(
+                                ["yt-dlp-wrapper.py", "audio", "https://example.invalid/no-info"]
+                            )
+
+            output = stdout.getvalue() + stderr.getvalue()
+            self.assertEqual(result, 1)
+            self.assertIn(".info.json", output)
+            self.assertNotIn("Traceback", output)
+            self.assertFalse(media_path.with_suffix(".info.json").exists())
+            self.assertFalse(Path(f"{media_path}.info.json").exists())
+
     def test_cut_keeps_requested_ffmpeg_options_and_finalizes_without_embed_metadata(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:
@@ -933,6 +983,29 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("webp", command)
         self.assertIn("--embed-metadata", command)
         self.assertEqual(run.call_count, 1)
+
+    def test_main_reports_video_yt_dlp_failure_without_traceback(self):
+        wrapper = _load_wrapper(self)
+        calls = []
+        message = "ERROR: Video unavailable: access denied"
+
+        def fail_video(command, **kwargs):
+            calls.append((command, kwargs))
+            raise subprocess.CalledProcessError(1, command, stderr=message)
+
+        with mock.patch.object(wrapper.subprocess, "run", side_effect=fail_video):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "video", "https://example.invalid/video-error"]
+                    )
+
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][1].get("check"))
+        self.assertIn(message, output)
+        self.assertNotIn("Traceback", output)
 
 
 if __name__ == "__main__":
