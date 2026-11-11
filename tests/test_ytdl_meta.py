@@ -2,6 +2,7 @@ import os
 import importlib.util
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1006,6 +1007,64 @@ class WrapperTests(unittest.TestCase):
         self.assertTrue(calls[0][1].get("check"))
         self.assertIn(message, output)
         self.assertNotIn("Traceback", output)
+
+
+class OutputPathsRegressionTests(unittest.TestCase):
+    def test_relative_wrapper_template_resolves_inside_configured_paths(self):
+        if shutil.which("yt-dlp") is None:
+            self.skipTest("yt-dlp executable is not available")
+        wrapper = _load_wrapper(self)
+        meta = parse_info({"title": "Track", "channel": "Artist", "duration": 100})
+        template = wrapper._audio_output_template(meta)
+        self.assertEqual(template, "Artist - Track.%(ext)s")
+        self.assertFalse(os.path.isabs(template))
+        with tempfile.TemporaryDirectory() as tmp:
+            downloads = Path(tmp) / "Downloads"
+            info_path = Path(tmp) / "info.json"
+            info_path.write_text(
+                json.dumps({
+                    "id": "paths-regression",
+                    "title": "Track",
+                    "channel": "Artist",
+                    "ext": "webm",
+                    "formats": [{
+                        "format_id": "bestaudio",
+                        "url": "https://example.invalid/audio.webm",
+                        "ext": "webm",
+                        "acodec": "opus",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            config_path = Path(tmp) / "yt-dlp.conf"
+            config_path.write_text(f"--paths {downloads}\n", encoding="utf-8")
+            isolated_home = Path(tmp) / "home"
+            isolated_home.mkdir()
+            env = dict(
+                os.environ,
+                HOME=str(isolated_home),
+                XDG_CONFIG_HOME=str(isolated_home / ".config"),
+            )
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "--config-location", str(config_path),
+                    "--load-info-json", str(info_path),
+                    "--no-playlist",
+                    "-o", template,
+                    "--get-filename",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp,
+                check=True,
+            )
+            resolved = Path(result.stdout.strip())
+            if not resolved.is_absolute():
+                resolved = Path(tmp) / resolved
+            self.assertEqual(resolved.parent.resolve(), downloads.resolve())
+            self.assertEqual(resolved.name, "Artist - Track.webm")
 
 
 if __name__ == "__main__":
