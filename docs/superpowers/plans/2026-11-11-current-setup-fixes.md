@@ -74,11 +74,15 @@
 ### Task 4: Safe update of the real External Application Launcher apps
 
 **Files:**
-- Update the user's three existing EAL app records only via a complete export/import or official options UI.
+- Create: `firefox/patch_eal_settings.py`
+- Create: `tests/test_eal_settings.py`
+- Modify: `firefox/external-application-launcher-setup.md`
 
 - [ ] Confirm the real profile contains the three expected apps and retain their icons and all unrelated settings.
-- [ ] Update only their argument candidates and page/target filter fields.
-- [ ] If the full export or safe real-profile UI is unavailable, stop before importing/writing and request the full settings export or needed browser access; do not fabricate a partial export.
+- [ ] Test a full-export transformation with unrelated app/global preferences and unique icons; assert that only the three YouTube apps' args, target pattern, and document filter change.
+- [ ] Implement a JSON transformer that refuses incomplete exports or missing app names, preserves all top-level keys, app IDs, icons and unrelated apps, and updates arguments to `audio|video|cut "[PRE_SCRIPT]" "[HREF]"`, clears the upper target pattern, and sets YouTube domains in `filters`.
+- [ ] Run the transformer on the newest complete EAL export in `~/Downloads`, producing a new full import JSON there without editing the source exports or live Firefox profile.
+- [ ] Document the one-click full import and warn against importing partial hand-built JSON. If the supplied export is incomplete, stop and request a fresh full export.
 
 ### Task 5: Compatibility and final verification
 
