@@ -32,6 +32,24 @@ _AUTH_ERROR_MARKERS = (
     "log in to",
     "authentication required",
 )
+_LOAD_INFO_RETRY_MARKERS = (
+    "load-info-json",
+    "load info json",
+    "infojson",
+    "info-json",
+    "info json",
+    "http error 403",
+    "403: forbidden",
+    "expired",
+    "no video formats",
+    "requested format is not available",
+    "video unavailable",
+    "missing media url",
+    "missing a url",
+    "no media url",
+    "unable to extract",
+)
+_POSTPROCESSING_ERROR_MARKERS = ("postprocessing:", "ffmpeg")
 
 
 class _YtDlpError(RuntimeError):
@@ -58,6 +76,19 @@ def _is_auth_error(error):
         if output
     ).lower()
     return any(marker in message for marker in _AUTH_ERROR_MARKERS)
+
+
+def _is_retryable_load_info_error(error):
+    if not isinstance(error, subprocess.CalledProcessError):
+        return False
+    message = "\n".join(
+        output.decode(errors="replace") if isinstance(output, bytes) else str(output)
+        for output in (getattr(error, "stderr", None), getattr(error, "output", None))
+        if output
+    ).casefold()
+    if any(marker in message for marker in _POSTPROCESSING_ERROR_MARKERS):
+        return False
+    return any(marker in message for marker in _LOAD_INFO_RETRY_MARKERS)
 
 
 _YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
@@ -633,7 +664,9 @@ def interactive_cut(url, config=None):
                     ["yt-dlp", "--load-info-json", temp_info_path, *rest],
                     check=True, text=True, stdout=None, stderr=subprocess.PIPE,
                 )
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as error:
+                if not _is_retryable_load_info_error(error):
+                    raise _YtDlpError(_yt_dlp_error_text(error)) from None
                 _run_with_auth_retry(["yt-dlp", *rest, "--", url])
             filepath = _read_print_to_file(print_path)
             if auto_tag:

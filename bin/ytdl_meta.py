@@ -486,6 +486,9 @@ _MP4_CLEAR_FREEFORMS = frozenset({
     "----:com.apple.iTunes:LANGUAGE",
     "----:com.apple.iTunes:LANG",
 })
+_MP4_CLEAR_FREEFORMS_CASEFOLD = frozenset(
+    key.casefold() for key in _MP4_CLEAR_FREEFORMS
+)
 _MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt", "purl", "©url", "elng"})
 
 
@@ -621,7 +624,10 @@ def _tag_mp4_atoms(audio, meta, cover):
     from mutagen.mp4 import MP4Cover
 
     for key in list(audio.keys()):
-        if key in _MP4_CLEAR_ATOMS or key in _MP4_CLEAR_FREEFORMS:
+        if (
+            key in _MP4_CLEAR_ATOMS
+            or key.casefold() in _MP4_CLEAR_FREEFORMS_CASEFOLD
+        ):
             del audio[key]
 
     def set_atom(key, value):

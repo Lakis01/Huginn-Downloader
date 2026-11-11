@@ -4,6 +4,8 @@
 // background.js (menu creation + native dispatch) and content.js
 // (segmented pill mounting + context URL hit-testing).
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -574,6 +576,24 @@ function testBuildScript() {
   assert.ok(stat.mode & 0o111, 'build script is executable');
   const gi = readFile('.gitignore');
   assert.ok(gi.split('\n').some((line) => line.trim() === 'dist/' || line.trim() === 'dist' || line.trim() === '/dist/'), '.gitignore lists dist/');
+
+  const source = path.join(EXT, 'popup.js');
+  const archive = path.join(ROOT, 'dist', 'firefox-youtube-downloader.xpi');
+  const build = () => execFileSync('bash', [path.join(ROOT, 'scripts', 'build-xpi.sh')], { cwd: ROOT, stdio: 'ignore' });
+  const digest = () => crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+  const original = fs.statSync(source);
+  let firstDigest;
+  let touchedDigest;
+  try {
+    build();
+    firstDigest = digest();
+    fs.utimesSync(source, original.atimeMs / 1000, (original.mtimeMs + 10000) / 1000);
+    build();
+    touchedDigest = digest();
+  } finally {
+    fs.utimesSync(source, original.atimeMs / 1000, original.mtimeMs / 1000);
+  }
+  assert.equal(touchedDigest, firstDigest, 'XPI bytes are independent of source file mtimes');
 }
 
 async function main() {

@@ -120,8 +120,9 @@ if $CHECK_DEPS; then
         printf '  missing: Python libraries mutagen, Pillow\n'
     fi
     printf '\nSuggested dependencies (review; this command is not run):\n'
-    printf 'Debian 13.7 (GNOME): sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin wl-clipboard xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils\n'
-    printf 'LMDE 7 (Cinnamon): sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin wl-clipboard xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils\n'
+    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils\n'
+    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils\n'
+    printf 'GNOME usually includes kgx or ptyxis; install gnome-terminal only if desired. Clipboard tools: wl-clipboard on Wayland, xclip or xsel on X11.\n'
     exit 0
 fi
 

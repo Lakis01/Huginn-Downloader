@@ -35,12 +35,17 @@ It reports available and missing commands and prints these suggested package
 commands. Review the list first; the installer never runs `apt` for you:
 
 ```sh
-# Debian 13.7 (GNOME)
-sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin wl-clipboard xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
+# Debian 13.7 (GNOME, Wayland)
+sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
 
-# LMDE 7 (Cinnamon)
-sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin wl-clipboard xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
+# LMDE 7 (Cinnamon, X11)
+sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
 ```
+
+Debian GNOME normally includes `kgx` or `ptyxis`; install `gnome-terminal` only
+if you want that terminal. `wl-clipboard` provides Wayland clipboard support.
+LMDE Cinnamon defaults to X11, where `xclip` (or `xsel`) and
+`gnome-terminal` are the suggested clipboard and terminal tools.
 
 The downloader also needs `ffmpeg`, Python 3 with `mutagen` and Pillow,
 `yt-dlp`, and a JavaScript runtime such as Node.js. `rsgain` is optional; it
@@ -72,8 +77,9 @@ add these commands, assigning any unused key combinations:
 KDE users can add the installed **YouTube Audio Download**, **YouTube Video
 Download**, and **YouTube Interactive Cut Audio** desktop launchers under
 **System Settings → Keyboard → Shortcuts → Custom Shortcuts**. The shortcut
-uses the active media URL first, then selection/clipboard fallbacks; use the
-Firefox context menu for a specific hovered video card.
+resolves URLs in this order: explicit URL argument, primary selection, active
+media URL (MPRIS), then clipboard. Use the Firefox context menu for a specific
+hovered video card.
 
 ## Build and install
 
@@ -214,11 +220,12 @@ be edited.
 Run the repository checks from its root:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 71 tests
+python3 -m unittest discover -s tests -v  # 72 tests
 bash tests/test_shortcut.sh               # 42 checks: launcher, desktop entries, installer
 node tests/test_firefox_extension.js
 node tests/test_youtube_buttons.js
-bash -n install.sh bin/yt-dlp-shortcut.sh tests/test_shortcut.sh
+bash scripts/build-xpi.sh
+bash -n install.sh bin/yt-dlp-shortcut.sh tests/test_shortcut.sh scripts/build-xpi.sh
 desktop-file-validate desktop/*.desktop
 ./install.sh                              # no-write dry run
 ```

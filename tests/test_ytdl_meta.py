@@ -366,6 +366,7 @@ class TagAudioFileTests(unittest.TestCase):
                 ("SYNOPSIS", "old synopsis"),
                 ("COMMENT", "old comment"),
                 ("WEBPAGE_URL", "https://example.invalid/old"),
+                ("language", "old language"),
             ):
                 seed[f"----:com.apple.iTunes:{descriptor}"] = [
                     MP4FreeForm(value.encode(), dataformat=MP4FreeForm.FORMAT_TEXT)
@@ -412,6 +413,7 @@ class TagAudioFileTests(unittest.TestCase):
                 "desc", "purl", "©cmt", "----:com.apple.iTunes:DESCRIPTION",
                 "----:com.apple.iTunes:URL", "----:com.apple.iTunes:SYNOPSIS",
                 "----:com.apple.iTunes:COMMENT", "----:com.apple.iTunes:WEBPAGE_URL",
+                "----:com.apple.iTunes:language",
             ):
                 self.assertNotIn(stale, tagged)
             self.assertIn("covr", tagged)
@@ -1245,6 +1247,42 @@ class WrapperTests(unittest.TestCase):
             finalize.assert_called_once()
             self.assertEqual(finalize.call_args.args[0], str(moved_media))
             self.assertEqual(result, str(moved_media))
+
+    def test_cut_does_not_retry_load_info_json_failure_from_ffmpeg(self):
+        wrapper = _load_wrapper(self)
+        calls = []
+        url = "https://example.invalid/watch?v=cut"
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            if "--dump-json" in command:
+                return SimpleNamespace(
+                    stdout=json.dumps(
+                        {"title": "Track", "channel": "Artist", "duration": 100}
+                    )
+                )
+            if "--load-info-json" in command:
+                raise subprocess.CalledProcessError(
+                    1,
+                    command,
+                    stderr="ERROR: Postprocessing: ffmpeg exited with code 1",
+                )
+            self.fail("FFmpeg failure must not retry the live URL")
+
+        config = {"download_dir": None, "auto_tag": False, "rsgain": False}
+        with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                with mock.patch(
+                    "builtins.input",
+                    side_effect=["0:10", "0:50", "117", "2", "audio"],
+                ):
+                    with self.assertRaisesRegex(wrapper._YtDlpError, "Postprocessing"):
+                        wrapper.interactive_cut(url, config)
+
+        cut_commands = [command for command in calls if "--download-sections" in command]
+        self.assertEqual(len(cut_commands), 1)
+        self.assertIn("--load-info-json", cut_commands[0])
+        self.assertFalse(any(command[-2:] == ["--", url] for command in cut_commands))
 
     def test_final_members_only_error_is_clear_and_does_not_print_traceback(self):
         wrapper = _load_wrapper(self)

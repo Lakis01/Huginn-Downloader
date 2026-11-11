@@ -59,7 +59,10 @@ by_name = {path.relative_to(src).as_posix(): path for path in files}
 out.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
     for name in names:
-        archive.write(by_name[name], name)
+        info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.external_attr = 0o100644 << 16
+        archive.writestr(info, by_name[name].read_bytes())
 
 with zipfile.ZipFile(out) as archive:
     archived = archive.namelist()
