@@ -14,9 +14,17 @@ to the corresponding value below:
 
 | Existing app | Arguments |
 | --- | --- |
-| Audio | `audio [PRE_SCRIPT]` |
-| Video | `video [PRE_SCRIPT]` |
-| Cut | `cut [PRE_SCRIPT]` |
+| Audio | `audio "[PRE_SCRIPT]" "[HREF]"` |
+| Video | `video "[PRE_SCRIPT]" "[HREF]"` |
+| Cut | `cut "[PRE_SCRIPT]" "[HREF]"` |
+
+Each quoted placeholder is passed as a separate argument with no shell
+evaluation. The launcher uses the first candidate that is a valid YouTube
+watch/shorts/music URL: `[PRE_SCRIPT]` (the right-clicked card link, or the
+current page URL) first, then `[HREF]` (the clicked link target) as a safe
+fallback. Invalid or empty first candidates fall through to the second; if
+neither is valid, the launcher keeps its existing primary-selection, active
+media, and clipboard fallbacks.
 
 For each app:
 
@@ -35,10 +43,12 @@ For each app:
    ```
 
 The `[PRE_SCRIPT]` argument is replaced with the value assigned to
-`document.currentScript.output`. The Audio, Video, and Cut modes then pass that
-URL to the existing `yt-dlp-shortcut.sh` launcher. A right-click on a card uses
-its own `/watch` or `/shorts/` link; a right-click elsewhere uses the current
-page URL.
+`document.currentScript.output`, and `[HREF]` is replaced with the clicked
+link's URL. The Audio, Video, and Cut modes then pass those two candidates to
+the existing `yt-dlp-shortcut.sh` launcher. A right-click on a card uses its
+own `/watch` or `/shorts/` link; a right-click elsewhere uses the current
+page URL. Keep the quotes exactly as shown so URLs containing `&` or `'`
+arrive intact as separate arguments.
 
 **Do not import a partial External Application Launcher settings export.** Its
 import operation replaces all extension settings, including apps and unrelated

@@ -143,6 +143,30 @@ PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='QString "xesam:url": "https://www.you
 assert_launch audio "$valid_url" 'explicit URL precedence'
 pass 'valid explicit URL takes precedence over all fallbacks'
 
+run_shortcut audio 'https://youtube.com.evil.invalid/watch?v=bad' "$valid_url"
+assert_launch audio "$valid_url" 'invalid first candidate fallback'
+pass 'invalid first candidate falls through to valid second candidate'
+
+run_shortcut audio '' "$other_url"
+assert_launch audio "$other_url" 'empty first candidate fallback'
+pass 'empty first candidate falls through to valid second candidate'
+
+second_payload="https://www.youtube.com/watch?v=2&title=O'Brien&x=1"
+run_shortcut video 'not a URL' "$second_payload"
+assert_launch video "$second_payload" 'second candidate shell metacharacters'
+[[ ! -e "$TMP/injected" ]] || fail 'second-candidate URL data was evaluated by a shell'
+pass 'second candidate preserves apostrophes and ampersands without evaluation'
+
+if PRIMARY_SELECTION=$other_url \
+    MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
+    CLIPBOARD_SELECTION="$valid_url" \
+    run_shortcut audio 'yt-dlp://cut?url=%ZZ' "$valid_url" > "$TMP/malformed.out" 2>&1; then
+    fail 'invalid custom-scheme first candidate unexpectedly succeeded'
+fi
+[[ ! -e "$CALL_ARGS" ]] || fail 'invalid custom-scheme first candidate launched Konsole'
+assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'candidate URI error report'
+pass 'invalid custom-scheme first candidate remains fail-closed'
+
 PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
     CLIPBOARD_SELECTION="$valid_url" run_shortcut video
 assert_launch video "$other_url" 'primary selection precedence'

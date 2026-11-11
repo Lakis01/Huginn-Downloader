@@ -7,9 +7,11 @@ EXPLICIT_URL=
 URI_ARGUMENT=
 
 usage() {
-    printf 'Usage: %s [audio|video|cut] [URL]\n       %s [--uri] yt-dlp://<audio|video|cut>?url=<encoded-URL>\n' \
+    printf 'Usage: %s [audio|video|cut] [URL1 [URL2]]\n       %s [--uri] yt-dlp://<audio|video|cut>?url=<encoded-URL>\n' \
         "$SCRIPT_NAME" "$SCRIPT_NAME" >&2
 }
+
+CANDIDATES=()
 
 if [[ ${1:-} == audio || ${1:-} == video || ${1:-} == cut ]]; then
     MODE=$1
@@ -26,15 +28,14 @@ case $# in
         elif [[ $1 == yt-dlp://* ]]; then
             URI_ARGUMENT=$1
         else
-            EXPLICIT_URL=$1
+            CANDIDATES=("$1")
         fi
         ;;
     2)
         if [[ $1 == --uri ]]; then
             URI_ARGUMENT=$2
         else
-            usage
-            exit 2
+            CANDIDATES=("$1" "$2")
         fi
         ;;
     *)
@@ -138,8 +139,24 @@ if [[ -n $URI_ARGUMENT ]]; then
 fi
 
 URL=
-if [[ -n $EXPLICIT_URL ]] && is_youtube_url "$EXPLICIT_URL"; then
+if [[ -n $EXPLICIT_URL ]]; then
     URL=$EXPLICIT_URL
+fi
+if [[ -z $URL ]]; then
+    for candidate in ${CANDIDATES[@]+"${CANDIDATES[@]}"}; do
+        if [[ $candidate == yt-dlp://* ]]; then
+            if ! parse_uri "$candidate"; then
+                printf 'Invalid yt-dlp URI: %s\n' "$candidate" >&2
+                exit 2
+            fi
+            URL=$EXPLICIT_URL
+            break
+        fi
+        if [[ -n $candidate ]] && is_youtube_url "$candidate"; then
+            URL=$candidate
+            break
+        fi
+    done
 fi
 
 if [[ -z $URL ]]; then
