@@ -259,4 +259,19 @@ fi
 assert_file_contains "$TMP/conflict.out" 'is a directory' 'installer destination conflict report'
 pass 'installer detects conflicting destination directories before making changes'
 
+config_home="$TMP/config-home"
+mkdir -p "$config_home/.config/yt-dlp"
+printf -- '--no-mtime\n-o ~/Downloads/%%(title)s.%%(ext)s\n' > "$config_home/.config/yt-dlp/config"
+cp -- "$config_home/.config/yt-dlp/config" "$TMP/yt-dlp-config.orig"
+HOME="$config_home" "$INSTALLER" --install > "$TMP/config-preserve.out"
+cmp -s "$TMP/yt-dlp-config.orig" "$config_home/.config/yt-dlp/config" \
+    || fail 'installer modified the pre-existing yt-dlp config'
+pass 'installer preserves a pre-existing yt-dlp config byte-for-byte'
+
+fresh_home="$TMP/fresh-home"
+HOME="$fresh_home" "$INSTALLER" --install > "$TMP/fresh-config.out"
+[[ ! -e "$fresh_home/.config/yt-dlp/config" ]] \
+    || fail 'installer created a yt-dlp config in a fresh HOME'
+pass 'installer creates no yt-dlp config in a fresh HOME'
+
 printf '1..%s\n' "$PASS"

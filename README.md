@@ -37,6 +37,32 @@ Firefox side (add-ons, not PATH commands):
   right-click context actions.
 - Tampermonkey for the on-page Audio / Video / Cut buttons.
 
+### Fresh-install dependency matrix (LMDE/Debian GNOME/Cinnamon)
+
+Common on every desktop — provide the executable/library, whatever Debian
+package name supplies it on that release:
+
+- `ffmpeg` — audio extraction/conversion and cover-art handling.
+- Python 3 with the `mutagen` and `Pillow` libraries — metadata parsing
+  and container-native tagging (no `pip install` performed).
+- `rsgain` — per-track ReplayGain for audio/cut outputs.
+- A JavaScript runtime for yt-dlp (e.g. Node.js) — yt-dlp needs one for
+  some extractors.
+
+Desktop/session-dependent roles — one implementation per role; rows name
+the capability required, not a guaranteed identical Debian package name:
+
+| Role | This (KDE Plasma / Wayland) setup | GNOME/Cinnamon or X11 equivalent |
+| --- | --- | --- |
+| Held terminal for the shortcut launcher | `konsole` | A GNOME/Cinnamon terminal (the launcher Exec assumes `konsole`; adjust when porting) |
+| Clipboard/primary-selection reader | `wl-paste` (Wayland) | `xclip` / `xsel` (X11) |
+| Active-media (MPRIS) reader | Plasma Browser Integration via `qdbus6` (or `qdbus`) | `playerctl` |
+| Notifications | `notify-send` | `notify-send` (same role) |
+| URI-handler registration | `xdg-mime` (xdg-utils role) | same |
+| Desktop entry validation | `desktop-file-validate` (desktop-file-utils role) | same |
+| Right-click actions | External Application Launcher plus its native host | same |
+| On-page buttons | Tampermonkey | same |
+
 ## What each mode does
 
 All downloads land in `~/Downloads` (via the user's existing yt-dlp config;
@@ -141,6 +167,22 @@ What `--install` does:
    them to `~/.local/share/applications` (mode 644).
 3. Registers `net.local.yt-dlp-uri.desktop` as the handler for
    `x-scheme-handler/yt-dlp` via `xdg-mime`.
+
+### yt-dlp config policy
+
+The installer never creates or overwrites `~/.config/yt-dlp/config`: it
+only touches `~/.local/bin`, `~/.local/share/applications`, and the
+`x-scheme-handler/yt-dlp` MIME registration. Downloads resolve through
+the user's existing yt-dlp config (currently `~/Downloads`); the wrapper
+never passes `--ignore-config`. Setup on future machines must preserve an
+existing config and create one only if absent.
+
+### Download directory portability
+
+The requested `~/Music/Youtube Downloads` directory for other hosts is
+future portability scope, not a current installer option. This checkout
+keeps the current `~/Downloads` behavior; no other machine's config is
+created here.
 
 ### Rollback
 
@@ -303,11 +345,11 @@ URIs, and the external-application confirmation on a real watch page.
 ## Verification
 
 ```sh
-python3 -m unittest discover -s tests   # 21 tests: parser, tagging, wrapper
+python3 -m unittest discover -s tests   # 36 tests: parser, tagging, wrapper, EAL settings
 node tests/test_youtube_buttons.js      # userscript DOM fixture
 node --check firefox/youtube-ytdlp-buttons.user.js
 node --check tests/test_youtube_buttons.js
-bash tests/test_shortcut.sh             # 14 checks: launcher, desktop files, installer
+bash tests/test_shortcut.sh             # 23 checks: launcher, desktop files, installer
 bash -n bin/yt-dlp-shortcut.sh && bash -n install.sh
 python3 -m py_compile bin/ytdl_meta.py bin/yt-dlp-wrapper.py
 desktop-file-validate desktop/*.desktop
