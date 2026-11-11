@@ -13,6 +13,7 @@ from unittest import mock
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
+import ytdl_meta
 from ytdl_meta import parse_info, sanitize_filename, tag_audio_file
 
 
@@ -237,6 +238,15 @@ def _make_silence_opus(path):
         ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
          "-i", "sine=frequency=440:duration=1",
          "-c:a", "libopus", path],
+        check=True,
+    )
+
+
+def _make_silence_ogg(path):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1",
+         "-c:a", "libvorbis", path],
         check=True,
     )
 
@@ -537,6 +547,138 @@ class TagAudioFileTests(unittest.TestCase):
 
             picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
             self.assertEqual((picture.width, picture.height), (1280, 720))
+
+
+class LanguageTagTests(unittest.TestCase):
+    @staticmethod
+    def _make_audio(path):
+        suffix = Path(path).suffix.lower()
+        if suffix == ".opus":
+            _make_silence_opus(path)
+        elif suffix == ".ogg":
+            _make_silence_ogg(path)
+        elif suffix == ".mp3":
+            _make_silence_mp3(path)
+        else:
+            _make_silence_m4a(path)
+
+    @staticmethod
+    def _seed_language_tags(path):
+        suffix = Path(path).suffix.lower()
+        if suffix in {".opus", ".ogg"}:
+            if suffix == ".opus":
+                from mutagen.oggopus import OggOpus as Audio
+            else:
+                from mutagen.oggvorbis import OggVorbis as Audio
+            audio = Audio(path)
+            audio["LANGUAGE"] = ["eng"]
+            audio["LANG"] = ["en"]
+            audio.save()
+        elif suffix == ".mp3":
+            from mutagen.id3 import TLAN, TXXX
+            from mutagen.mp3 import MP3
+
+            audio = MP3(path)
+            if audio.tags is None:
+                audio.add_tags()
+            audio.tags.add(TLAN(encoding=3, text=["eng"]))
+            audio.tags.add(TXXX(encoding=3, desc="LANGUAGE", text=["en"]))
+            audio.tags.add(TXXX(encoding=3, desc="LANG", text=["en"]))
+            audio.save()
+        else:
+            from mutagen.mp4 import MP4, MP4FreeForm
+
+            audio = MP4(path)
+            for key, value in (
+                ("elng", "eng"),
+                ("----:com.apple.iTunes:LANGUAGE", "en"),
+                ("----:com.apple.iTunes:LANG", "en"),
+            ):
+                audio[key] = [
+                    MP4FreeForm(value.encode(), dataformat=MP4FreeForm.FORMAT_TEXT)
+                    if key.startswith("----:")
+                    else value
+                ]
+            audio.save()
+
+    @staticmethod
+    def _assert_language_tags_absent(test_case, path):
+        suffix = Path(path).suffix.lower()
+        if suffix in {".opus", ".ogg"}:
+            if suffix == ".opus":
+                from mutagen.oggopus import OggOpus as Audio
+            else:
+                from mutagen.oggvorbis import OggVorbis as Audio
+            keys = {key.casefold() for key in Audio(path).tags.keys()}
+            test_case.assertNotIn("language", keys)
+            test_case.assertNotIn("lang", keys)
+        elif suffix == ".mp3":
+            from mutagen.mp3 import MP3
+
+            tags = MP3(path).tags
+            test_case.assertEqual(tags.getall("TLAN"), [])
+            test_case.assertEqual(
+                [frame for frame in tags.getall("TXXX")
+                 if str(frame.desc).casefold() in {"language", "lang"}],
+                [],
+            )
+        else:
+            from mutagen.mp4 import MP4
+
+            tags = MP4(path)
+            test_case.assertFalse(
+                {key.casefold() for key in tags.keys()}
+                & {"elng", "----:com.apple.itunes:language", "----:com.apple.itunes:lang"}
+            )
+
+    def test_tagging_and_standalone_stripping_remove_language_tags_in_all_audio_formats(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for suffix in (".opus", ".ogg", ".mp3", ".m4a"):
+                with self.subTest(suffix=suffix):
+                    path = os.path.join(tmp, f"track{suffix}")
+                    self._make_audio(path)
+
+                    self._seed_language_tags(path)
+                    tag_audio_file(path, {})
+                    self._assert_language_tags_absent(self, path)
+
+                    self._seed_language_tags(path)
+                    ytdl_meta.strip_language_tags(path)
+                    self._assert_language_tags_absent(self, path)
+
+    def test_strip_language_tags_is_noop_for_unsupported_extensions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.txt"
+            path.write_text("not audio", encoding="utf-8")
+
+            ytdl_meta.strip_language_tags(str(path))
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "not audio")
+
+
+class CoverEncodingTests(unittest.TestCase):
+    def test_cover_bytes_are_optimized_jpeg_at_quality_88(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thumbnail = os.path.join(tmp, "thumbnail.png")
+            Image.new("RGB", (640, 480), (80, 120, 160)).save(thumbnail, "PNG")
+            save_options = {}
+            original_save = Image.Image.save
+
+            def capture_save(image, fp, format=None, **params):
+                save_options.update(params)
+                return original_save(image, fp, format=format, **params)
+
+            with mock.patch.object(Image.Image, "save", new=capture_save):
+                data, mime, _width, _height = ytdl_meta._cover_image_bytes(thumbnail, False)
+
+        self.assertEqual(mime, "image/jpeg")
+        self.assertNotEqual(mime, "image/webp")
+        self.assertEqual(data[:2], b"\xff\xd8")
+        self.assertEqual(data[-2:], b"\xff\xd9")
+        self.assertEqual(save_options.get("quality"), 88)
+        self.assertIs(save_options.get("optimize"), True)
 
 
 class WrapperTests(unittest.TestCase):

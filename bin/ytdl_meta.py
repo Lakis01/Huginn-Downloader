@@ -456,7 +456,10 @@ def sanitize_filename(text: str) -> str:
 
 
 _VORBIS_CLEAR_KEYS = frozenset(
-    {"description", "purl", "synopsis", "comment", "url", "webpage_url"}
+    {
+        "description", "purl", "synopsis", "comment", "url", "webpage_url",
+        "language", "lang",
+    }
 )
 _MP4_CLEAR_FREEFORMS = frozenset({
     "----:com.apple.iTunes:DESCRIPTION",
@@ -480,8 +483,10 @@ _MP4_CLEAR_FREEFORMS = frozenset({
     "----:com.apple.iTunes:RECORDINGDATE",
     "----:com.apple.iTunes:STUDIO",
     "----:com.apple.iTunes:INSTRUMENT",
+    "----:com.apple.iTunes:LANGUAGE",
+    "----:com.apple.iTunes:LANG",
 })
-_MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt", "purl", "©url"})
+_MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt", "purl", "©url", "elng"})
 
 
 def _cover_image_bytes(thumbnail_path, is_official):
@@ -499,7 +504,7 @@ def _cover_image_bytes(thumbnail_path, is_official):
         import io
 
         buffer = io.BytesIO()
-        frame.save(buffer, "JPEG", quality=90)
+        frame.save(buffer, "JPEG", quality=88, optimize=True)
         return buffer.getvalue(), "image/jpeg", width, height
 
 
@@ -711,10 +716,12 @@ def _tag_id3_frames(audio, meta, cover):
     user_descriptions = {
         "ARTISTS", "LABEL", "DISTRIBUTOR", "RECORDINGDATE", "STUDIO", "INSTRUMENT",
         "DESCRIPTION", "URL", "SYNOPSIS", "COMMENT", "PURL", "WEBPAGE_URL",
+        "LANGUAGE", "LANG",
     }
     for frame in list(tags.getall("TXXX")):
         if str(frame.desc).strip().upper() in user_descriptions:
             del tags[frame.HashKey]
+    tags.delall("TLAN")
 
     def set_text(frame_class, value):
         tags.delall(frame_class.__name__)
@@ -765,6 +772,75 @@ def _tag_id3_frames(audio, meta, cover):
         tags.add(
             APIC(encoding=3, mime=mime, type=3, desc="", data=data)
         )
+
+
+def _strip_language_tags_from_audio(audio, suffix):
+    """Remove stream-inherited language tags from an opened Mutagen object."""
+    if suffix in {".opus", ".ogg"}:
+        tags = audio.tags
+        if tags is None:
+            return False
+        removed = False
+        for key in list(tags.keys()):
+            if key.casefold() in {"language", "lang"}:
+                del tags[key]
+                removed = True
+        return removed
+
+    if suffix == ".mp3":
+        tags = audio.tags
+        if tags is None:
+            return False
+        removed = bool(tags.getall("TLAN"))
+        tags.delall("TLAN")
+        for frame in list(tags.getall("TXXX")):
+            if str(frame.desc).strip().casefold() in {"language", "lang"}:
+                del tags[frame.HashKey]
+                removed = True
+        return removed
+
+    if suffix in {".m4a", ".mp4", ".m4b"}:
+        removed = False
+        language_keys = {
+            "elng",
+            "----:com.apple.itunes:language",
+            "----:com.apple.itunes:lang",
+        }
+        for key in list(audio.keys()):
+            if key.casefold() in language_keys:
+                del audio[key]
+                removed = True
+        return removed
+    return False
+
+
+def strip_language_tags(filepath: str) -> None:
+    """Remove inherited language tags from a supported audio file in place."""
+    import os
+
+    suffix = os.path.splitext(str(filepath))[1].lower()
+    if suffix in {".opus", ".ogg"}:
+        if suffix == ".opus":
+            from mutagen.oggopus import OggOpus
+
+            audio = OggOpus(filepath)
+        else:
+            from mutagen.oggvorbis import OggVorbis
+
+            audio = OggVorbis(filepath)
+    elif suffix == ".mp3":
+        from mutagen.mp3 import MP3
+
+        audio = MP3(filepath)
+    elif suffix in {".m4a", ".mp4", ".m4b"}:
+        from mutagen.mp4 import MP4
+
+        audio = MP4(filepath)
+    else:
+        return
+
+    if _strip_language_tags_from_audio(audio, suffix):
+        audio.save()
 
 
 def tag_audio_file(filepath, meta, thumbnail_path=None) -> None:
