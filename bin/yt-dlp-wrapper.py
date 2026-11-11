@@ -8,8 +8,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 
-from ytdl_meta import parse_info, sanitize_filename, tag_audio_file
+from ytdl_config import effective_download_dir, load_config
+from ytdl_meta import parse_info, sanitize_filename, strip_language_tags, tag_audio_file
 
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
@@ -58,6 +60,37 @@ def _is_auth_error(error):
     return any(marker in message for marker in _AUTH_ERROR_MARKERS)
 
 
+_YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+
+
+def is_youtube_url(url: str) -> bool:
+    """Check whether a URL belongs to YouTube (including subdomains)."""
+    try:
+        host = urllib.parse.urlsplit(url).hostname or ""
+    except ValueError:
+        return False
+    host = host.lower().rstrip(".")
+    return any(host == base or host.endswith(f".{base}") for base in _YOUTUBE_HOSTS)
+
+
+def wait_for_keypress(prompt: str = "\nPress any key to close...") -> None:
+    """Wait for a single keypress in raw/cbreak mode (interactive TTY only)."""
+    if not sys.stdin.isatty():
+        return
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    import termios
+    import tty
+
+    descriptor = sys.stdin.fileno()
+    attributes = termios.tcgetattr(descriptor)
+    try:
+        tty.setcbreak(descriptor)
+        sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
+
+
 def _metadata_command(url, browser=None):
     command = ["yt-dlp"]
     if browser:
@@ -66,8 +99,8 @@ def _metadata_command(url, browser=None):
     return command
 
 
-def _parse_audio_with_access(url):
-    """Return metadata and whether the browser cookies were needed to read it."""
+def _fetch_info_with_access(url):
+    """Return raw info JSON and whether browser cookies were needed to read it."""
     command = _metadata_command(url)
     use_browser_cookies = False
     try:
@@ -97,6 +130,12 @@ def _parse_audio_with_access(url):
         info = json.loads(result.stdout)
     except Exception as error:
         raise _YtDlpError(f"yt-dlp returned invalid metadata: {error}") from None
+    return info, use_browser_cookies
+
+
+def _parse_audio_with_access(url):
+    """Return metadata and whether the browser cookies were needed to read it."""
+    info, use_browser_cookies = _fetch_info_with_access(url)
     return parse_info(info), use_browser_cookies
 
 
@@ -245,9 +284,70 @@ def _commit_tagged_file(temp_path, original_path, target_path):
         return candidate
 
 
-def finalize_audio_download(media_path, filename_suffix=""):
+def _read_track_gain(final_path):
+    """Best-effort read-back of the applied ReplayGain value for the summary."""
+    try:
+        suffix = Path(final_path).suffix.lower()
+        if suffix == ".opus":
+            from mutagen.oggopus import OggOpus
+
+            tags = OggOpus(final_path).tags
+            values = tags.get("REPLAYGAIN_TRACK_GAIN", []) if tags is not None else []
+            return values[0] if values else None
+        if suffix == ".ogg":
+            from mutagen.oggvorbis import OggVorbis
+
+            tags = OggVorbis(final_path).tags
+            values = tags.get("REPLAYGAIN_TRACK_GAIN", []) if tags is not None else []
+            return values[0] if values else None
+        if suffix == ".mp3":
+            from mutagen.mp3 import MP3
+
+            audio = MP3(final_path)
+            if audio.tags is None:
+                return None
+            for frame in audio.tags.getall("TXXX:REPLAYGAIN_TRACK_GAIN"):
+                if frame.text:
+                    return str(frame.text[0])
+            return None
+        if suffix in {".m4a", ".mp4", ".m4b"}:
+            from mutagen.mp4 import MP4
+
+            values = MP4(final_path).get(
+                "----:com.apple.iTunes:REPLAYGAIN_TRACK_GAIN", []
+            )
+            if values:
+                raw = bytes(values[0])
+                return raw.decode("utf-8", errors="replace")
+            return None
+        return None
+    except Exception:
+        return None
+
+
+def _run_rsgain(final_path):
+    """Apply ReplayGain normalization and report the resulting gain."""
+    subprocess.run(["rsgain", "custom", "-s", "i", str(final_path)], check=True)
+    gain = _read_track_gain(final_path)
+    if gain:
+        print(f"ReplayGain applied: {gain} ({final_path})")
+    else:
+        print(f"ReplayGain normalization complete: {final_path}")
+
+
+def finalize_audio_download(media_path, filename_suffix="", config=None):
     """Tag an audio download transactionally, rename it, clean sidecars, gain."""
+    cfg = dict(config) if config is not None else load_config()
+    auto_tag = cfg.get("auto_tag", True)
+    do_rsgain = cfg.get("rsgain", False)
     media_path = Path(media_path).expanduser().resolve()
+    if not auto_tag:
+        print("Skipping automatic tag extraction (auto_tag=false).")
+        strip_language_tags(str(media_path))
+        if do_rsgain:
+            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+            _run_rsgain(str(media_path))
+        return str(media_path)
     info_path = _info_sidecar_path(media_path)
     try:
         with info_path.open("r", encoding="utf-8") as sidecar:
@@ -258,6 +358,14 @@ def finalize_audio_download(media_path, filename_suffix=""):
             f"Unable to read yt-dlp info sidecar '{info_path}': {reason}"
         ) from None
     meta = parse_info(info)
+    if meta["is_tagged"]:
+        print("\n\033[1;32mDetected High-Quality Auto-Generated Audio track.\033[0m")
+        print(
+            f"  Title:    {meta['title']}\n  Artist:   {meta['artist']}"
+            f"\n  Album:    {meta['album']}\n  Date:     {meta['date']}\n"
+        )
+    else:
+        print("\n\033[1;34mStandard track detected.\033[0m\n")
     thumbnail_path = _find_thumbnail(media_path, info)
 
     target_path = media_path.with_name(
@@ -271,6 +379,7 @@ def finalize_audio_download(media_path, filename_suffix=""):
 
     try:
         shutil.copy2(media_path, temp_path)
+        print("[2/2] Automatic tag extraction & cover art...")
         tag_audio_file(
             str(temp_path), meta, str(thumbnail_path) if thumbnail_path else None
         )
@@ -282,9 +391,9 @@ def finalize_audio_download(media_path, filename_suffix=""):
     info_path.unlink(missing_ok=True)
     if thumbnail_path:
         thumbnail_path.unlink(missing_ok=True)
-    subprocess.run(
-        ["rsgain", "custom", "-s", "i", str(final_path)], check=True
-    )
+    if do_rsgain:
+        print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+        _run_rsgain(str(final_path))
     return str(final_path)
 
 
@@ -292,77 +401,137 @@ def _audio_output_template(meta, suffix=""):
     return f"{_final_stem(meta, suffix)}.%(ext)s"
 
 
-def _download_audio_and_finalize(command, filename_suffix=""):
+def _run_with_auth_retry(command):
+    """Run yt-dlp with TTY progress, retrying once with Firefox cookies on auth errors."""
     try:
-        result = subprocess.run(
-            command,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        )
+        subprocess.run(command, check=True, text=True, stdout=None, stderr=subprocess.PIPE)
     except subprocess.CalledProcessError as error:
-        raise _YtDlpError(_yt_dlp_error_text(error)) from None
-    lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        print(_yt_dlp_error_text(error), file=sys.stderr)
+        if _is_auth_error(error) and "--cookies-from-browser" not in command:
+            retry = [*command[:1], "--cookies-from-browser", "firefox", *command[1:]]
+            try:
+                subprocess.run(
+                    retry, check=True, text=True, stdout=None, stderr=subprocess.PIPE
+                )
+            except subprocess.CalledProcessError as retry_error:
+                print(_yt_dlp_error_text(retry_error), file=sys.stderr)
+                raise _YtDlpError(_yt_dlp_error_text(retry_error)) from None
+        else:
+            raise _YtDlpError(_yt_dlp_error_text(error)) from None
+
+
+def _read_print_to_file(print_path):
+    """Return the post-move media filepath yt-dlp reported via --print-to-file."""
+    try:
+        with open(print_path, encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle if line.strip()]
+    except OSError:
+        lines = []
     if not lines:
         raise _YtDlpError("yt-dlp did not report the post-move media filepath")
-    return finalize_audio_download(lines[-1], filename_suffix)
+    return lines[-1]
 
 
-def download_audio(url):
-    print(f"Analyzing {url}...")
-    meta, use_browser_cookies = _parse_audio_with_access(url)
+def _new_print_to_file():
+    """Create a temp file for yt-dlp --print-to-file reporting."""
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", prefix="yt-dlp-filepath-", suffix=".txt", delete=False
+    )
+    print_path = handle.name
+    handle.close()
+    return print_path
 
-    if meta["is_tagged"]:
-        print("\n\033[1;32mDetected High-Quality Auto-Generated Audio track.\033[0m")
-        print(
-            f"  Title:    {meta['title']}\n  Artist:   {meta['artist']}"
-            f"\n  Album:    {meta['album']}\n  Date:     {meta['date']}\n"
-        )
-    else:
-        print("\n\033[1;34mStandard track detected. Downloading normally.\033[0m\n")
 
-    # Leave yt-dlp config discovery and configured output paths enabled; the
-    # user's installed config directs downloads to ~/Downloads.
+def _remove_temp_file(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def download_audio(url, config=None):
+    cfg = dict(config) if config is not None else load_config()
+    auto_tag = cfg.get("auto_tag", True)
+    effective_dir = effective_download_dir(cfg)
+    print(f"[1/2] Downloading audio from {url}...")
+    print_path = _new_print_to_file()
+    try:
+        extras = []
+        if is_youtube_url(url):
+            extras.extend(["--ies", "youtube,youtube:tab"])
+        if effective_dir is not None:
+            extras.extend(["-P", effective_dir])
+        if auto_tag:
+            extras.extend([
+                "--write-info-json",
+                "--write-thumbnail",
+                "--convert-thumbnails", "jpg",
+            ])
+        else:
+            extras.extend([
+                "--embed-metadata",
+                "--embed-thumbnail",
+                "--convert-thumbnails", "jpg",
+            ])
+        command = [
+            "yt-dlp",
+            *extras,
+            "-f", "bestaudio",
+            "-x", "--audio-format", "best",
+            "--no-warnings",
+            "--no-playlist",
+            "--progress",
+            "-o", "%(title)s.%(ext)s",
+            "--print-to-file", "after_move:filepath", print_path,
+            "--", url,
+        ]
+        _run_with_auth_retry(command)
+        filepath = _read_print_to_file(print_path)
+        if auto_tag:
+            return finalize_audio_download(filepath, "", cfg)
+        strip_language_tags(filepath)
+        if cfg.get("rsgain", False):
+            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+            _run_rsgain(filepath)
+        return filepath
+    finally:
+        _remove_temp_file(print_path)
+
+
+def download_video(url, config=None):
+    cfg = dict(config) if config is not None else load_config()
+    effective_dir = effective_download_dir(cfg)
+    print("[1/2] Downloading video & audio streams...")
+    extras = []
+    if is_youtube_url(url):
+        extras.extend(["--ies", "youtube,youtube:tab"])
+    if effective_dir is not None:
+        extras.extend(["-P", effective_dir])
     command = [
         "yt-dlp",
-        "-f", "bestaudio",
-        "-x", "--audio-format", "best",
-        "--no-warnings",
-        "--no-playlist",
-        "--write-info-json",
-        "--write-thumbnail",
-        "--convert-thumbnails", "jpg",
-        "-o", _audio_output_template(meta),
-        "--print", "after_move:filepath",
-        url,
-    ]
-    if use_browser_cookies:
-        command[1:1] = ["--cookies-from-browser", "firefox"]
-    _download_audio_and_finalize(command)
-
-
-def download_video(url):
-    print(f"Downloading video: {url}")
-    command = [
-        "yt-dlp",
+        *extras,
         "-f", "bestvideo+bestaudio/best",
         "--merge-output-format", "mkv",
         "--embed-thumbnail",
         "--convert-thumbnails", "webp",
         "--embed-metadata",
         "--no-warnings",
+        "--progress",
+        "--print",
+        "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
         "-o", "%(title)s.%(ext)s",
-        url,
+        "--", url,
     ]
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as error:
-        raise _YtDlpError(_yt_dlp_error_text(error)) from None
+    _run_with_auth_retry(command)
+    print("[2/2] Video download complete.")
 
 
-def interactive_cut(url):
+def interactive_cut(url, config=None):
+    cfg = dict(config) if config is not None else load_config()
+    auto_tag = cfg.get("auto_tag", True)
     print(f"Fetching metadata for {url}...")
-    meta, use_browser_cookies = _parse_audio_with_access(url)
+    info, use_browser_cookies = _fetch_info_with_access(url)
+    meta = parse_info(info)
     duration = meta.get("duration", 0)
 
     if duration == 0:
@@ -410,50 +579,106 @@ def interactive_cut(url):
     print(f"\nProceeding with cut: {format_time(start_sec)} to {format_time(end_sec)}")
     print(f"Applying FFmpeg overrides: {ffmpeg_options}\n")
 
-    command = [
-        "yt-dlp",
-        "--download-sections", f"*{start_sec}-{end_sec}",
-        "--force-keyframes-at-cuts",
-        "-f", "bestaudio",
-        "-x", "--audio-format", "opus",
-        "--no-warnings",
-        "--no-playlist",
-        "--write-info-json",
-        "--write-thumbnail",
-        "--convert-thumbnails", "jpg",
-        "--postprocessor-args", f"ExtractAudio:{ffmpeg_options}",
-        "-o", _audio_output_template(
-            meta, f"_cut_{int(start_sec)}_{int(end_sec)}"
-        ),
-        "--print", "after_move:filepath",
-        url,
-    ]
-    if use_browser_cookies:
-        command[1:1] = ["--cookies-from-browser", "firefox"]
-    _download_audio_and_finalize(command, f"_cut_{int(start_sec)}_{int(end_sec)}")
+    filename_suffix = f"_cut_{int(start_sec)}_{int(end_sec)}"
+    info_handle = tempfile.NamedTemporaryFile(
+        mode="w", prefix="yt-dlp-info-", suffix=".info.json",
+        delete=False, encoding="utf-8",
+    )
+    temp_info_path = info_handle.name
+    try:
+        json.dump(info, info_handle)
+        info_handle.close()
+        print_path = _new_print_to_file()
+        try:
+            extras = []
+            if use_browser_cookies:
+                extras.extend(["--cookies-from-browser", "firefox"])
+            if is_youtube_url(url):
+                extras.extend(["--ies", "youtube,youtube:tab"])
+            effective_dir = effective_download_dir(cfg)
+            if effective_dir is not None:
+                extras.extend(["-P", effective_dir])
+            if auto_tag:
+                extras.extend([
+                    "--write-info-json",
+                    "--write-thumbnail",
+                    "--convert-thumbnails", "jpg",
+                ])
+                output_template = _audio_output_template(meta, filename_suffix)
+            else:
+                extras.extend([
+                    "--embed-metadata",
+                    "--embed-thumbnail",
+                    "--convert-thumbnails", "jpg",
+                ])
+                output_template = "%(title)s.%(ext)s"
+            rest = [
+                *extras,
+                "--download-sections", f"*{start_sec}-{end_sec}",
+                "--force-keyframes-at-cuts",
+                "-f", "bestaudio",
+                "-x", "--audio-format", "opus",
+                "--no-warnings",
+                "--no-playlist",
+                "--progress",
+                "--postprocessor-args", f"ExtractAudio:{ffmpeg_options}",
+                "-o", output_template,
+                "--print-to-file", "after_move:filepath", print_path,
+            ]
+            print("[1/2] Downloading cut...")
+            try:
+                subprocess.run(
+                    ["yt-dlp", "--load-info-json", temp_info_path, *rest],
+                    check=True, text=True, stdout=None, stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError:
+                _run_with_auth_retry(["yt-dlp", *rest, "--", url])
+            filepath = _read_print_to_file(print_path)
+            if auto_tag:
+                return finalize_audio_download(filepath, filename_suffix, cfg)
+            strip_language_tags(filepath)
+            if cfg.get("rsgain", False):
+                print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+                _run_rsgain(filepath)
+            return filepath
+        finally:
+            _remove_temp_file(print_path)
+    finally:
+        _remove_temp_file(temp_info_path)
 
 
 def main(argv=None):
     argv = sys.argv if argv is None else argv
-    if len(argv) < 3:
-        print("Usage: yt-dlp-wrapper.py [audio|video|cut] <url>")
-        return 1
-
-    mode, url = argv[1], argv[2]
+    args = list(argv[1:])
+    wait_keypress = False
+    if args and args[0] == "--wait-keypress":
+        wait_keypress = True
+        args = args[1:]
+    if os.environ.get("YTDL_WAIT_KEYPRESS") == "1":
+        wait_keypress = True
     try:
-        if mode == "audio":
-            download_audio(url)
-        elif mode == "video":
-            download_video(url)
-        elif mode == "cut":
-            interactive_cut(url)
-        else:
-            print("Unknown mode.")
+        if len(args) < 2:
+            print("Usage: yt-dlp-wrapper.py [--wait-keypress] [audio|video|cut] <url>")
             return 1
-    except _YtDlpError as error:
-        print(f"yt-dlp failed: {error}", file=sys.stderr)
-        return 1
-    return 0
+
+        mode, url = args[0], args[1]
+        try:
+            if mode == "audio":
+                download_audio(url)
+            elif mode == "video":
+                download_video(url)
+            elif mode == "cut":
+                interactive_cut(url)
+            else:
+                print("Unknown mode.")
+                return 1
+        except _YtDlpError as error:
+            print(f"yt-dlp failed: {error}", file=sys.stderr)
+            return 1
+        return 0
+    finally:
+        if wait_keypress and sys.stdin.isatty():
+            wait_for_keypress()
 
 
 if __name__ == "__main__":
