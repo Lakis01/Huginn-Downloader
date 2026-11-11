@@ -89,7 +89,9 @@ function testBackgroundStatic() {
   assert.ok(src.includes('icons/audio.svg'), 'audio item uses audio icon');
   assert.ok(src.includes('icons/video.svg'), 'video item uses video icon');
   assert.ok(src.includes('icons/cut.svg'), 'cut item uses cut icon');
-  assert.ok(src.includes('documentUrlPatterns') || src.includes('targetUrlPatterns') || src.includes('onShown'), 'menu is scoped to YouTube documents/links');
+  assert.ok(!src.includes('documentUrlPatterns'), 'menu creation omits restrictive documentUrlPatterns');
+  assert.ok(src.includes('targetUrlPatterns'), 'menu targets YouTube link destinations');
+  assert.ok(src.includes('onShown'), 'menu visibility is gated by onShown');
   assert.ok(src.includes('ytdl-get-context-url'), 'background queries content script for context URL');
   assert.ok(src.includes('sendNativeMessage'), 'background uses sendNativeMessage');
   assert.ok(src.includes('firefox_youtube_downloader'), 'background uses the native host id');
@@ -103,18 +105,20 @@ function runBackgroundFixture() {
   const src = readFile('extension/background.js');
   const created = [];
   const handlers = { clicked: null, shown: null, message: null };
-  const calls = { nativeMessages: [], tabsCreated: [], sentTabMessages: [] };
+  const calls = { nativeMessages: [], tabsCreated: [], sentTabMessages: [], updates: [], refreshes: 0 };
   let nativeShouldReject = false;
+  let nativeResponse = { ok: true, launched: true };
+  let tabMessageResponse = { url: 'https://www.youtube.com/watch?v=ctx123' };
   const browser = {
     menus: {
       create(item) { created.push(item); return Promise.resolve(item.id); },
       onClicked: { addListener(fn) { handlers.clicked = fn; } },
       onShown: { addListener(fn) { handlers.shown = fn; } },
-      refresh() { return Promise.resolve(); },
-      update() { return Promise.resolve(); },
+      refresh() { calls.refreshes += 1; return Promise.resolve(); },
+      update(id, props) { calls.updates.push({ id, props }); return Promise.resolve(); },
     },
     tabs: {
-      sendMessage(tabId, msg) { calls.sentTabMessages.push({ tabId, msg }); return Promise.resolve({ url: 'https://www.youtube.com/watch?v=ctx123' }); },
+      sendMessage(tabId, msg) { calls.sentTabMessages.push({ tabId, msg }); return Promise.resolve(tabMessageResponse); },
       query() { return Promise.resolve([{ id: 7, url: 'https://www.youtube.com/watch?v=tab7' }]); },
       create(opts) { calls.tabsCreated.push(opts); return Promise.resolve(opts); },
     },
@@ -122,17 +126,24 @@ function runBackgroundFixture() {
       sendNativeMessage(host, msg) {
         calls.nativeMessages.push({ host, msg });
         if (nativeShouldReject) return Promise.reject(new Error('No such native application'));
-        return Promise.resolve({ ok: true, launched: true });
+        return Promise.resolve(nativeResponse);
       },
       onMessage: { addListener(fn) { handlers.message = fn; } },
       getURL(p) { return `moz-extension://fake/${p}`; },
       lastError: undefined,
     },
   };
-  const context = { browser, chrome: undefined, console, setTimeout, clearTimeout };
+  const context = { browser, chrome: undefined, console, setTimeout, clearTimeout, URL };
   vm.createContext(context);
   vm.runInContext(src, context, { filename: 'background.js' });
-  return { created, handlers, calls, setNativeReject(v) { nativeShouldReject = v; } };
+  return {
+    created,
+    handlers,
+    calls,
+    setNativeReject(v) { nativeShouldReject = v; },
+    setNativeResponse(v) { nativeResponse = v; },
+    setTabMessageResponse(v) { tabMessageResponse = v; },
+  };
 }
 
 async function testBackgroundBehavior() {
@@ -162,6 +173,69 @@ async function testBackgroundOnboardingFallback() {
   await handlers.clicked({ menuItemId: 'ytdl-video', pageUrl: 'https://www.youtube.com/watch?v=page9' }, { id: 9, url: 'https://www.youtube.com/watch?v=page9' });
   const opened = calls.tabsCreated.some((opts) => String(opts.url || '').includes('popup.html?onboarding=1'));
   assert.ok(opened, 'missing companion opens the onboarding popup');
+}
+
+async function testBackgroundLinkAndPageFallbacks() {
+  // No card match: the content script answers null, so the menu
+  // linkUrl target must win over the current page.
+  {
+    const { handlers, calls, setTabMessageResponse } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setTabMessageResponse({ url: null });
+    await handlers.clicked(
+      { menuItemId: 'ytdl-audio', linkUrl: 'https://www.youtube.com/watch?v=link9', pageUrl: 'https://www.youtube.com/watch?v=page9' },
+      { id: 9, url: 'https://www.youtube.com/watch?v=page9' },
+    );
+    assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/watch?v=link9', 'non-card YouTube link resolves to info.linkUrl');
+  }
+  // Empty non-card space: no linkUrl either, so info.pageUrl applies.
+  {
+    const { handlers, calls, setTabMessageResponse } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setTabMessageResponse({ url: null });
+    await handlers.clicked(
+      { menuItemId: 'ytdl-video', pageUrl: 'https://www.youtube.com/watch?v=page9' },
+      { id: 9, url: 'https://www.youtube.com/watch?v=page9' },
+    );
+    assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/watch?v=page9', 'empty non-card space falls back to info.pageUrl');
+  }
+}
+
+async function testBackgroundErrorResponseSkipsOnboarding() {
+  // A returned error from a connected host is a download failure,
+  // not a missing companion: no onboarding tab.
+  {
+    const { handlers, calls, setNativeResponse } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setNativeResponse({ ok: false, error: 'no valid YouTube URL was provided' });
+    await handlers.clicked({ menuItemId: 'ytdl-audio', pageUrl: 'https://www.youtube.com/watch?v=page1' }, { id: 7, url: 'https://www.youtube.com/watch?v=page1' });
+    assert.equal(calls.tabsCreated.length, 0, 'response.ok === false does NOT open onboarding');
+  }
+  // A rejected sendNativeMessage (companion missing) DOES open onboarding.
+  {
+    const { handlers, calls, setNativeReject } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setNativeReject(true);
+    await handlers.clicked({ menuItemId: 'ytdl-audio', pageUrl: 'https://www.youtube.com/watch?v=page1' }, { id: 7, url: 'https://www.youtube.com/watch?v=page1' });
+    const opened = calls.tabsCreated.some((opts) => String(opts.url || '').includes('popup.html?onboarding=1'));
+    assert.ok(opened, 'rejected sendNativeMessage DOES open onboarding');
+  }
+}
+
+async function testBackgroundOnShownGatesExternalLinks() {
+  const { created, handlers, calls } = runBackgroundFixture();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  for (const item of created) {
+    assert.ok(!('documentUrlPatterns' in item), `${item.id} omits documentUrlPatterns`);
+  }
+  assert.ok(handlers.shown, 'onShown handler registered');
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  handlers.shown({ pageUrl: 'https://example.com/', linkUrl: 'https://www.youtube.com/watch?v=ext1' });
+  await tick();
+  assert.ok(calls.updates.some((u) => u.id === 'ytdl-root' && u.props.visible === true), 'YouTube link on external site shows ytdl-root');
+  handlers.shown({ pageUrl: 'https://example.com/', linkUrl: 'https://example.com/other' });
+  await tick();
+  assert.ok(calls.updates.some((u) => u.id === 'ytdl-root' && u.props.visible === false), 'non-YouTube link on external site hides ytdl-root');
 }
 
 // --- content.css ---
@@ -390,12 +464,14 @@ function testContentBehavior() {
   assert.equal(fx.sentMessages.length, 1);
   assert.equal(fx.sentMessages[0].type, 'ytdl-trigger-download');
   assert.equal(fx.sentMessages[0].mode, 'audio');
-  // context URL query round-trip
+  // context URL query round-trip: no contextmenu yet, so no card
+  // match is preserved as null (background falls back to link/page).
   assert.ok(fx.messageListeners.length >= 1, 'content answers runtime messages');
   const responder = fx.messageListeners[0];
   let answered = null;
   responder({ type: 'ytdl-get-context-url' }, {}, (r) => { answered = r; });
-  assert.ok(answered && typeof answered.url === 'string', 'context URL answered');
+  assert.ok(answered && 'url' in answered, 'context URL answered');
+  assert.equal(answered.url, null, 'no card match is preserved as null');
   // card hit-testing through elementsFromPoint
   const card = fx.document.createElement('yt-lockup-view-model');
   const link = fx.document.createElement('a');
@@ -409,6 +485,24 @@ function testContentBehavior() {
   let after = null;
   responder({ type: 'ytdl-get-context-url' }, {}, (r) => { after = r; });
   assert.equal(after.url, 'https://www.youtube.com/watch?v=lockup123');
+  // right-clicking a bare YouTube link outside any card: no context
+  // URL, so the background resolves info.linkUrl instead of the page.
+  const bareLink = fx.document.createElement('a');
+  bareLink.setAttribute('href', 'https://www.youtube.com/watch?v=bare999');
+  fx.document.body.appendChild(bareLink);
+  fx.setHitStackArr([bareLink]);
+  bareLink.dispatchEvent({ type: 'contextmenu', target: bareLink, bubbles: true, clientX: 30, clientY: 40 });
+  let bare = null;
+  responder({ type: 'ytdl-get-context-url' }, {}, (r) => { bare = r; });
+  assert.equal(bare.url, null, 'bare non-card link yields no context URL');
+  // right-clicking empty non-card space: no context URL either.
+  const empty = fx.document.createElement('div');
+  fx.document.body.appendChild(empty);
+  fx.setHitStackArr([empty]);
+  empty.dispatchEvent({ type: 'contextmenu', target: empty, bubbles: true, clientX: 50, clientY: 60 });
+  let vacant = null;
+  responder({ type: 'ytdl-get-context-url' }, {}, (r) => { vacant = r; });
+  assert.equal(vacant.url, null, 'empty non-card space yields no context URL');
 }
 
 // --- popup ---
@@ -458,6 +552,9 @@ async function main() {
   testBackgroundStatic();
   await testBackgroundBehavior();
   await testBackgroundOnboardingFallback();
+  await testBackgroundLinkAndPageFallbacks();
+  await testBackgroundErrorResponseSkipsOnboarding();
+  await testBackgroundOnShownGatesExternalLinks();
   testContentCss();
   testContentStatic();
   testContentBehavior();

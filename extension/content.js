@@ -179,7 +179,11 @@
   }
 
   function captureContextHref(event) {
-    let href = pageLocation().href;
+    // No card match means no context URL (null): the background then
+    // falls back to the menu linkUrl/pageUrl targets instead of the
+    // current page, so right-clicking a bare YouTube link never
+    // downloads the page behind it.
+    let href = null;
     const cards = [];
     const addCardFor = (element) => {
       const card = element && element.closest ? element.closest(CARD_SELECTOR) : null;
@@ -207,8 +211,7 @@
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
     if (message && message.type === 'ytdl-get-context-url') {
-      const url = lastContextUrl || pageLocation().href;
-      if (typeof sendResponse === 'function') sendResponse({ url });
+      if (typeof sendResponse === 'function') sendResponse({ url: lastContextUrl });
       return true;
     }
     return undefined;

@@ -91,8 +91,9 @@ async function sendDownload(mode, primaryUrl, fallbacks) {
       url,
       fallbacks: candidates.slice(1),
     });
-    if (response && response.ok) return response;
-    await openOnboarding();
+    // A non-OK reply is a download failure from a connected companion,
+    // not a missing companion, so it must not open onboarding. Only a
+    // rejected sendNativeMessage (companion missing) does that.
     return response || { ok: false, error: 'companion did not respond' };
   } catch (_error) {
     await openOnboarding();
@@ -127,7 +128,6 @@ function setupMenus() {
       id: 'ytdl-root',
       title: 'YouTube Downloader',
       contexts: ['page', 'link'],
-      documentUrlPatterns: YT_PAGE_PATTERNS,
       targetUrlPatterns: YT_PAGE_PATTERNS,
       icons: { 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' },
     },
@@ -136,7 +136,6 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Audio',
       contexts: ['page', 'link'],
-      documentUrlPatterns: YT_PAGE_PATTERNS,
       targetUrlPatterns: YT_PAGE_PATTERNS,
       icons: { 16: 'icons/audio.svg', 32: 'icons/audio.svg' },
     },
@@ -145,7 +144,6 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Video',
       contexts: ['page', 'link'],
-      documentUrlPatterns: YT_PAGE_PATTERNS,
       targetUrlPatterns: YT_PAGE_PATTERNS,
       icons: { 16: 'icons/video.svg', 32: 'icons/video.svg' },
     },
@@ -154,7 +152,6 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Cut Audio',
       contexts: ['page', 'link'],
-      documentUrlPatterns: YT_PAGE_PATTERNS,
       targetUrlPatterns: YT_PAGE_PATTERNS,
       icons: { 16: 'icons/cut.svg', 32: 'icons/cut.svg' },
     },
@@ -169,8 +166,9 @@ function setupMenus() {
   menus.onClicked.addListener(handleMenuClick);
   if (menus.onShown && typeof menus.onShown.addListener === 'function') {
     menus.onShown.addListener((info) => {
-      // Keep the subtree visible for YouTube pages and for YouTube
-      // link targets on any site, without duplicating items.
+      // Items carry no document patterns, so this gate is what
+      // enables YouTube pages and YouTube link targets on any site,
+      // without duplicating items.
       const visible = isYouTubeUrl(info.pageUrl) || isYouTubeUrl(info.linkUrl);
       try {
         const result = menus.update ? menus.update('ytdl-root', { visible }) : null;
