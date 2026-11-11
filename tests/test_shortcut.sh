@@ -132,6 +132,16 @@ for malformed_uri in 'yt-dlp://cut?url=%ZZ' 'yt-dlp://bad-mode?url=https%3A%2F%2
 done
 pass 'rejects malformed explicit and custom-scheme URIs without trying valid fallbacks'
 
+if PRIMARY_SELECTION=$other_url \
+    MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
+    CLIPBOARD_SELECTION="$valid_url" \
+    run_shortcut --uri '' > "$TMP/malformed.out" 2>&1; then
+    fail 'empty explicit URI unexpectedly succeeded'
+fi
+[[ ! -e "$CALL_ARGS" ]] || fail 'empty explicit URI launched Konsole'
+assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'empty URI error report'
+pass 'empty explicit URI remains fail-closed without trying valid fallbacks'
+
 shell_payload="https://www.youtube.com/watch?v=1&title=O'Brien&next=\$(touch\${IFS}$TMP/injected)"
 run_shortcut video "$shell_payload"
 assert_launch video "$shell_payload" 'shell metacharacter URL'

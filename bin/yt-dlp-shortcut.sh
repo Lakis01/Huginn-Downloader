@@ -5,6 +5,7 @@ SCRIPT_NAME=${0##*/}
 MODE=audio
 EXPLICIT_URL=
 URI_ARGUMENT=
+URI_SUPPLIED=
 
 usage() {
     printf 'Usage: %s [audio|video|cut] [URL1 [URL2]]\n       %s [--uri] yt-dlp://<audio|video|cut>?url=<encoded-URL>\n' \
@@ -27,6 +28,7 @@ case $# in
             exit 2
         elif [[ $1 == yt-dlp://* ]]; then
             URI_ARGUMENT=$1
+            URI_SUPPLIED=1
         else
             CANDIDATES=("$1")
         fi
@@ -34,6 +36,7 @@ case $# in
     2)
         if [[ $1 == --uri ]]; then
             URI_ARGUMENT=$2
+            URI_SUPPLIED=1
         else
             CANDIDATES=("$1" "$2")
         fi
@@ -131,7 +134,7 @@ PY
     [[ $EXPLICIT_URL != *$'\t'* ]]
 }
 
-if [[ -n $URI_ARGUMENT ]]; then
+if [[ -n $URI_SUPPLIED ]]; then
     if ! parse_uri "$URI_ARGUMENT"; then
         printf 'Invalid yt-dlp URI: %s\n' "$URI_ARGUMENT" >&2
         exit 2
