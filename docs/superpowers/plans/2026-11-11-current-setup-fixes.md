@@ -65,9 +65,9 @@
 - Modify: `tests/test_youtube_buttons.js`
 
 - [ ] Extend the DOM fixture to place a `yt-lockup-view-model` card beneath a `ytd-video-preview` overlay; assert context capture returns the card's URL via hit-testing.
-- [ ] Add style assertions for 40px controls, 20px icons, 16px horizontal padding, and visible dark/light tonal fallbacks.
+- [ ] Add style assertions for 42px controls, 22px icons, 16px horizontal padding, 21px radius, 15px labels, and visible dark/light tonal fallbacks.
 - [ ] Add new card selectors and inspect `document.elementsFromPoint()` entries to find the underlying card; preserve existing `/watch`/`/shorts/` fallback.
-- [ ] Restyle the buttons to 40px high, 20px SVGs, 16px side padding, 20px radius, and YouTube-compatible dark/light backgrounds.
+- [ ] Restyle the buttons to 42px high, 22px SVGs, 16px side padding, 21px radius, 15px labels, and YouTube-compatible dark/light backgrounds.
 - [ ] Run Node fixture, syntax checks, and Impeccable detector. Record that live rendering is still manual if the MCP profile is not the user's real Firefox.
 
 ### Task 4: Safe update of the real External Application Launcher apps
