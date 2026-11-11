@@ -5,18 +5,33 @@ Tampermonkey control group to YouTube watch pages. The extension's Pre JavaScrip
 reads the most recently right-clicked YouTube card link from the page; it is not
 a direct page-script bridge for launching a saved extension app.
 
-## Configure the three existing External Application Launcher apps
+## Import the corrected External Application Launcher settings
 
-Edit the existing **Audio**, **Video**, and **Cut** apps individually in the
-External Application Launcher options. Do not delete the other apps or change
-unrelated settings. Preserve each app's current executable; set its arguments
-to the corresponding value below:
+Import the generated file
+`~/Downloads/external-application-button-preferences-fixed.json` using the
+extension's full settings import:
+
+1. In Firefox, open `about:addons`.
+2. Select **External Application Launcher** and open its **Options** or
+   **Preferences** page.
+3. Choose **Import Settings**.
+4. Select `external-application-button-preferences-fixed.json` from Downloads
+   and confirm the import.
+
+This generated JSON is a **complete export** based on the existing settings,
+not a partial import or hand-built settings fragment. Import replaces all
+External Application Launcher settings, so use this complete file only. It
+retains all existing app records, IDs, icons, executable paths, Pre JavaScript,
+contexts, toolbar settings, and unrelated preferences. Only the three YouTube
+apps' arguments, target pattern, and document filter are changed.
+
+The corrected arguments are:
 
 | Existing app | Arguments |
 | --- | --- |
-| Audio | `audio "[PRE_SCRIPT]" "[HREF]"` |
-| Video | `video "[PRE_SCRIPT]" "[HREF]"` |
-| Cut | `cut "[PRE_SCRIPT]" "[HREF]"` |
+| Download YouTube Audio | `audio "[PRE_SCRIPT]" "[HREF]"` |
+| Download YouTube Video | `video "[PRE_SCRIPT]" "[HREF]"` |
+| Cut YouTube Audio | `cut "[PRE_SCRIPT]" "[HREF]"` |
 
 Each quoted placeholder is passed as a separate argument with no shell
 evaluation. The launcher uses the first candidate that is a valid YouTube
@@ -26,21 +41,15 @@ fallback. Invalid or empty first candidates fall through to the second; if
 neither is valid, the launcher keeps its existing primary-selection, active
 media, and clipboard fallbacks.
 
-For each app:
+The imported apps have an empty **target pattern** and a **document/page URL
+filter** of `https://www.youtube.com/*, https://music.youtube.com/*`. The
+target pattern is intentionally cleared: image and video previews can use
+`blob:` URLs even though the containing document is YouTube. The existing
+Pre JavaScript is preserved and should not need to be re-entered:
 
-1. Enable the `page`, `frame`, `link`, `image`, `audio`, and `video` contexts.
-2. Set its **document/page URL filter** to YouTube pages, including
-   `https://www.youtube.com/*` and `https://music.youtube.com/*`. Add
-   `https://youtube.com/*` or `https://m.youtube.com/*` too if you use those
-   hosts.
-3. Leave the app's **target pattern** broad/default (normally `*`). Do not
-   narrow it to `https:`: image and video previews can use `blob:` URLs even
-   though the containing document is YouTube.
-4. In the app's **Pre JavaScript** field, enter this exact one-line expression:
-
-   ```javascript
-   document.currentScript.output = window.__ytdlLastContextHref || location.href;
-   ```
+```javascript
+document.currentScript.output = window.__ytdlLastContextHref || location.href;
+```
 
 The `[PRE_SCRIPT]` argument is replaced with the value assigned to
 `document.currentScript.output`, and `[HREF]` is replaced with the clicked
@@ -50,9 +59,9 @@ own `/watch` or `/shorts/` link; a right-click elsewhere uses the current
 page URL. Keep the quotes exactly as shown so URLs containing `&` or `'`
 arrive intact as separate arguments.
 
-**Do not import a partial External Application Launcher settings export.** Its
-import operation replaces all extension settings, including apps and unrelated
-preferences. Make these changes manually to the three existing apps only.
+Do not import the unmodified export or any partial/hand-built JSON. The
+extension's import replaces all settings; the generated `*-fixed.json` file is
+safe to import because it is the patched complete export.
 
 Firefox may group the app entries under the External Application Launcher
 extension submenu in its right-click menu rather than showing them at the top
