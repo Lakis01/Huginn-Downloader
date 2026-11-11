@@ -88,6 +88,8 @@ def _is_retryable_load_info_error(error):
     ).casefold()
     if any(marker in message for marker in _POSTPROCESSING_ERROR_MARKERS):
         return False
+    if _is_auth_error(error):
+        return True
     return any(marker in message for marker in _LOAD_INFO_RETRY_MARKERS)
 
 

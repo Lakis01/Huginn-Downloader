@@ -220,7 +220,7 @@ be edited.
 Run the repository checks from its root:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 72 tests
+python3 -m unittest discover -s tests -v  # 73 tests
 bash tests/test_shortcut.sh               # 42 checks: launcher, desktop entries, installer
 node tests/test_firefox_extension.js
 node tests/test_youtube_buttons.js

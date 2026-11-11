@@ -1284,6 +1284,69 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("--load-info-json", cut_commands[0])
         self.assertFalse(any(command[-2:] == ["--", url] for command in cut_commands))
 
+    def test_cut_auth_failure_falls_back_and_retries_with_browser_cookies(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            moved_media = Path(tmp) / "cut.opus"
+            calls = []
+            url = "https://example.invalid/watch?v=cut"
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                if "--dump-json" in command:
+                    return SimpleNamespace(
+                        stdout=json.dumps(
+                            {"title": "Track", "channel": "Artist", "duration": 100}
+                        )
+                    )
+                if "--load-info-json" in command:
+                    raise subprocess.CalledProcessError(
+                        1, command, stderr="ERROR: Sign in to confirm your age"
+                    )
+                if "--cookies-from-browser" not in command:
+                    raise subprocess.CalledProcessError(
+                        1, command, stderr="ERROR: Sign in to confirm your age"
+                    )
+                print_index = command.index("--print-to-file")
+                Path(command[print_index + 2]).write_text(
+                    f"{moved_media}\n", encoding="utf-8"
+                )
+                return SimpleNamespace(stdout="")
+
+            config = {"download_dir": None, "auto_tag": True, "rsgain": False}
+            with mock.patch.object(
+                wrapper, "effective_download_dir", return_value=None
+            ):
+                with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                    with mock.patch(
+                        "builtins.input",
+                        side_effect=["0:10", "0:50", "117", "2", "audio"],
+                    ):
+                        with mock.patch.object(
+                            wrapper, "finalize_audio_download", return_value=str(moved_media)
+                        ) as finalize:
+                            result = wrapper.interactive_cut(url, config)
+
+            cut_commands = [
+                command for command in calls if "--download-sections" in command
+            ]
+            metadata_commands = [
+                command for command in calls if "--dump-json" in command
+            ]
+            self.assertEqual(len(metadata_commands), 1)
+            self.assertNotIn("--cookies-from-browser", metadata_commands[0])
+            self.assertEqual(len(cut_commands), 3)
+            self.assertIn("--load-info-json", cut_commands[0])
+            self.assertEqual(cut_commands[1][-2:], ["--", url])
+            self.assertNotIn("--cookies-from-browser", cut_commands[1])
+            self.assertEqual(cut_commands[2][-2:], ["--", url])
+            self.assertEqual(
+                cut_commands[2][cut_commands[2].index("--cookies-from-browser") + 1],
+                "firefox",
+            )
+            finalize.assert_called_once()
+            self.assertEqual(result, str(moved_media))
+
     def test_final_members_only_error_is_clear_and_does_not_print_traceback(self):
         wrapper = _load_wrapper(self)
         calls = []
