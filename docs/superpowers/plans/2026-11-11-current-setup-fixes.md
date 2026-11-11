@@ -1,90 +1,86 @@
-# Current YouTube Downloader Setup Fixes
+# Current YouTube Setup Fixes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix the user's current sidecar, protected-video diagnostics, EAL context targeting, sidebar preview targeting, and YouTube button styling without changing unrelated browser or yt-dlp settings.
+**Goal:** Fix the reported current-machine download failures and improve YouTube controls/menu targeting while preserving existing user settings.
 
-**Architecture:** Update the existing wrapper to locate both yt-dlp info-sidecar conventions and produce clear, optionally cookie-authenticated metadata errors. Make the KDE/EAL launch path accept multiple validated candidate URLs. Update the userscript to target YouTube's newer recommendation cards and autoplay overlays, and size/stylize its controls to match the screenshot. Modify the real EAL app preferences only from a complete settings export or safe real-profile UI access; never edit its live IndexedDB directly.
+**Architecture:** The wrapper recognizes both info sidecar names and reports yt-dlp errors cleanly, retrying auth failures once with Firefox cookies. The launcher accepts ordered URL candidates. The userscript targets new YouTube lockups and preview overlays and uses slightly larger tonal controls. The real External Application Launcher profile is updated only through a safe full export or its official options UI.
 
-**Tech Stack:** Existing Python/Mutagen/yt-dlp wrapper, Firefox/Tampermonkey userscript, KDE/Bash launcher, External Application Launcher configuration, current test suites.
+**Tech Stack:** Python 3, yt-dlp, Mutagen, Bash, Firefox/Tampermonkey JavaScript, External Application Launcher.
 
-**Spec:** `docs/superpowers/specs/2026-11-10-youtube-downloader-design.md` plus this approved follow-up request.
+**Spec:** `docs/superpowers/specs/2026-11-11-current-setup-fixes.md` and `docs/superpowers/specs/2026-11-10-youtube-downloader-design.md`.
 
 ## Global Constraints
 
-- The info JSON may be either `<media-stem>.info.json` or `<media-path>.info.json`; use a same-directory file only and clean the one used after successful tagging.
-- When an auth-gated metadata request fails, retry once with `--cookies-from-browser firefox`. Do not log or persist cookies. A members-only error after retry means the browser account lacks channel access; do not bypass it.
-- Show yt-dlp's actual actionable error and exit without a Python traceback.
-- EAL arguments may provide more than one URL candidate; select the first valid YouTube URL (Pre Script first, `[HREF]` fallback) without shell interpolation.
-- Do not overwrite or create another `~/.config/yt-dlp/config`; the current installer must leave configuration files untouched. For later machines, create a config only when none exists, and preserve an existing file.
-- Do not import a partial EAL export, do not modify its live IndexedDB, and do not overwrite unrelated apps/preferences. A real settings update requires a complete export from the real profile or safe UI access.
-- Use the user's screenshots as the visual reference: compact YouTube-tonal buttons, slightly larger than current, with real SVG icons and dark/light contrast.
+- Keep all info-sidecar candidates in the media directory; do not touch existing Downloads as test data.
+- Retry `--cookies-from-browser firefox` only for recognized authentication errors; never log cookie contents or bypass a members-only entitlement.
+- Report yt-dlp stderr to the user instead of a generic `CalledProcessError` traceback.
+- EAL arguments prefer a valid `[PRE_SCRIPT]` URL, then valid `[HREF]`; arguments remain separate and shell-safe.
+- Keep the on-page controls between Subscribe and Like/Dislike with accessible names, keyboard focus, inline SVGs, dark/light contrast, and no duplicated SPA mounts.
+- Never import a partial EAL export or write the live Firefox IndexedDB. If real-profile access/full export is unavailable, ask before altering EAL preferences.
+- Preserve an existing `~/.config/yt-dlp/config`; don't create a second one. Cross-machine download-directory configuration is future scope, not current deployment.
 
 ## Review Focus
 
-1. Both yt-dlp info sidecar naming patterns resolve without reading a path outside the media directory; failed tagging still preserves source and sidecar files.
-2. A cookie retry is limited to auth-classified errors; a members-only failure after retry explains that account membership is required and never emits a traceback.
-3. Multiple URL candidates with empty/invalid Pre Script values select a valid `[HREF]`; malformed custom URIs fail closed and never launch a fallback download.
-4. Right-click on a recommendation card covered by a video preview selects the card's URL; playlist/music cards and `yt-lockup-view-model` are covered.
-5. Button dimensions, contrast and spacing are checked against the supplied screenshot; repeated SPA events still do not duplicate buttons.
-6. A full EAL config update preserves unrelated apps and icons; if a complete export/real profile isn't available, do not fabricate a replacement export.
+1. `stem.info.json` and `media-path.info.json` both tag and clean correctly, while failures preserve media and sidecars (Task 1 tests).
+2. Auth retry is exactly once and only for auth markers; cookies that still receive a membership error produce that clear message (Task 1 tests).
+3. `[PRE_SCRIPT]` blank/invalid values fall through to a valid `[HREF]`; hostile strings are never evaluated by the shell (Task 2 tests).
+4. A preview overlay above a `yt-lockup-view-model` recommendation still resolves the card URL; the page fallback remains correct (Task 3 tests).
+5. Larger button geometry and high-contrast dark/light surfaces are asserted, with route and de-duplication behavior unchanged (Task 3 tests).
 
 ---
 
-### Task 1: Fix info sidecars and yt-dlp access diagnostics
+### Task 1: Info sidecars and yt-dlp access diagnostics
 
 **Files:**
 - Modify: `bin/yt-dlp-wrapper.py`
 - Modify: `tests/test_ytdl_meta.py`
 
 **Interfaces:**
-- Preserve `finalize_audio_download(media_path, filename_suffix="")` and `parse_audio(url)` call behavior for existing callers.
-- Add a same-directory info-sidecar resolver that prefers `<stem>.info.json` and falls back to `<media-name>.info.json`.
+- Keep `finalize_audio_download(media_path, filename_suffix="")` and existing CLI modes.
+- Resolve `<media-stem>.info.json` before the appended `<media-path>.info.json` fallback.
 
-- [ ] Add a red regression with `Tommo - The Liam Lawson problem.opus` plus `Tommo - The Liam Lawson problem.info.json`; assert tagging succeeds, cleans only that sidecar, and calls rsgain once.
-- [ ] Add a regression for the appended `<media-name>.info.json` convention to preserve compatibility.
-- [ ] Add mocked metadata-fetch tests: unauthenticated auth error retries once with `--cookies-from-browser firefox`; successful retry supplies credentials to the ensuing download; a still-blocked members-only result reports the yt-dlp reason without traceback.
-- [ ] Implement same-directory candidate lookup and a clear `YtDlpError`/CLI error path. Never print cookie contents; don't retry unrelated errors.
-- [ ] Run the wrapper tests red before implementation and green afterward; run the full Python suite.
+- [ ] Add generated-file regression for `Tommo - The Liam Lawson problem.opus` plus `Tommo - The Liam Lawson problem.info.json`; assert sidecar cleanup after successful tag, and preserve existing appended-sidecar test.
+- [ ] Add mocked tests for metadata auth retry once with `--cookies-from-browser firefox`, cookie use on the ensuing audio/cut command, and a final members-only message with no traceback.
+- [ ] Run focused tests red before implementation.
+- [ ] Implement sidecar resolution and a clear CLI exception path; never expose cookie values.
+- [ ] Run wrapper and complete Python suites; don't run real downloads or rsgain as tests.
 
-### Task 2: Fix EAL candidate selection and saved app settings
+### Task 2: Candidate URLs for right-click launcher calls
 
 **Files:**
 - Modify: `bin/yt-dlp-shortcut.sh`
 - Modify: `tests/test_shortcut.sh`
 - Modify: `firefox/external-application-launcher-setup.md`
 
-**Interfaces:**
-- Launcher accepts `[mode] [candidate-url ...]` and chooses the first valid YouTube URL before normal clipboard/MPRIS fallback.
-- EAL args are `audio "[PRE_SCRIPT]" "[HREF]"`, `video "[PRE_SCRIPT]" "[HREF]"`, and `cut "[PRE_SCRIPT]" "[HREF]"`.
+- [ ] Add shell tests proving invalid/empty first candidate falls through to valid second candidate, preserves query ampersands/apostrophes, and malformed URI remains fail-closed.
+- [ ] Implement first-valid-candidate selection for `mode [PRE_SCRIPT] [HREF]` without shell evaluation.
+- [ ] Update the guide to use quoted `[PRE_SCRIPT]` followed by quoted `[HREF]` for all three existing apps.
+- [ ] Run shell tests and syntax check.
 
-- [ ] Add tests for empty/invalid Pre Script URL followed by valid HREF, preserving apostrophes and ampersands as separate safe argv values.
-- [ ] Update the guide to explain that YouTube domains belong in the lower document/page filter box; leave the upper target pattern empty/broad for blob and thumbnail contexts.
-- [ ] Fix the three stored EAL apps only from a complete export or controlled real-profile options UI. Preserve icons and every unrelated app/setting; no partial import or direct live IndexedDB writes. If neither safe access method is available, stop and ask the user for the full export or real-profile access.
-- [ ] Verify the installed values use the candidate args, broad target pattern, and YouTube document filter.
-
-### Task 3: Improve YouTube recommendation targeting and button fit
+### Task 3: YouTube recommendation targeting and button sizing
 
 **Files:**
 - Modify: `firefox/youtube-ytdlp-buttons.user.js`
 - Modify: `tests/test_youtube_buttons.js`
 
-- [ ] Add red fixture cases for `yt-lockup-view-model`, a right-column recommendation under a `ytd-video-preview` overlay, and the hovered card URL obtained through `document.elementsFromPoint()`.
-- [ ] Add a fixture assertion for the screenshot-matched slightly larger tonal button dimensions and dark/light fallback colors.
-- [ ] Implement selectors/point-through behavior and compact button sizing (40px control height, 20px SVG, 16px horizontal padding, 20px radius) while preserving current text, ARIA labels, keyboard focus, route handling, and click URIs.
-- [ ] Run Node fixture/syntax tests and Impeccable detector. Live render remains manual if Firefox MCP can't attach to the real profile.
+- [ ] Extend the DOM fixture to place a `yt-lockup-view-model` card beneath a `ytd-video-preview` overlay; assert context capture returns the card's URL via hit-testing.
+- [ ] Add style assertions for 40px controls, 20px icons, 16px horizontal padding, and visible dark/light tonal fallbacks.
+- [ ] Add new card selectors and inspect `document.elementsFromPoint()` entries to find the underlying card; preserve existing `/watch`/`/shorts/` fallback.
+- [ ] Restyle the buttons to 40px high, 20px SVGs, 16px side padding, 20px radius, and YouTube-compatible dark/light backgrounds.
+- [ ] Run Node fixture, syntax checks, and Impeccable detector. Record that live rendering is still manual if the MCP profile is not the user's real Firefox.
 
-### Task 4: Preserve future-host yt-dlp configuration
+### Task 4: Safe update of the real External Application Launcher apps
 
 **Files:**
-- Modify: `README.md`
-- Modify: `install.sh` only if needed.
+- Update the user's three existing EAL app records only via a complete export/import or official options UI.
 
-- [ ] Document that future cross-distro installation must use a user-selected download directory and never create/overwrite `~/.config/yt-dlp/config` when one already exists.
-- [ ] Add or retain an installer test proving an existing yt-dlp config is unchanged and that no duplicate config is created by the current install.
+- [ ] Confirm the real profile contains the three expected apps and retain their icons and all unrelated settings.
+- [ ] Update only their argument candidates and page/target filter fields.
+- [ ] If the full export or safe real-profile UI is unavailable, stop before importing/writing and request the full settings export or needed browser access; do not fabricate a partial export.
 
-### Task 5: Verify and hand off current machine
+### Task 5: Compatibility and final verification
 
-- [ ] Run Python, Bash, Node, desktop validation, installer dry-run, compatibility smoke checks, and the style detector.
-- [ ] Install only after test/review gates; preserve timestamped backups and do not touch existing downloads or run rsgain against unrelated files.
-- [ ] Review the complete diff; document live Firefox/EAL checks that could not be done through the isolated MCP profile.
+- [ ] Confirm the installer does not create or overwrite `~/.config/yt-dlp/config`.
+- [ ] Run Python, shell, Node, syntax, desktop, and dry-run installer checks; verify `yt-to-forerunner` still imports the parser.
+- [ ] Review complete diff and report any live Firefox/EAL checks not possible with the isolated profile.
