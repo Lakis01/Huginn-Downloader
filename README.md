@@ -253,7 +253,7 @@ right-click menu when you want a specific card in a feed or sidebar.
 ### External Application Launcher (complete settings import)
 
 Use the generated complete settings export at
-`/home/gratis01/Downloads/external-application-button-preferences-fixed.json`.
+`~/Downloads/external-application-button-preferences-fixed.json`.
 In the add-on's options, choose **Import Settings** and select that file.
 Importing replaces all extension settings, so **never import a partial or
 hand-built export**. This one complete import configures all three existing
@@ -353,7 +353,7 @@ python3 -m unittest discover -s tests   # 37 tests: parser, tagging, wrapper, EA
 node tests/test_youtube_buttons.js      # userscript DOM fixture
 node --check firefox/youtube-ytdlp-buttons.user.js
 node --check tests/test_youtube_buttons.js
-bash tests/test_shortcut.sh             # 23 checks: launcher, desktop files, installer
+bash tests/test_shortcut.sh             # 25 checks: launcher, desktop files, installer
 bash -n bin/yt-dlp-shortcut.sh && bash -n install.sh
 python3 -m py_compile bin/ytdl_meta.py bin/yt-dlp-wrapper.py
 desktop-file-validate desktop/*.desktop
