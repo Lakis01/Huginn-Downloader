@@ -40,14 +40,33 @@ STUB
 cat > "$TMP/stubs/wl-paste" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in
-    -p|--primary) printf '%s' "${PRIMARY_SELECTION:-}" ;;
-    *) printf '%s' "${CLIPBOARD_SELECTION:-}" ;;
+    -p|--primary) printf '%s' "${WL_PRIMARY_SELECTION:-${PRIMARY_SELECTION:-}}" ;;
+    *) printf '%s' "${WL_CLIPBOARD_SELECTION:-${CLIPBOARD_SELECTION:-}}" ;;
 esac
 STUB
 cat > "$TMP/stubs/qdbus6" <<'STUB'
 #!/usr/bin/env bash
 [[ -n "${MPRIS_OUTPUT:-}" ]] || exit 1
 printf '%s\n' "$MPRIS_OUTPUT"
+STUB
+cat > "$TMP/stubs/playerctl" <<'STUB'
+#!/usr/bin/env bash
+[[ ${1:-} == metadata && ${2:-} == xesam:url && -n ${MPRIS_OUTPUT:-} ]] || exit 1
+printf '%s\n' "$MPRIS_OUTPUT"
+STUB
+cat > "$TMP/stubs/xclip" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in
+    *' primary '*) printf '%s' "${PRIMARY_SELECTION:-}" ;;
+    *) printf '%s' "${CLIPBOARD_SELECTION:-}" ;;
+esac
+STUB
+cat > "$TMP/stubs/xsel" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in
+    *' --primary '*) printf '%s' "${PRIMARY_SELECTION:-}" ;;
+    *) printf '%s' "${CLIPBOARD_SELECTION:-}" ;;
+esac
 STUB
 cat > "$TMP/stubs/xdg-mime" <<'STUB'
 #!/usr/bin/env bash
@@ -57,23 +76,56 @@ chmod +x "$TMP/stubs/"*
 
 export PATH="$TMP/stubs:$PATH"
 export CALL_ARGS="$TMP/call-args"
+export CALL_TERMINAL="$TMP/call-terminal"
 export XDG_MIME_ARGS="$TMP/xdg-mime-args"
 
 run_shortcut() {
     rm -f -- "$CALL_ARGS"
-    HOME="$TMP/home" "$SHORTCUT" "$@"
+    HOME="$TMP/home" YTDL_TERMINAL=${YTDL_TERMINAL:-konsole} "$SHORTCUT" "$@"
 }
 
 assert_launch() {
     local mode=$1 url=$2 label=$3
-    [[ -f "$CALL_ARGS" ]] || fail "$label (Konsole was not launched)"
+    [[ -f "$CALL_ARGS" ]] || fail "$label (terminal was not launched)"
     mapfile -t args < "$CALL_ARGS"
-    assert_eq '--hold' "${args[0]:-}" "$label: Konsole hold option"
-    assert_eq '-e' "${args[1]:-}" "$label: execute option"
-    assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[2]:-}" "$label: wrapper path"
+    assert_eq '-e' "${args[0]:-}" "$label: Konsole execute option"
+    assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+    assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
     assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
     assert_eq "$url" "${args[4]:-}" "$label: URL argument"
     assert_eq 5 "${#args[@]}" "$label: argument count"
+}
+
+assert_terminal_args() {
+    local terminal=$1 separator=$2 mode=$3 url=$4 label=$5
+    [[ -f "$CALL_ARGS" ]] || fail "$label (terminal was not launched)"
+    mapfile -t args < "$CALL_ARGS"
+    if [[ $separator == '-e' || $separator == '-x' ]]; then
+        assert_eq "$separator" "${args[0]:-}" "$label: terminal separator"
+        assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+        assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
+        assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
+        assert_eq "$url" "${args[4]:-}" "$label: URL argument"
+        assert_eq 5 "${#args[@]}" "$label: argument count"
+    else
+        assert_eq '--' "${args[0]:-}" "$label: terminal separator"
+        assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+        assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
+        assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
+        assert_eq "$url" "${args[4]:-}" "$label: URL argument"
+        assert_eq 5 "${#args[@]}" "$label: argument count"
+    fi
+    [[ -n $terminal ]] || fail "$label (terminal name was empty)"
+}
+
+add_terminal_stub() {
+    local terminal=$1
+    cat > "$TMP/stubs/$terminal" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "${0##*/}" > "$CALL_TERMINAL"
+printf '%s\n' "$@" > "$CALL_ARGS"
+STUB
+    chmod +x "$TMP/stubs/$terminal"
 }
 
 valid_url='https://www.youtube.com/watch?v=video123&list=PL123'
@@ -84,9 +136,44 @@ assert_launch audio "$valid_url" 'explicit URL and mode'
 pass 'passes explicit URLs and mode as separate arguments'
 
 PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='no active media' \
-    CLIPBOARD_SELECTION='' run_shortcut audio 'https://youtube.com.evil.invalid/watch?v=bad'
+    CLIPBOARD_SELECTION='' run_shortcut audio 'not a URL'
 assert_launch audio "$other_url" 'invalid explicit URL fallback'
-pass 'rejects invalid explicit hosts before using the validated primary selection'
+pass 'rejects plain-text explicit arguments before using the primary selection'
+
+for non_youtube_url in 'https://soundcloud.com/example/track' 'https://vimeo.com/12345'; do
+    run_shortcut video "$non_youtube_url"
+    assert_launch video "$non_youtube_url" 'non-YouTube explicit URL'
+done
+pass 'launches arbitrary safe HTTP(S) sites without a hold flag'
+
+for terminal_spec in \
+    'ptyxis --' 'kgx --' 'gnome-terminal --' 'xfce4-terminal -x' \
+    'mate-terminal --' 'tilix -e' 'alacritty -e' 'kitty -e' \
+    'xterm -e' 'x-terminal-emulator -e'; do
+    terminal=${terminal_spec%% *}
+    separator=${terminal_spec#* }
+    add_terminal_stub "$terminal"
+    rm -f "$CALL_ARGS" "$CALL_TERMINAL"
+    YTDL_TERMINAL=$terminal run_shortcut cut 'https://vimeo.com/12345'
+    assert_eq "$terminal" "$(<"$CALL_TERMINAL")" "$terminal override selection"
+    assert_terminal_args "$terminal" "$separator" cut 'https://vimeo.com/12345' "$terminal argv"
+done
+pass 'uses the required argv shape for every supported terminal emulator'
+
+for unsafe_url in \
+    'file:///etc/passwd' \
+    'javascript:alert(1)' \
+    'ftp://example.com/file' \
+    'https://user:pass@example.com/x' \
+    'https://example.com../x' \
+    'plain text' \
+    $'https://example.com/a\tb'; do
+    if run_shortcut audio "$unsafe_url" > "$TMP/unsafe.out" 2>&1; then
+        fail "unsafe URL unexpectedly succeeded: $unsafe_url"
+    fi
+    [[ ! -e "$CALL_ARGS" ]] || fail "unsafe URL launched a terminal: $unsafe_url"
+done
+pass 'rejects unsafe schemes, userinfo, whitespace, and plain text'
 
 uri_url='https://www.youtube.com/watch?v=uri123&list=PL456'
 uri="yt-dlp://cut?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Duri123%26list%3DPL456"
@@ -153,7 +240,7 @@ PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='QString "xesam:url": "https://www.you
 assert_launch audio "$valid_url" 'explicit URL precedence'
 pass 'valid explicit URL takes precedence over all fallbacks'
 
-run_shortcut audio 'https://youtube.com.evil.invalid/watch?v=bad' "$valid_url"
+run_shortcut audio 'not a URL' "$valid_url"
 assert_launch audio "$valid_url" 'invalid first candidate fallback'
 pass 'invalid first candidate falls through to valid second candidate'
 
@@ -199,8 +286,20 @@ pass 'valid primary selection takes precedence over MPRIS and clipboard'
 PRIMARY_SELECTION='https://youtube.com.evil.invalid/watch?v=bad' \
     MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
     CLIPBOARD_SELECTION="$valid_url" run_shortcut cut
+assert_launch cut 'https://youtube.com.evil.invalid/watch?v=bad' 'non-YouTube primary selection'
+pass 'accepts safe non-YouTube primary-selection URLs'
+
+WAYLAND_DISPLAY=wayland-test WL_PRIMARY_SELECTION='https://vimeo.com/wayland-primary' \
+    PRIMARY_SELECTION="$other_url" MPRIS_OUTPUT='not a URL' \
+    CLIPBOARD_SELECTION="$valid_url" run_shortcut audio
+assert_launch audio 'https://vimeo.com/wayland-primary' 'Wayland primary selection priority'
+pass 'prefers wl-paste for primary selection under Wayland'
+
+PRIMARY_SELECTION='not a URL' \
+    MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
+    CLIPBOARD_SELECTION="$valid_url" run_shortcut cut
 assert_launch cut 'https://www.youtube.com/watch?v=mpris123' 'MPRIS fallback'
-pass 'rejects bad primary selections and extracts xesam:url from MPRIS metadata'
+pass 'uses MPRIS after invalid primary selection and extracts xesam:url'
 
 live_mpris_url='https://www.youtube.com/watch?v=WQF8jqYn7xw'
 PRIMARY_SELECTION='not a URL' \
@@ -214,11 +313,90 @@ PRIMARY_SELECTION='not a URL' MPRIS_OUTPUT='no active media' \
 assert_launch audio "$other_url" 'clipboard fallback'
 pass 'uses validated clipboard after invalid primary and MPRIS values'
 
-PRIMARY_SELECTION='https://youtube.com.evil.invalid/watch?v=bad' \
-    MPRIS_OUTPUT='QString "xesam:url": "https://youtube.com.evil.invalid/watch?v=bad"' \
+PRIMARY_SELECTION='not a URL' MPRIS_OUTPUT='not a URL' \
+    CLIPBOARD_SELECTION='https://soundcloud.com/example/track' run_shortcut audio
+assert_launch audio 'https://soundcloud.com/example/track' 'non-YouTube clipboard URL'
+pass 'accepts safe non-YouTube clipboard URLs'
+
+PRIMARY_SELECTION='not a URL' \
+    MPRIS_OUTPUT='not a URL' \
     CLIPBOARD_SELECTION='file:///etc/passwd' run_shortcut audio && fail 'invalid fallback URLs unexpectedly launched'
 [[ ! -e "$CALL_ARGS" ]] || fail 'invalid primary, MPRIS, and clipboard values launched the wrapper'
 pass 'does not launch when every fallback URL is invalid'
+
+make_x11_path() {
+    local dir=$1 terminal=$2
+    mkdir -p "$dir"
+    ln -sf "$(command -v bash)" "$dir/bash"
+    ln -sf "$(command -v python3)" "$dir/python3"
+    for command_name in notify-send xclip playerctl "$terminal"; do
+        cat > "$dir/$command_name" <<'STUB'
+#!/usr/bin/env bash
+name=${0##*/}
+if [[ $name == xclip ]]; then
+    case " $* " in
+        *' primary '*) printf '%s' "${PRIMARY_SELECTION:-}" ;;
+        *) printf '%s' "${CLIPBOARD_SELECTION:-}" ;;
+    esac
+elif [[ $name == playerctl ]]; then
+    [[ ${1:-} == metadata && ${2:-} == xesam:url && -n ${MPRIS_OUTPUT:-} ]] || exit 1
+    printf '%s\n' "$MPRIS_OUTPUT"
+elif [[ $name == notify-send ]]; then
+    exit 0
+else
+    printf '%s\n' "$@" > "$CALL_ARGS"
+    printf '%s\n' "$name" > "$TMP/terminal-name"
+fi
+STUB
+        chmod +x "$dir/$command_name"
+    done
+}
+
+x11_gnome_bin="$TMP/x11-gnome-bin"
+make_x11_path "$x11_gnome_bin" gnome-terminal
+rm -f "$CALL_ARGS"
+env -u WAYLAND_DISPLAY -u YTDL_TERMINAL \
+    PATH="$x11_gnome_bin" HOME="$TMP/home" XDG_CURRENT_DESKTOP=GNOME \
+    PRIMARY_SELECTION='' MPRIS_OUTPUT='https://soundcloud.com/example/track' \
+    CLIPBOARD_SELECTION='' CALL_ARGS="$CALL_ARGS" TMP="$TMP" \
+    "$SHORTCUT" video
+assert_eq gnome-terminal "$(<"$TMP/terminal-name")" 'GNOME terminal selection'
+assert_terminal_args gnome-terminal -- video 'https://soundcloud.com/example/track' 'X11 gnome fallback'
+pass 'uses xclip and playerctl with gnome-terminal when Wayland tools and Konsole are absent'
+
+x11_kgx_bin="$TMP/x11-kgx-bin"
+make_x11_path "$x11_kgx_bin" kgx
+rm -f "$CALL_ARGS"
+env -u WAYLAND_DISPLAY -u YTDL_TERMINAL \
+    PATH="$x11_kgx_bin" HOME="$TMP/home" XDG_CURRENT_DESKTOP=GNOME \
+    PRIMARY_SELECTION='https://vimeo.com/12345' MPRIS_OUTPUT='' \
+    CLIPBOARD_SELECTION='' CALL_ARGS="$CALL_ARGS" TMP="$TMP" \
+    "$SHORTCUT" audio
+assert_eq kgx "$(<"$TMP/terminal-name")" 'GNOME kgx terminal fallback'
+assert_terminal_args kgx -- audio 'https://vimeo.com/12345' 'X11 kgx fallback'
+pass 'falls back to kgx and accepts non-YouTube X11 selection URLs'
+
+x11_xsel_bin="$TMP/x11-xsel-bin"
+make_x11_path "$x11_xsel_bin" gnome-terminal
+rm -f "$x11_xsel_bin/xclip"
+cat > "$x11_xsel_bin/xsel" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in
+    *' --primary '*) printf '%s' "${PRIMARY_SELECTION:-}" ;;
+    *) printf '%s' "${CLIPBOARD_SELECTION:-}" ;;
+esac
+STUB
+chmod +x "$x11_xsel_bin/xsel"
+rm -f "$CALL_ARGS"
+env -u WAYLAND_DISPLAY -u YTDL_TERMINAL \
+    PATH="$x11_xsel_bin" HOME="$TMP/home" XDG_CURRENT_DESKTOP=GNOME \
+    PRIMARY_SELECTION='not a URL' MPRIS_OUTPUT='' \
+    CLIPBOARD_SELECTION='https://soundcloud.com/example/track' \
+    CALL_ARGS="$CALL_ARGS" TMP="$TMP" \
+    "$SHORTCUT" audio
+assert_eq gnome-terminal "$(<"$TMP/terminal-name")" 'GNOME terminal with xsel fallback'
+assert_terminal_args gnome-terminal -- audio 'https://soundcloud.com/example/track' 'X11 xsel fallback'
+pass 'uses xsel after xclip is unavailable'
 
 for desktop in \
     "$ROOT/desktop/net.local.yt-dlp-shortcut.sh.desktop" \
