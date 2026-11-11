@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube yt-dlp controls
 // @namespace    https://github.com/gratis01/youtube-downloader
-// @version      1.0.0
+// @version      1.1.0
 // @description  Add compact yt-dlp actions to YouTube watch pages.
 // @match        https://youtube.com/*
 // @match        https://www.youtube.com/*
@@ -66,17 +66,17 @@
       [data-ytdl-controls] a {
         box-sizing: border-box;
         display: inline-flex;
-        height: 40px;
-        min-height: 40px;
+        height: 42px;
+        min-height: 42px;
         align-items: center;
         justify-content: center;
         gap: 8px;
         padding: 0 16px;
         border: 0;
-        border-radius: 20px;
+        border-radius: 21px;
         background: var(--yt-spec-badge-chip-background, #f2f2f2);
         color: var(--yt-spec-text-primary, #0f0f0f);
-        font: 500 14px Roboto, Arial, sans-serif;
+        font: 500 15px Roboto, Arial, sans-serif;
         line-height: 20px;
         text-decoration: none;
         white-space: nowrap;
@@ -98,9 +98,9 @@
         background: var(--yt-spec-10-percent-layer, rgba(255, 255, 255, .1));
       }
       [data-ytdl-controls] svg {
-        width: 20px;
-        height: 20px;
-        flex: 0 0 20px;
+        width: 22px;
+        height: 22px;
+        flex: 0 0 22px;
         fill: none;
         stroke: currentColor;
         stroke-width: 1.8;
