@@ -90,8 +90,9 @@ function testBackgroundStatic() {
   assert.ok(src.includes('icons/video.svg'), 'video item uses video icon');
   assert.ok(src.includes('icons/cut.svg'), 'cut item uses cut icon');
   assert.ok(!src.includes('documentUrlPatterns'), 'menu creation omits restrictive documentUrlPatterns');
-  assert.ok(src.includes('targetUrlPatterns'), 'menu targets YouTube link destinations');
+  assert.ok(!src.includes('targetUrlPatterns'), 'menu creation omits targetUrlPatterns (rejected for bare pages, thumbnails, previews)');
   assert.ok(src.includes('onShown'), 'menu visibility is gated by onShown');
+  assert.ok(src.includes('frameUrl'), 'onShown also considers frame targets');
   assert.ok(src.includes('ytdl-get-context-url'), 'background queries content script for context URL');
   assert.ok(src.includes('sendNativeMessage'), 'background uses sendNativeMessage');
   assert.ok(src.includes('firefox_youtube_downloader'), 'background uses the native host id');
@@ -104,7 +105,8 @@ function testBackgroundStatic() {
 function runBackgroundFixture() {
   const src = readFile('extension/background.js');
   const created = [];
-  const handlers = { clicked: null, shown: null, message: null };
+  const handlers = { clicked: null, shown: null, message: null, installed: null };
+  const listenerCounts = { clicked: 0, shown: 0, message: 0, installed: 0 };
   const calls = { nativeMessages: [], tabsCreated: [], sentTabMessages: [], updates: [], refreshes: 0 };
   let nativeShouldReject = false;
   let nativeResponse = { ok: true, launched: true };
@@ -112,8 +114,8 @@ function runBackgroundFixture() {
   const browser = {
     menus: {
       create(item) { created.push(item); return Promise.resolve(item.id); },
-      onClicked: { addListener(fn) { handlers.clicked = fn; } },
-      onShown: { addListener(fn) { handlers.shown = fn; } },
+      onClicked: { addListener(fn) { handlers.clicked = fn; listenerCounts.clicked += 1; } },
+      onShown: { addListener(fn) { handlers.shown = fn; listenerCounts.shown += 1; } },
       refresh() { calls.refreshes += 1; return Promise.resolve(); },
       update(id, props) { calls.updates.push({ id, props }); return Promise.resolve(); },
     },
@@ -128,7 +130,8 @@ function runBackgroundFixture() {
         if (nativeShouldReject) return Promise.reject(new Error('No such native application'));
         return Promise.resolve(nativeResponse);
       },
-      onMessage: { addListener(fn) { handlers.message = fn; } },
+      onMessage: { addListener(fn) { handlers.message = fn; listenerCounts.message += 1; } },
+      onInstalled: { addListener(fn) { handlers.installed = fn; listenerCounts.installed += 1; } },
       getURL(p) { return `moz-extension://fake/${p}`; },
       lastError: undefined,
     },
@@ -139,7 +142,9 @@ function runBackgroundFixture() {
   return {
     created,
     handlers,
+    listenerCounts,
     calls,
+    fireInstalled() { if (handlers.installed) handlers.installed(); },
     setNativeReject(v) { nativeShouldReject = v; },
     setNativeResponse(v) { nativeResponse = v; },
     setTabMessageResponse(v) { tabMessageResponse = v; },
@@ -223,19 +228,41 @@ async function testBackgroundErrorResponseSkipsOnboarding() {
 }
 
 async function testBackgroundOnShownGatesExternalLinks() {
-  const { created, handlers, calls } = runBackgroundFixture();
+  const { created, handlers, listenerCounts, calls, fireInstalled } = runBackgroundFixture();
   await new Promise((resolve) => setTimeout(resolve, 0));
+  const expectedContexts = ['page', 'frame', 'link', 'image', 'video', 'audio'];
+  assert.equal(created.length, 4, 'four menu items created');
   for (const item of created) {
     assert.ok(!('documentUrlPatterns' in item), `${item.id} omits documentUrlPatterns`);
+    assert.ok(!('targetUrlPatterns' in item), `${item.id} omits targetUrlPatterns`);
+    assert.equal(JSON.stringify(item.contexts), JSON.stringify(expectedContexts), `${item.id} declares all six contexts`);
   }
   assert.ok(handlers.shown, 'onShown handler registered');
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const lastVisible = () => calls.updates.filter((u) => u.id === 'ytdl-root').pop().props.visible;
+  // Watch page, video-preview target (blob: srcUrl), no linkUrl.
+  handlers.shown({ pageUrl: 'https://www.youtube.com/watch?v=abc123', srcUrl: 'blob:https://www.youtube.com/123' });
+  await tick();
+  assert.equal(lastVisible(), true, 'blob preview on watch page shows ytdl-root');
+  // Watch page, thumbnail target (i.ytimg.com srcUrl), no linkUrl.
+  handlers.shown({ pageUrl: 'https://www.youtube.com/watch?v=abc123', srcUrl: 'https://i.ytimg.com/vi/abc/hqdefault.jpg' });
+  await tick();
+  assert.equal(lastVisible(), true, 'thumbnail on watch page shows ytdl-root');
   handlers.shown({ pageUrl: 'https://example.com/', linkUrl: 'https://www.youtube.com/watch?v=ext1' });
   await tick();
-  assert.ok(calls.updates.some((u) => u.id === 'ytdl-root' && u.props.visible === true), 'YouTube link on external site shows ytdl-root');
+  assert.equal(lastVisible(), true, 'YouTube link on external site shows ytdl-root');
   handlers.shown({ pageUrl: 'https://example.com/', linkUrl: 'https://example.com/other' });
   await tick();
-  assert.ok(calls.updates.some((u) => u.id === 'ytdl-root' && u.props.visible === false), 'non-YouTube link on external site hides ytdl-root');
+  assert.equal(lastVisible(), false, 'non-YouTube link on external site hides ytdl-root');
+  handlers.shown({ pageUrl: 'https://example.com/' });
+  await tick();
+  assert.equal(lastVisible(), false, 'external page with no YouTube URL hides ytdl-root');
+  // onInstalled re-runs setup without duplicating listener registrations.
+  fireInstalled();
+  await tick();
+  fireInstalled();
+  await tick();
+  assert.deepEqual(listenerCounts, { clicked: 1, shown: 1, message: 1, installed: 1 }, 'listeners and hooks registered exactly once');
 }
 
 // --- content.css ---
