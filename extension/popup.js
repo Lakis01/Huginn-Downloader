@@ -1,0 +1,177 @@
+'use strict';
+
+/* Settings popup: ping the native companion, edit config when
+   connected, and show one-line setup when disconnected. */
+
+const HOST_ID = 'firefox_youtube_downloader';
+const INSTALL_CMD = './install.sh --install';
+
+const PRESETS = {
+  keep: null,
+  music: '~/Music/Youtube Downloads',
+  downloads: '~/Downloads/Youtube',
+};
+
+function ext() {
+  if (typeof browser !== 'undefined' && browser) return browser;
+  if (typeof chrome !== 'undefined' && chrome) return chrome;
+  return null;
+}
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+function queryParam(name) {
+  try {
+    return new URLSearchParams(window.location.search).get(name);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function setVisible(connected) {
+  $('connectedView').hidden = !connected;
+  $('setupView').hidden = connected;
+  const dot = $('statusDot');
+  dot.classList.toggle('ok', connected);
+  dot.classList.toggle('bad', !connected);
+}
+
+function expandHome(value) {
+  if (value === null || value === undefined) return null;
+  if (value.startsWith('~/')) return value;
+  return value;
+}
+
+function presetKeyFor(downloadDir) {
+  if (downloadDir === null || downloadDir === undefined || downloadDir === '') return 'keep';
+  for (const [key, preset] of Object.entries(PRESETS)) {
+    if (key !== 'keep' && preset === downloadDir) return key;
+  }
+  return 'custom';
+}
+
+function renderConnected(response) {
+  setVisible(true);
+  $('statusText').textContent = `Connected (companion ${response.version || 'unknown'})`;
+  const config = response.config || {};
+  $('autoTag').checked = config.auto_tag !== false;
+  $('rsgain').checked = config.rsgain === true;
+
+  const key = presetKeyFor(config.download_dir);
+  for (const radio of document.querySelectorAll('input[name="folder"]')) {
+    radio.checked = radio.value === key;
+  }
+  $('customDir').hidden = key !== 'custom';
+  if (key === 'custom') $('customDir').value = config.download_dir || '';
+
+  const effective = response.effective_download_dir;
+  $('effectiveDir').textContent = effective
+    ? `Saving to ${effective}${response.ytdlp_config_exists ? '' : ' (yt-dlp config not found, using app default)'}`
+    : 'Download folder follows your yt-dlp config.';
+  const deps = response.deps || {};
+  const missing = Object.entries(deps)
+    .filter(([, ok]) => !ok)
+    .map(([name]) => name);
+  $('depsLine').textContent = missing.length
+    ? `Missing tools: ${missing.join(', ')}`
+    : 'Tools ready: yt-dlp, ffmpeg, rsgain.';
+}
+
+function renderDisconnected() {
+  setVisible(false);
+  $('statusText').textContent = 'Companion not connected';
+  if ($('installCmd')) $('installCmd').textContent = INSTALL_CMD;
+}
+
+async function refresh() {
+  const api = ext();
+  $('statusText').textContent = 'Checking companion connection...';
+  if (!api) {
+    renderDisconnected();
+    return;
+  }
+  try {
+    const response = await api.runtime.sendNativeMessage(HOST_ID, { action: 'ping' });
+    if (response && response.ok) renderConnected(response);
+    else renderDisconnected();
+  } catch (_error) {
+    renderDisconnected();
+  }
+}
+
+async function saveConfig(patch) {
+  const api = ext();
+  if (!api) return;
+  try {
+    const response = await api.runtime.sendNativeMessage(HOST_ID, {
+      action: 'set_config',
+      config: patch,
+    });
+    if (response && response.ok) renderConnected(response);
+  } catch (_error) {
+    renderDisconnected();
+  }
+}
+
+function currentFolderValue() {
+  const checked = document.querySelector('input[name="folder"]:checked');
+  const key = checked ? checked.value : 'keep';
+  if (key === 'custom') {
+    const custom = $('customDir').value.trim();
+    return custom || null;
+  }
+  return expandHome(PRESETS[key] !== undefined ? PRESETS[key] : null);
+}
+
+async function copyInstallCommand() {
+  const note = $('copyNote');
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(INSTALL_CMD);
+    } else {
+      const area = document.createElement('textarea');
+      area.value = INSTALL_CMD;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+    }
+    note.textContent = 'Copied. Run it in the project folder, then retry.';
+  } catch (_error) {
+    note.textContent = 'Copy failed. Type the command above by hand.';
+  }
+}
+
+function main() {
+  const view = queryParam('view');
+  const onboarding = queryParam('onboarding');
+  if (view === 'options') document.querySelector('.panel').setAttribute('data-view', 'options');
+  if (onboarding) document.querySelector('.panel').setAttribute('data-view', 'onboarding');
+  if (onboarding) renderDisconnected();
+
+  $('autoTag').addEventListener('change', (event) => {
+    saveConfig({ auto_tag: event.target.checked });
+  });
+  $('rsgain').addEventListener('change', (event) => {
+    saveConfig({ rsgain: event.target.checked });
+  });
+  for (const radio of document.querySelectorAll('input[name="folder"]')) {
+    radio.addEventListener('change', () => {
+      const checked = document.querySelector('input[name="folder"]:checked');
+      const isCustom = !!checked && checked.value === 'custom';
+      $('customDir').hidden = !isCustom;
+      if (!isCustom) saveConfig({ download_dir: currentFolderValue() });
+    });
+  }
+  $('customDir').addEventListener('change', () => {
+    saveConfig({ download_dir: currentFolderValue() });
+  });
+  $('copyBtn').addEventListener('click', copyInstallCommand);
+  $('retryBtn').addEventListener('click', refresh);
+
+  refresh();
+}
+
+document.addEventListener('DOMContentLoaded', main);

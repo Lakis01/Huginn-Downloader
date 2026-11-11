@@ -1,0 +1,95 @@
+/* Segmented YouTube Downloader pill for watch pages.
+   Light surface matches the like/dislike segmented pill; dark
+   surface follows html[dark]. Never use badge-chip variables here:
+   they resolve to near-invisible 5% white on dark YouTube. */
+
+[data-ytdl-controls] {
+  display: inline-flex;
+  align-items: stretch;
+  height: 38px;
+  margin-inline-start: 8px;
+  vertical-align: middle;
+  border-radius: 19px;
+  background: #f2f2f2;
+  background: rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+html[dark] [data-ytdl-controls] {
+  background: #272727;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-ytdl-controls] button {
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--yt-spec-text-primary, #0f0f0f);
+  font: 500 14px/20px Roboto, Arial, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+html[dark] [data-ytdl-controls] button {
+  color: var(--yt-spec-text-primary, #f1f1f1);
+}
+
+[data-ytdl-controls] button + button {
+  position: relative;
+}
+
+[data-ytdl-controls] button + button::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  width: 1px;
+  height: 18px;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+html[dark] [data-ytdl-controls] button + button::before {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+[data-ytdl-controls] button:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html[dark] [data-ytdl-controls] button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-ytdl-controls] button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html[dark] [data-ytdl-controls] button:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-ytdl-controls] button[data-launching="true"] {
+  opacity: 0.55;
+}
+
+[data-ytdl-controls] button svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
