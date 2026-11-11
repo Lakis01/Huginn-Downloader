@@ -41,22 +41,31 @@ def full_export():
             "args": f'{mode} "[HREF]"',
             "pre": "document.currentScript.output = location.href;",
             "post": f"post-{mode}",
-            "toolbar": {"enabled": True, "position": index},
+            "toolbar": True,
             "context": ["page", "frame", "link", "image", "audio", "video"],
             "pattern": "*://*.youtube.com/*",
             "filters": "",
-            "redirects": [f"redirect-{mode}"],
-            "index": index,
+            "redirects": f"redirect-{mode}",
+            "index": str(index),
             "vendor-option": {"keep": [index, mode]},
         }
     apps["other-app-id"] = {
-        "name": "Unrelated App",
         "icon": "data:image/png;base64,other-icon",
+        "errors": False,
+        "quotes": True,
+        "closeme": False,
+        "changestate": "none",
+        "name": "Unrelated App",
         "path": "/custom/bin/other",
         "args": "--keep-me",
+        "pre": "preserve-this-pre-script",
+        "post": "preserve-this-post-script",
+        "toolbar": False,
         "context": ["link"],
         "pattern": "*",
         "filters": "other-document-filter",
+        "redirects": "",
+        "index": "3",
         "unrelated": {"preference": 17},
     }
     return {
@@ -110,6 +119,20 @@ class PatchSettingsTests(unittest.TestCase):
         source["apps"]["duplicate-id"] = copy.deepcopy(source["apps"]["audio-id"])
 
         with self.assertRaises(SettingsPatchError):
+            patch_settings(source)
+
+    def test_refuses_unrelated_app_missing_required_core_field(self):
+        source = full_export()
+        del source["apps"]["other-app-id"]["pre"]
+
+        with self.assertRaisesRegex(SettingsPatchError, "pre"):
+            patch_settings(source)
+
+    def test_refuses_unrelated_app_with_invalid_core_field_type(self):
+        source = full_export()
+        source["apps"]["other-app-id"]["toolbar"] = "enabled"
+
+        with self.assertRaisesRegex(SettingsPatchError, "toolbar"):
             patch_settings(source)
 
     def test_patch_file_refuses_existing_output_and_does_not_change_source(self):

@@ -25,17 +25,23 @@ YOUTUBE_DOCUMENT_FILTER = (
     "https://www.youtube.com/*, https://music.youtube.com/*"
 )
 REQUIRED_TOP_LEVEL_KEYS = {"active", "apps", "last-update", "save"}
-REQUIRED_APP_KEYS = {
-    "icon",
-    "name",
-    "path",
-    "args",
-    "pre",
-    "post",
-    "toolbar",
-    "context",
-    "pattern",
-    "filters",
+REQUIRED_APP_FIELD_TYPES = {
+    "icon": str,
+    "errors": bool,
+    "quotes": bool,
+    "closeme": bool,
+    "changestate": str,
+    "name": str,
+    "path": str,
+    "args": str,
+    "pre": str,
+    "post": str,
+    "toolbar": bool,
+    "context": list,
+    "pattern": str,
+    "filters": str,
+    "redirects": str,
+    "index": str,
 }
 
 
@@ -67,10 +73,32 @@ def patch_settings(settings: dict[str, Any]) -> dict[str, Any]:
         name: [] for name in TARGET_APPS
     }
     for app_id, app in settings["apps"].items():
-        if not isinstance(app, dict) or not isinstance(app.get("name"), str):
+        if not isinstance(app, dict):
             raise SettingsPatchError(
-                f"incomplete EAL export; app {app_id!r} is not a named object"
+                f"incomplete EAL export; app {app_id!r} must be an object"
             )
+
+        missing_fields = REQUIRED_APP_FIELD_TYPES.keys() - app.keys()
+        if missing_fields:
+            missing = ", ".join(sorted(missing_fields))
+            raise SettingsPatchError(
+                f"incomplete EAL app {app_id!r}; missing fields: {missing}"
+            )
+
+        for field, expected_type in REQUIRED_APP_FIELD_TYPES.items():
+            value = app[field]
+            if not isinstance(value, expected_type) or (
+                expected_type is bool and type(value) is not bool
+            ):
+                raise SettingsPatchError(
+                    f"incomplete EAL app {app_id!r}; field {field!r} "
+                    f"must be {expected_type.__name__}"
+                )
+        if any(not isinstance(context, str) for context in app["context"]):
+            raise SettingsPatchError(
+                f"incomplete EAL app {app_id!r}; field 'context' must contain strings"
+            )
+
         if app["name"] in matches:
             matches[app["name"]].append((app_id, app))
 
@@ -79,12 +107,6 @@ def patch_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise SettingsPatchError(f"missing target app: {name}")
         if len(found) > 1:
             raise SettingsPatchError(f"duplicate target app name: {name}")
-        missing_fields = REQUIRED_APP_KEYS - found[0][1].keys()
-        if missing_fields:
-            missing = ", ".join(sorted(missing_fields))
-            raise SettingsPatchError(
-                f"incomplete target app {name!r}; missing fields: {missing}"
-            )
 
     patched = copy.deepcopy(settings)
     for app_name, mode in TARGET_APPS.items():
