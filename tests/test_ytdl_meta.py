@@ -1,5 +1,6 @@
 import os
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -583,6 +584,36 @@ class WrapperTests(unittest.TestCase):
                 ["rsgain", "custom", "-s", "i", str(expected_target)], check=True
             )
 
+    def test_finalize_prefers_and_cleans_stem_info_sidecar(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media_path = Path(tmp) / "Tommo - The Liam Lawson problem.opus"
+            thumbnail = self._write_download_sidecars(
+                media_path,
+                {"title": "wrong fallback", "channel": "Wrong Artist"},
+            )
+            stem_info_path = media_path.with_suffix(".info.json")
+            stem_info_path.write_text(
+                json.dumps({"title": "The Liam Lawson problem", "channel": "Tommo"}),
+                encoding="utf-8",
+            )
+            tagged_metadata = []
+
+            def tag_copy(path, meta, thumbnail_path=None):
+                tagged_metadata.append(meta)
+                with open(path, "ab") as tagged_file:
+                    tagged_file.write(b"+tagged")
+
+            with mock.patch.object(wrapper, "tag_audio_file", side_effect=tag_copy):
+                with mock.patch.object(wrapper.subprocess, "run"):
+                    result = wrapper.finalize_audio_download(str(media_path))
+
+            self.assertEqual(Path(result), media_path)
+            self.assertEqual(tagged_metadata[0]["title"], "The Liam Lawson problem")
+            self.assertEqual(tagged_metadata[0]["artist"], "Tommo")
+            self.assertFalse(stem_info_path.exists())
+            self.assertFalse(thumbnail.exists())
+
     def test_failed_retag_preserves_download_and_sidecars_and_skips_rsgain(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:
@@ -685,7 +716,11 @@ class WrapperTests(unittest.TestCase):
             def tag_copy(path, meta, thumbnail_path=None):
                 tagged_thumbnails.append(thumbnail_path)
 
-            with mock.patch.object(wrapper, "parse_audio", return_value=self._metadata()):
+            with mock.patch.object(
+                wrapper,
+                "_parse_audio_with_access",
+                return_value=(self._metadata(), False),
+            ):
                 with mock.patch.object(wrapper, "tag_audio_file", side_effect=tag_copy):
                     with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
                         wrapper.download_audio("https://example.invalid/watch?v=audio")
@@ -705,6 +740,134 @@ class WrapperTests(unittest.TestCase):
                 [["rsgain", "custom", "-s", "i", str(Path(tmp) / "Artist - Track.opus")]],
             )
 
+    def test_audio_download_retries_auth_metadata_with_browser_cookies_and_reuses_them(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            moved_media = Path(tmp) / "yt-dlp-post-move.opus"
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append((command, kwargs))
+                if "--dump-json" in command:
+                    if len([call for call, _ in calls if "--dump-json" in call]) == 1:
+                        raise subprocess.CalledProcessError(
+                            1, command, stderr="ERROR: Sign in to confirm your age"
+                        )
+                    return SimpleNamespace(
+                        stdout=json.dumps({"title": "Track", "channel": "Artist"})
+                    )
+                return SimpleNamespace(stdout=f"{moved_media}\n")
+
+            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                with mock.patch.object(wrapper, "finalize_audio_download") as finalize:
+                    wrapper.download_audio("https://example.invalid/watch?v=audio")
+
+            metadata_command = calls[0][0]
+            retry_command = calls[1][0]
+            audio_command = calls[2][0]
+            self.assertNotIn("--cookies-from-browser", metadata_command)
+            self.assertEqual(
+                retry_command[
+                    retry_command.index("--cookies-from-browser") + 1
+                ],
+                "firefox",
+            )
+            self.assertEqual(
+                audio_command[audio_command.index("--cookies-from-browser") + 1],
+                "firefox",
+            )
+            self.assertEqual(finalize.call_args.args[0], str(moved_media))
+
+    def test_cut_download_reuses_browser_cookies_after_auth_metadata_retry(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            moved_media = Path(tmp) / "cut-after-move.opus"
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append((command, kwargs))
+                if "--dump-json" in command:
+                    if len([call for call, _ in calls if "--dump-json" in call]) == 1:
+                        raise subprocess.CalledProcessError(
+                            1, command, stderr="ERROR: Sign in to confirm you're not a bot"
+                        )
+                    return SimpleNamespace(
+                        stdout=json.dumps({"title": "Track", "channel": "Artist", "duration": 100})
+                    )
+                return SimpleNamespace(stdout=f"{moved_media}\n")
+
+            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                with mock.patch(
+                    "builtins.input",
+                    side_effect=["0:10", "0:50", "160", "1", "voip"],
+                ):
+                    with mock.patch.object(wrapper, "finalize_audio_download") as finalize:
+                        wrapper.interactive_cut("https://example.invalid/watch?v=cut")
+
+            metadata_retry = calls[1][0]
+            cut_command = calls[2][0]
+            self.assertEqual(
+                metadata_retry[metadata_retry.index("--cookies-from-browser") + 1],
+                "firefox",
+            )
+            self.assertEqual(
+                cut_command[cut_command.index("--cookies-from-browser") + 1],
+                "firefox",
+            )
+            self.assertIn("--download-sections", cut_command)
+            self.assertEqual(finalize.call_args.args[0], str(moved_media))
+
+    def test_final_members_only_error_is_clear_and_does_not_print_traceback(self):
+        wrapper = _load_wrapper(self)
+        calls = []
+
+        def fail_metadata(command, **kwargs):
+            calls.append(command)
+            message = "This video is available to this channel's members only"
+            raise subprocess.CalledProcessError(1, command, stderr=message)
+
+        with mock.patch.object(wrapper.subprocess, "run", side_effect=fail_metadata):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                    try:
+                        result = wrapper.main(
+                            ["yt-dlp-wrapper.py", "audio", "https://example.invalid/members"]
+                        )
+                    except SystemExit as error:
+                        result = error.code
+
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("--cookies-from-browser", calls[0])
+        self.assertIn("--cookies-from-browser", calls[1])
+        self.assertIn("members only", output)
+        self.assertNotIn("Traceback", output)
+
+    def test_non_auth_metadata_error_is_not_retried_with_browser_cookies(self):
+        wrapper = _load_wrapper(self)
+        calls = []
+
+        def fail_metadata(command, **kwargs):
+            calls.append(command)
+            raise subprocess.CalledProcessError(
+                1, command, stderr="ERROR: Unable to download webpage: HTTP Error 500"
+            )
+
+        with mock.patch.object(wrapper.subprocess, "run", side_effect=fail_metadata):
+            with mock.patch("sys.stderr", new_callable=io.StringIO):
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    try:
+                        result = wrapper.main(
+                            ["yt-dlp-wrapper.py", "audio", "https://example.invalid/server-error"]
+                        )
+                    except SystemExit:
+                        result = None
+
+        self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("--cookies-from-browser", calls[0])
+
     def test_cut_keeps_requested_ffmpeg_options_and_finalizes_without_embed_metadata(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:
@@ -721,7 +884,11 @@ class WrapperTests(unittest.TestCase):
                     return SimpleNamespace(stdout=f"{moved_media}\n", returncode=0)
                 return SimpleNamespace(stdout="", returncode=0)
 
-            with mock.patch.object(wrapper, "parse_audio", return_value=self._metadata()):
+            with mock.patch.object(
+                wrapper,
+                "_parse_audio_with_access",
+                return_value=(self._metadata(), False),
+            ):
                 with mock.patch(
                     "builtins.input", side_effect=["0:10", "0:50", "160", "1", "voip"]
                 ):

@@ -13,22 +13,102 @@ from ytdl_meta import parse_info, sanitize_filename, tag_audio_file
 
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+_AUTH_ERROR_MARKERS = (
+    "members-only",
+    "members only",
+    "available to members",
+    "members of this channel",
+    "sign in",
+    "sign-in",
+    "signin",
+    "confirm your age",
+    "age-restricted",
+    "age restricted",
+    "private video",
+    "this video is private",
+    "login required",
+    "log in to",
+    "authentication required",
+    "not a bot",
+)
+
+
+class _YtDlpError(RuntimeError):
+    """A user-facing yt-dlp failure without subprocess traceback details."""
+
+
+def _yt_dlp_error_text(error):
+    for output in (getattr(error, "stderr", None), getattr(error, "output", None)):
+        if isinstance(output, bytes):
+            output = output.decode(errors="replace")
+        if isinstance(output, str) and output.strip():
+            return output.strip()
+    if isinstance(error, subprocess.CalledProcessError):
+        return f"yt-dlp exited with status {error.returncode}"
+    return str(error)
+
+
+def _is_auth_error(error):
+    if not isinstance(error, subprocess.CalledProcessError):
+        return False
+    message = "\n".join(
+        str(output)
+        for output in (getattr(error, "stderr", None), getattr(error, "output", None))
+        if output
+    ).lower()
+    return any(marker in message for marker in _AUTH_ERROR_MARKERS)
+
+
+def _metadata_command(url, browser=None):
+    command = ["yt-dlp"]
+    if browser:
+        command.extend(["--cookies-from-browser", browser])
+    command.extend(["--dump-json", "--no-warnings", "--no-playlist", url])
+    return command
+
+
+def _parse_audio_with_access(url):
+    """Return metadata and whether the browser cookies were needed to read it."""
+    command = _metadata_command(url)
+    use_browser_cookies = False
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        if not _is_auth_error(error):
+            raise _YtDlpError(_yt_dlp_error_text(error)) from None
+        use_browser_cookies = True
+        try:
+            result = subprocess.run(
+                _metadata_command(url, "firefox"),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception as retry_error:
+            raise _YtDlpError(_yt_dlp_error_text(retry_error)) from None
+    except Exception as error:
+        raise _YtDlpError(_yt_dlp_error_text(error)) from None
+
+    try:
+        info = json.loads(result.stdout)
+    except Exception as error:
+        raise _YtDlpError(f"yt-dlp returned invalid metadata: {error}") from None
+    return parse_info(info), use_browser_cookies
 
 
 def parse_audio(url):
     """Fetch metadata without downloading media and parse it for the prompts."""
     try:
-        result = subprocess.run(
-            ["yt-dlp", "--dump-json", "--no-warnings", "--no-playlist", url],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        info = json.loads(result.stdout)
-    except Exception as error:
+        meta, _ = _parse_audio_with_access(url)
+    except _YtDlpError as error:
         print("Failed to get info:", error)
-        raise SystemExit(1)
-    return parse_info(info)
+        raise SystemExit(1) from None
+    return meta
 
 
 def parse_time(time_str):
@@ -48,6 +128,10 @@ def format_time(seconds):
 
 
 def _info_sidecar_path(media_path):
+    media_path = Path(media_path)
+    stem_sidecar = media_path.with_suffix(".info.json")
+    if stem_sidecar.is_file():
+        return stem_sidecar
     return Path(f"{media_path}.info.json")
 
 
@@ -204,12 +288,15 @@ def _audio_output_template(meta, suffix=""):
 
 
 def _download_audio_and_finalize(command, filename_suffix=""):
-    result = subprocess.run(
-        command,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as error:
+        raise _YtDlpError(_yt_dlp_error_text(error)) from None
     lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
     if not lines:
         raise RuntimeError("yt-dlp did not report the post-move media filepath")
@@ -218,7 +305,7 @@ def _download_audio_and_finalize(command, filename_suffix=""):
 
 def download_audio(url):
     print(f"Analyzing {url}...")
-    meta = parse_audio(url)
+    meta, use_browser_cookies = _parse_audio_with_access(url)
 
     if meta["is_tagged"]:
         print("\n\033[1;32mDetected High-Quality Auto-Generated Audio track.\033[0m")
@@ -244,6 +331,8 @@ def download_audio(url):
         "--print", "after_move:filepath",
         url,
     ]
+    if use_browser_cookies:
+        command[1:1] = ["--cookies-from-browser", "firefox"]
     _download_audio_and_finalize(command)
 
 
@@ -265,7 +354,7 @@ def download_video(url):
 
 def interactive_cut(url):
     print(f"Fetching metadata for {url}...")
-    meta = parse_audio(url)
+    meta, use_browser_cookies = _parse_audio_with_access(url)
     duration = meta.get("duration", 0)
 
     if duration == 0:
@@ -331,6 +420,8 @@ def interactive_cut(url):
         "--print", "after_move:filepath",
         url,
     ]
+    if use_browser_cookies:
+        command[1:1] = ["--cookies-from-browser", "firefox"]
     _download_audio_and_finalize(command, f"_cut_{int(start_sec)}_{int(end_sec)}")
 
 
@@ -341,14 +432,18 @@ def main(argv=None):
         return 1
 
     mode, url = argv[1], argv[2]
-    if mode == "audio":
-        download_audio(url)
-    elif mode == "video":
-        download_video(url)
-    elif mode == "cut":
-        interactive_cut(url)
-    else:
-        print("Unknown mode.")
+    try:
+        if mode == "audio":
+            download_audio(url)
+        elif mode == "video":
+            download_video(url)
+        elif mode == "cut":
+            interactive_cut(url)
+        else:
+            print("Unknown mode.")
+            return 1
+    except _YtDlpError as error:
+        print(f"yt-dlp failed: {error}", file=sys.stderr)
         return 1
     return 0
 
