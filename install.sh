@@ -223,11 +223,29 @@ if ! $IS_MACOS; then
     command -v xdg-mime >/dev/null 2>&1 || { printf 'xdg-mime is required to register the URI handler.\n' >&2; exit 1; }
 fi
 command -v python3 >/dev/null 2>&1 || { printf 'python3 is required to install configuration and stage desktop entries.\n' >&2; exit 1; }
+if $IS_MACOS; then
+    PYTHON_BIN=$(command -v python3)
+fi
 
 TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
 STAGING_DIR=$(mktemp -d)
 cleanup() { rm -rf -- "$STAGING_DIR"; }
 trap cleanup EXIT
+
+if $IS_MACOS; then
+    STAGED_NATIVE_HOST="$STAGING_DIR/yt-dlp-native-host.py"
+    python3 - "$BIN_SOURCE/yt-dlp-native-host.py" "$STAGED_NATIVE_HOST" "$PYTHON_BIN" <<'PY'
+from pathlib import Path
+import sys
+
+source, destination, python_bin = sys.argv[1:]
+contents = Path(source).read_text(encoding="utf-8")
+first_line, separator, remainder = contents.partition("\n")
+if first_line.rstrip("\r") != "#!/usr/bin/env python3":
+    raise SystemExit(f"Unexpected native host shebang: {first_line!r}")
+Path(destination).write_text(f"#!{python_bin}\n{remainder}", encoding="utf-8")
+PY
+fi
 
 stage_desktop() {
     local source=$1 output=$2 shortcut_path=$3
@@ -368,7 +386,11 @@ fi
 "$ROOT/scripts/build-xpi.sh"
 
 for file in "${BIN_FILES[@]}"; do
-    install_source "$BIN_SOURCE/$file" "$BIN_TARGET/$file" 755
+    source_file="$BIN_SOURCE/$file"
+    if $IS_MACOS && [[ $file == yt-dlp-native-host.py ]]; then
+        source_file=$STAGED_NATIVE_HOST
+    fi
+    install_source "$source_file" "$BIN_TARGET/$file" 755
 done
 if ! $IS_MACOS; then
     for file in "${DESKTOP_FILES[@]}"; do
@@ -396,7 +418,7 @@ with open(destination, "w", encoding="utf-8") as stream:
     stream.write("\n")
 PY
 install_source "$manifest_template" "$HOME_NATIVE_MANIFEST" 644
-if [[ $NATIVE_MANIFESTS_SAME == false ]]; then
+if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     install_source "$manifest_template" "$XDG_NATIVE_MANIFEST" 644
 fi
 

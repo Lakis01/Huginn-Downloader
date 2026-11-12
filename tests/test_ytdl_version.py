@@ -62,6 +62,9 @@ class DetectUpdateCommandTests(unittest.TestCase):
         )
         self.assertIn("apt", hint)
         self.assertIn("yt-dlp", hint)
+        self.assertTrue(
+            "backports" in hint.lower() or "pipx" in hint.lower(), hint
+        )
 
     def test_lmde_usr_bin_uses_apt(self):
         hint = ytdl_version.detect_update_command(
@@ -70,6 +73,25 @@ class DetectUpdateCommandTests(unittest.TestCase):
             os_release_text=self.LMDE_RELEASE,
         )
         self.assertIn("apt", hint)
+        self.assertTrue(
+            "backports" in hint.lower() or "pipx" in hint.lower(), hint
+        )
+
+    def test_opensuse_usr_bin_uses_zypper(self):
+        hint = ytdl_version.detect_update_command(
+            ytdlp_path="/usr/bin/yt-dlp",
+            platform_name="linux",
+            os_release_text='ID=opensuse-tumbleweed\nID_LIKE="suse opensuse"\n',
+        )
+        self.assertEqual(hint, "sudo zypper up yt-dlp")
+
+    def test_unknown_linux_usr_bin_keeps_generic_apt_hint(self):
+        hint = ytdl_version.detect_update_command(
+            ytdlp_path="/usr/bin/yt-dlp",
+            platform_name="linux",
+            os_release_text="ID=unknown\n",
+        )
+        self.assertEqual(hint, "sudo apt update && sudo apt install -y yt-dlp")
 
     def test_pipx_path_uses_pipx_upgrade(self):
         hint = ytdl_version.detect_update_command(
@@ -94,6 +116,20 @@ class DetectUpdateCommandTests(unittest.TestCase):
         )
         self.assertEqual(hint, "brew upgrade yt-dlp")
 
+    def test_macos_non_homebrew_local_bin_uses_self_update(self):
+        hint = ytdl_version.detect_update_command(
+            ytdlp_path="~/.local/bin/yt-dlp",
+            platform_name="darwin",
+        )
+        self.assertEqual(hint, "yt-dlp -U")
+
+    def test_windows_scoop_path_uses_scoop_update(self):
+        hint = ytdl_version.detect_update_command(
+            ytdlp_path=r"C:\Users\user\scoop\apps\yt-dlp\current\yt-dlp.exe",
+            platform_name="nt",
+        )
+        self.assertEqual(hint, "scoop update yt-dlp")
+
     def test_windows_winget_upgrade(self):
         hint = ytdl_version.detect_update_command(
             ytdlp_path=r"C:\Users\user\AppData\Local\Microsoft\WinGet\Packages\yt-dlp.yt-dlp\yt-dlp.exe",
@@ -115,6 +151,60 @@ class DetectUpdateCommandTests(unittest.TestCase):
 
 
 class CheckUpdateTests(unittest.TestCase):
+    def test_expired_equal_cache_does_not_hide_stale_age_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp, "XDG_CACHE_HOME": os.path.join(tmp, ".cache")}
+            cache_path = ytdl_version._cache_path(env, "linux")
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "checked_at": ytdl_version.time.time() - 10 * 86400,
+                        "latest_version": "2026.01.01",
+                    },
+                    handle,
+                )
+
+            for allow_network, fetch_latest in (
+                (False, None),
+                (True, lambda: None),
+            ):
+                with self.subTest(allow_network=allow_network):
+                    status = ytdl_version.check_ytdlp_update(
+                        allow_network=allow_network,
+                        env=env,
+                        fetch_latest=fetch_latest,
+                        installed_version="2026.01.01",
+                        today=date(2026, 11, 12),
+                        platform_name="linux",
+                    )
+                    self.assertTrue(status["outdated"])
+                    self.assertEqual(status["reason"], "stale_age")
+
+    def test_expired_cache_still_reports_known_newer_release_offline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp, "XDG_CACHE_HOME": os.path.join(tmp, ".cache")}
+            cache_path = ytdl_version._cache_path(env, "linux")
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "checked_at": ytdl_version.time.time() - 10 * 86400,
+                        "latest_version": "2026.02.01",
+                    },
+                    handle,
+                )
+            status = ytdl_version.check_ytdlp_update(
+                allow_network=False,
+                env=env,
+                installed_version="2026.01.01",
+                today=date(2026, 11, 12),
+                platform_name="linux",
+            )
+        self.assertTrue(status["outdated"])
+        self.assertEqual(status["reason"], "behind_latest")
+        self.assertEqual(status["latest"], "2026.02.01")
+
     def test_allow_network_false_never_calls_fetch_latest(self):
         fetch = mock.Mock(side_effect=AssertionError("must not be called"))
         with tempfile.TemporaryDirectory() as tmp:

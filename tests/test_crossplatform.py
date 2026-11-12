@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -176,6 +177,7 @@ class NativeHostLaunchTests(unittest.TestCase):
                 expected = (
                     "#!/bin/sh\n"
                     'rm -f -- "$0"\n'
+                    'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"\n'
                     f"exec {shlex.quote(sys.executable)} "
                     f"{shlex.quote(str(ROOT / 'bin/yt-dlp-wrapper.py'))} "
                     f"--wait-keypress cut {shlex.quote(url)}\n"
@@ -190,6 +192,136 @@ class NativeHostLaunchTests(unittest.TestCase):
                 )
             finally:
                 command_path.unlink(missing_ok=True)
+
+    @unittest.skipIf(os.name == "nt", "macOS PATH behavior requires POSIX")
+    def test_macos_gui_path_and_terminal_launcher_work_with_minimal_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local_bin = Path(tmp) / ".local/bin"
+            local_bin.mkdir(parents=True)
+            yt_dlp = local_bin / "yt-dlp"
+            yt_dlp.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            yt_dlp.chmod(0o755)
+            real_isdir = os.path.isdir
+
+            def isdir(path):
+                if path in {"/opt/homebrew/bin", "/usr/local/bin"}:
+                    return True
+                return real_isdir(path)
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": tmp, "PATH": "/usr/bin:/bin"},
+                clear=True,
+            ):
+                self.assertTrue(
+                    callable(getattr(self.host, "_ensure_macos_gui_path", None))
+                )
+                with mock.patch.object(self.host.sys, "platform", "darwin"):
+                    with mock.patch.object(
+                        self.host.os.path, "isdir", side_effect=isdir
+                    ):
+                        self.host._ensure_macos_gui_path()
+                path_entries = os.environ["PATH"].split(os.pathsep)
+                self.assertEqual(path_entries[:2], ["/usr/bin", "/bin"])
+                self.assertIn("/opt/homebrew/bin", path_entries)
+                self.assertIn("/usr/local/bin", path_entries)
+                self.assertIn(str(local_bin), path_entries)
+                self.assertEqual(
+                    self.host.shutil.which("yt-dlp", path=str(local_bin)),
+                    str(yt_dlp),
+                )
+
+                command_path = None
+                created = []
+                real_mkstemp = self.host.tempfile.mkstemp
+
+                def make_temp(*args, **kwargs):
+                    kwargs["dir"] = tmp
+                    result = real_mkstemp(*args, **kwargs)
+                    created.append(result[1])
+                    return result
+
+                try:
+                    with mock.patch.object(self.host.sys, "platform", "darwin"):
+                        with mock.patch.object(
+                            self.host.tempfile, "mkstemp", side_effect=make_temp
+                        ):
+                            with mock.patch.object(self.host.subprocess, "Popen"):
+                                self.host._launch_download(
+                                    "audio", "https://youtu.be/abc"
+                                )
+                    command_path = Path(created[0])
+                    command_text = command_path.read_text(encoding="utf-8")
+                    export = (
+                        'export PATH="/opt/homebrew/bin:/usr/local/bin:'
+                        '$HOME/.local/bin:$PATH"'
+                    )
+                    self.assertIn(export, command_text)
+                    result = subprocess.run(
+                        ["/bin/sh", "-c", f"{export}\ncommand -v yt-dlp"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env={"HOME": tmp, "PATH": "/usr/bin:/bin"},
+                    )
+                    self.assertEqual(result.stdout.strip(), str(yt_dlp))
+                finally:
+                    if command_path is not None:
+                        command_path.unlink(missing_ok=True)
+
+    @unittest.skipIf(os.name == "nt", "install.sh is a POSIX installer")
+    def test_macos_install_pins_install_time_python_in_native_host_shebang(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            root.mkdir()
+            for name in ("install.sh",):
+                shutil.copy2(ROOT / name, root / name)
+            shutil.copytree(ROOT / "bin", root / "bin")
+            shutil.copytree(ROOT / "extension", root / "extension")
+            (root / "scripts").mkdir()
+            for name in ("build-xpi.sh", "build_xpi.py"):
+                shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
+            (root / "dist").mkdir()
+
+            fake_bin = Path(tmp) / "fake-bin"
+            fake_bin.mkdir()
+            uname = fake_bin / "uname"
+            uname.write_text("#!/bin/sh\nprintf 'Darwin\\n'\n", encoding="utf-8")
+            uname.chmod(0o755)
+            python3 = fake_bin / "python3"
+            python3.write_text(
+                f"#!/bin/sh\nexec {shlex.quote(sys.executable)} \"$@\"\n",
+                encoding="utf-8",
+            )
+            python3.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "HOME": str(Path(tmp) / "home"),
+                    "PATH": os.pathsep.join((str(fake_bin), os.environ["PATH"])),
+                }
+            )
+            completed = subprocess.run(
+                ["/bin/bash", str(root / "install.sh"), "--install", "--yes"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            installed_host = Path(environment["HOME"]) / ".local/bin/yt-dlp-native-host.py"
+            self.assertEqual(
+                installed_host.read_text(encoding="utf-8").splitlines()[0],
+                f"#!{python3}",
+            )
+            manifest = json.loads(
+                (
+                    Path(environment["HOME"])
+                    / "Library/Application Support/Mozilla/NativeMessagingHosts/firefox_youtube_downloader.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["path"], str(installed_host))
 
     def test_windows_terminal_and_console_fallback_launches(self):
         wrapper_path = str(ROOT / "bin/yt-dlp-wrapper.py")
@@ -255,6 +387,27 @@ class WindowsInstallerTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertFalse(Path(env["LOCALAPPDATA"]).exists())
             self.assertEqual(xpi.read_bytes() if xpi.exists() else None, xpi_before)
+
+    def test_failed_windows_install_does_not_save_partial_config(self):
+        installer = load_script(self, "windows_installer_failure", "install.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            environment = {
+                "LOCALAPPDATA": str(Path(tmp) / "Local"),
+                "APPDATA": str(Path(tmp) / "Roaming"),
+                "HOME": str(Path(tmp) / "home"),
+            }
+            config_path = ytdl_config.config_path(environment, "nt")
+            with mock.patch.dict(os.environ, environment, clear=True):
+                with mock.patch.object(installer, "_is_windows", return_value=True):
+                    with mock.patch.object(installer, "_register_native_host"):
+                        with mock.patch.object(
+                            installer.subprocess,
+                            "run",
+                            side_effect=subprocess.CalledProcessError(1, ["build_xpi"]),
+                        ):
+                            result = installer.main(["--install", "--yes"])
+            self.assertEqual(result, 1)
+            self.assertFalse(config_path.exists())
 
     def test_simulated_windows_install_writes_trampoline_manifest_registry_config_and_xpi(self):
         installer = load_script(self, "windows_installer", "install.py")

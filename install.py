@@ -145,7 +145,6 @@ def _install_windows(args, environment: dict[str, str]) -> int:
     _preflight(paths, sources)
 
     config = _configuration(paths, args, environment)
-    config_destination = ytdl_config.save_config(config, environment, "nt")
 
     paths["bin"].mkdir(parents=True, exist_ok=True)
     for source in sources:
@@ -173,6 +172,7 @@ def _install_windows(args, environment: dict[str, str]) -> int:
         [sys.executable, str(BUILD_SCRIPT), str(ROOT / "extension"), str(paths["xpi"])],
         check=True,
     )
+    config_destination = ytdl_config.save_config(config, environment, "nt")
     print(f"Saved plugin configuration to {config_destination}")
     print(f"Installed native messaging manifest -> {paths['manifest']}")
     print(f"Registered HKCU native host: {HOST_NAME}")

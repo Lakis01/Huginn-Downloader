@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -95,36 +96,49 @@ def detect_update_command(
     lowered = text_path.lower().replace("\\", "/")
 
     if platform == "nt":
-        if "pipx" in lowered:
-            return "pipx upgrade yt-dlp"
+        if "scoop" in lowered:
+            return "scoop update yt-dlp"
         if "winget" in lowered:
             return "winget upgrade yt-dlp.yt-dlp"
-        if lowered.endswith(".exe"):
-            return (
-                "Download the latest yt-dlp.exe from "
-                "https://github.com/yt-dlp/yt-dlp/releases/latest"
-            )
-        return "winget upgrade yt-dlp.yt-dlp"
+        return "yt-dlp -U"
 
     if platform == "darwin":
         if "pipx" in lowered:
             return "pipx upgrade yt-dlp"
-        if (
-            lowered.startswith("/opt/homebrew/")
-            or lowered.startswith("/usr/local/")
-            or "homebrew" in lowered
+        resolved_path = os.path.realpath(text_path).lower().replace("\\", "/")
+        candidates = (lowered, resolved_path)
+        if any(
+            "/opt/homebrew/" in candidate
+            or "/usr/local/cellar/" in candidate
+            or "/homebrew/" in candidate
+            for candidate in candidates
         ):
             return "brew upgrade yt-dlp"
-        return "brew upgrade yt-dlp"
+        return "yt-dlp -U"
 
     if "pipx" in lowered:
         return "pipx upgrade yt-dlp"
     if text_path == "/usr/bin/yt-dlp" or text_path.startswith("/usr/bin/"):
         release = os_release_text if os_release_text is not None else _read_os_release()
-        blob = (release or "").lower()
-        if "fedora" in blob or "rhel" in blob or "centos" in blob:
+        identifiers: set[str] = set()
+        for line in (release or "").splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or key not in {"ID", "ID_LIKE"}:
+                continue
+            try:
+                identifiers.update(token.lower() for token in shlex.split(value))
+            except ValueError:
+                continue
+        if any(token == "suse" or token.startswith("opensuse") for token in identifiers):
+            return "sudo zypper up yt-dlp"
+        if identifiers.intersection({"debian", "linuxmint", "ubuntu"}):
+            return (
+                "sudo apt install -t <codename>-backports yt-dlp  # or: "
+                "pipx install yt-dlp (distro apt packages often lag)"
+            )
+        if identifiers.intersection({"fedora", "rhel", "centos"}):
             return "sudo dnf upgrade yt-dlp"
-        if "arch" in blob or "manjaro" in blob:
+        if identifiers.intersection({"arch", "manjaro"}):
             return "sudo pacman -Syu yt-dlp"
         return "sudo apt update && sudo apt install -y yt-dlp"
     if ".local/bin" in lowered:
@@ -298,6 +312,7 @@ def check_ytdlp_update(
     )
 
     latest: str | None
+    latest_is_authoritative = cache_fresh
     if cache_fresh:
         latest = cached_latest
     elif allow_network:
@@ -318,6 +333,7 @@ def check_ytdlp_update(
             fetched = None
         if fetched:
             latest = fetched
+            latest_is_authoritative = True
             _write_cache(cache_file, latest, now)
         else:
             latest = cached_latest
@@ -326,6 +342,19 @@ def check_ytdlp_update(
 
     installed_tuple = version_tuple(installed) if installed else None
     latest_tuple = version_tuple(latest) if latest else None
+
+    if not latest_is_authoritative:
+        cached_tuple = version_tuple(cached_latest) if cached_latest else None
+        if (
+            installed_tuple is not None
+            and cached_tuple is not None
+            and cached_tuple > installed_tuple
+        ):
+            latest = cached_latest
+            latest_tuple = cached_tuple
+        else:
+            latest = None
+            latest_tuple = None
 
     outdated = False
     if installed is None:

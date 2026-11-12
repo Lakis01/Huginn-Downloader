@@ -45,6 +45,26 @@ def _is_windows():
     return os.name == "nt"
 
 
+def _ensure_macos_gui_path():
+    """Add common package-manager paths missing from GUI-launched processes."""
+    if sys.platform != "darwin":
+        return
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    directories = (
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        os.path.expanduser("~/.local/bin"),
+    )
+    for directory in directories:
+        if os.path.isdir(directory) and directory not in path_entries:
+            path_entries.append(directory)
+    os.environ["PATH"] = os.pathsep.join(path_entries)
+
+
+if sys.platform == "darwin":
+    _ensure_macos_gui_path()
+
+
 def _is_youtube_url(value):
     if not isinstance(value, str) or not value or value.startswith("-"):
         return False
@@ -114,6 +134,7 @@ def _launch_download(mode: str, chosen_url: str) -> None:
             command = (
                 "#!/bin/sh\n"
                 'rm -f -- "$0"\n'
+                'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"\n'
                 f"exec {shlex.quote(sys.executable)} "
                 f"{shlex.quote(str(wrapper_py))} --wait-keypress "
                 f"{shlex.quote(mode)} {shlex.quote(chosen_url)}\n"
