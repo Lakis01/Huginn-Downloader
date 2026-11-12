@@ -50,6 +50,7 @@
   let lastContextUrl = null;
   let lastPointerUrl = null;
   let lastPointerAt = 0;
+  let lastPointerDownAt = 0;
   let refreshTimer = null;
 
   function ext() {
@@ -223,24 +224,44 @@
     return 0;
   }
 
-  function handlePress(event) {
+  function handlePointerDown(event) {
     if (!event || event.button !== 2) return;
-    const found = captureContextHref(event);
-    if (found) {
-      lastPointerUrl = found;
-      lastPointerAt = nowMs();
+    // Start of a new right-click gesture: record even when unmatched
+    // so a bare link or empty space resets any prior gesture's URL.
+    const href = captureContextHref(event);
+    const now = nowMs();
+    lastPointerUrl = href;
+    lastPointerAt = now;
+    lastPointerDownAt = now;
+    lastContextUrl = href;
+  }
+
+  function handleMouseDown(event) {
+    if (!event || event.button !== 2) return;
+    const href = captureContextHref(event);
+    const now = nowMs();
+    if (href === null && lastPointerUrl && now - lastPointerDownAt < 80) {
+      // The preview vanished between pointerdown and mousedown for
+      // this same gesture: keep the pointerdown URL instead of wiping it.
+      lastContextUrl = lastPointerUrl;
+      return;
     }
+    lastPointerUrl = href;
+    lastPointerAt = now;
+    lastContextUrl = href;
   }
 
   function handleContextMenu(event) {
-    const found = captureContextHref(event);
-    if (found) return;
-    // YouTube may tear down or morph the hover-autoplay preview
-    // between pointerdown and contextmenu: keep a just-captured
-    // right-button URL for 500ms instead of clearing it.
-    if (lastPointerUrl && nowMs() - lastPointerAt < 500) {
-      lastContextUrl = lastPointerUrl;
+    let href = captureContextHref(event);
+    if (href === null && nowMs() - lastPointerAt < 500) {
+      // YouTube may tear down or morph the hover-autoplay preview
+      // between pointerdown and contextmenu: reuse this gesture's
+      // pointerdown URL (null when the gesture started on empty
+      // space or a non-card link, so nothing stale can leak).
+      href = lastPointerUrl;
     }
+    lastContextUrl = href;
+    lastPointerUrl = null;
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
@@ -263,8 +284,8 @@
     syncControls();
     document.addEventListener('yt-navigate-finish', syncControls);
     document.addEventListener('yt-page-data-updated', syncControls);
-    document.addEventListener('pointerdown', handlePress, true);
-    document.addEventListener('mousedown', handlePress, true);
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('mousedown', handleMouseDown, true);
     document.addEventListener('contextmenu', handleContextMenu, true);
     const api = ext();
     if (api && api.runtime && api.runtime.onMessage) {

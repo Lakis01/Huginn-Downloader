@@ -341,6 +341,9 @@ function testContentStatic() {
   assert.ok(src.includes('pointerdown'), 'right-button pointerdown capture for preview overlays');
   assert.ok(src.includes('mousedown'), 'right-button mousedown fallback capture');
   assert.ok(/button\s*!==?\s*2/.test(src), 'only right-button presses capture context');
+  assert.ok(src.includes('lastPointerDownAt'), 'pointerdown gesture timestamp tracked');
+  assert.ok(/<\s*80/.test(src), 'mousedown keeps pointerdown URL within the same-gesture window');
+  assert.ok(/<\s*500/.test(src), 'contextmenu reuses the gesture pointerdown URL briefly');
   assert.ok(src.includes('ytd-video-preview'), 'inline preview card selector');
   assert.ok(src.includes('#video-preview'), 'preview container id selector');
   assert.ok(src.includes('yt-lockup-view-model'), 'lockup selector');
@@ -600,6 +603,80 @@ function testContentBehavior() {
   assert.equal(kept.url, 'https://www.youtube.com/watch?v=preview999', 'left-button pointerdown preserves the right-click context URL');
 }
 
+function makePreviewCard(fx, watchId) {
+  const previewWrap = fx.document.createElement('div');
+  previewWrap.setAttribute('id', 'video-preview');
+  const loader = fx.document.createElement('ytd-video-preview-loader');
+  const loaderInner = fx.document.createElement('div');
+  const inlinePreview = fx.document.createElement('ytd-video-preview');
+  const previewLink = fx.document.createElement('a');
+  previewLink.setAttribute('href', `/watch?v=${watchId}`);
+  inlinePreview.appendChild(previewLink);
+  loaderInner.appendChild(inlinePreview);
+  loader.appendChild(loaderInner);
+  previewWrap.appendChild(loader);
+  fx.document.body.appendChild(previewWrap);
+  return { previewWrap, loader, loaderInner, inlinePreview };
+}
+
+async function testContentGestureState() {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // A preview-card gesture followed immediately (<500ms) by an
+  // empty-space or bare-link gesture must yield null, never the
+  // stale preview URL from the prior gesture.
+  {
+    const fx = createContentFixture();
+    const responder = fx.messageListeners[0];
+    const query = () => {
+      let answered = null;
+      responder({ type: 'ytdl-get-context-url' }, {}, (r) => { answered = r; });
+      return answered.url;
+    };
+    const { inlinePreview } = makePreviewCard(fx, 'preview999');
+    const empty = fx.document.createElement('div');
+    fx.document.body.appendChild(empty);
+    const bareLink = fx.document.createElement('a');
+    bareLink.setAttribute('href', 'https://www.youtube.com/watch?v=bare999');
+    fx.document.body.appendChild(bareLink);
+    // Gesture 1: full right-click on the preview card.
+    fx.setHitStackArr([inlinePreview]);
+    inlinePreview.dispatchEvent({ type: 'pointerdown', target: inlinePreview, bubbles: true, button: 2, clientX: 1, clientY: 2 });
+    inlinePreview.dispatchEvent({ type: 'contextmenu', target: inlinePreview, bubbles: true, clientX: 1, clientY: 2 });
+    assert.equal(query(), 'https://www.youtube.com/watch?v=preview999', 'preview gesture captures the preview URL');
+    // Gesture 2: right-click empty space right after (<500ms).
+    fx.setHitStackArr([empty]);
+    empty.dispatchEvent({ type: 'pointerdown', target: empty, bubbles: true, button: 2, clientX: 3, clientY: 4 });
+    empty.dispatchEvent({ type: 'contextmenu', target: empty, bubbles: true, clientX: 3, clientY: 4 });
+    assert.equal(query(), null, 'empty-space gesture after a preview gesture yields null, never the stale preview URL');
+    // Gesture 3: preview card again.
+    fx.setHitStackArr([inlinePreview]);
+    inlinePreview.dispatchEvent({ type: 'pointerdown', target: inlinePreview, bubbles: true, button: 2, clientX: 1, clientY: 2 });
+    inlinePreview.dispatchEvent({ type: 'contextmenu', target: inlinePreview, bubbles: true, clientX: 1, clientY: 2 });
+    assert.equal(query(), 'https://www.youtube.com/watch?v=preview999', 'preview gesture captures the preview URL again');
+    // Gesture 4: right-click a bare non-card link right after (<500ms).
+    fx.setHitStackArr([bareLink]);
+    bareLink.dispatchEvent({ type: 'pointerdown', target: bareLink, bubbles: true, button: 2, clientX: 5, clientY: 6 });
+    bareLink.dispatchEvent({ type: 'contextmenu', target: bareLink, bubbles: true, clientX: 5, clientY: 6 });
+    assert.equal(query(), null, 'bare-link gesture after a preview gesture yields null, never the stale preview URL');
+  }
+  // The preview is torn down between pointerdown and mousedown and no
+  // contextmenu ever reaches the document: the pointerdown URL survives.
+  {
+    const fx = createContentFixture();
+    const responder = fx.messageListeners[0];
+    const { loaderInner, inlinePreview } = makePreviewCard(fx, 'preview999');
+    fx.setHitStackArr([inlinePreview]);
+    inlinePreview.dispatchEvent({ type: 'pointerdown', target: inlinePreview, bubbles: true, button: 2, clientX: 7, clientY: 8 });
+    inlinePreview.remove();
+    await sleep(10);
+    fx.setHitStackArr([loaderInner]);
+    loaderInner.dispatchEvent({ type: 'mousedown', target: loaderInner, bubbles: true, button: 2, clientX: 7, clientY: 8 });
+    let after = null;
+    responder({ type: 'ytdl-get-context-url' }, {}, (r) => { after = r; });
+    assert.equal(after.url, 'https://www.youtube.com/watch?v=preview999', 'mousedown after preview teardown preserves the pointerdown URL without contextmenu');
+  }
+}
+
 // --- popup ---
 function testPopup() {
   const html = readFile('extension/popup.html');
@@ -784,6 +861,7 @@ async function main() {
   testContentCss();
   testContentStatic();
   testContentBehavior();
+  await testContentGestureState();
   testPopup();
   await testPopupUpdateNote();
   testBuildScript();
