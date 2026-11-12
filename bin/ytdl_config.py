@@ -36,27 +36,49 @@ def _expand_user(value: str | Path, env: Mapping[str, str] | None) -> str:
     return path
 
 
-def config_path(env: Mapping[str, str] | None = None) -> Path:
+def config_path(
+    env: Mapping[str, str] | None = None, platform_name: str | None = None
+) -> Path:
     """Return the application config path for the supplied environment."""
     values = _environment(env)
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt" and not values.get("XDG_CONFIG_HOME"):
+        local_app_data = values.get("LOCALAPPDATA") or str(
+            _home(env) / "AppData" / "Local"
+        )
+        return Path(local_app_data) / "FirefoxYouTubeDownloader" / "config.json"
     config_home = values.get("XDG_CONFIG_HOME") or str(_home(env) / ".config")
     return Path(_expand_user(config_home, env)) / "youtube-downloader" / "config.json"
 
 
-def ytdlp_config_exists(env: Mapping[str, str] | None = None) -> bool:
+def ytdlp_config_exists(
+    env: Mapping[str, str] | None = None, platform_name: str | None = None
+) -> bool:
     """Check the standard yt-dlp config locations under the supplied home."""
     values = _environment(env)
+    platform_name = os.name if platform_name is None else platform_name
     config_home = values.get("XDG_CONFIG_HOME") or str(_home(env) / ".config")
     xdg_config = Path(_expand_user(config_home, env)) / "yt-dlp" / "config"
     legacy_config = _home(env) / ".yt-dlp.conf"
-    return xdg_config.exists() or legacy_config.exists()
+    if xdg_config.exists() or legacy_config.exists():
+        return True
+    if platform_name == "nt" and values.get("APPDATA"):
+        roaming_config = Path(values["APPDATA"]) / "yt-dlp"
+        return (roaming_config / "config").exists() or (
+            roaming_config / "config.txt"
+        ).exists()
+    return False
 
 
-def load_config(env: Mapping[str, str] | None = None) -> dict[str, Any]:
+def load_config(
+    env: Mapping[str, str] | None = None, platform_name: str | None = None
+) -> dict[str, Any]:
     """Load the persisted options, applying defaults to missing/invalid values."""
     config = dict(_DEFAULT_CONFIG)
     try:
-        stored = json.loads(config_path(env).read_text(encoding="utf-8"))
+        stored = json.loads(
+            config_path(env, platform_name).read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError):
         return config
     if not isinstance(stored, dict):
@@ -73,7 +95,9 @@ def load_config(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 
 
 def save_config(
-    config: Mapping[str, Any], env: Mapping[str, str] | None = None
+    config: Mapping[str, Any],
+    env: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
 ) -> Path:
     """Validate and atomically write the supported application options."""
     if not isinstance(config, Mapping):
@@ -92,7 +116,7 @@ def save_config(
                 raise TypeError(f"{key} must be a bool")
             normalized[key] = value
 
-    destination = config_path(env)
+    destination = config_path(env, platform_name)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
     try:
@@ -115,12 +139,14 @@ def save_config(
 
 
 def effective_download_dir(
-    config: Mapping[str, Any], env: Mapping[str, str] | None = None
+    config: Mapping[str, Any],
+    env: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
 ) -> str | None:
     """Resolve the app override, or defer to yt-dlp's configured paths."""
     download_dir = config.get("download_dir")
     if download_dir is not None:
         return _expand_user(download_dir, env)
-    if ytdlp_config_exists(env):
+    if ytdlp_config_exists(env, platform_name):
         return None
     return _expand_user(DEFAULT_FRESH_DOWNLOAD_DIR, env)

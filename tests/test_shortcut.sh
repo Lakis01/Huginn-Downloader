@@ -419,7 +419,7 @@ pass 'staged desktop entries validate and use absolute launcher paths'
 dry_home="$TMP/dry-home"
 HOME="$dry_home" "$INSTALLER" > "$TMP/dry-run.out"
 assert_file_contains "$TMP/dry-run.out" 'Dry run' 'installer dry-run message'
-for planned_file in ytdl_config.py ytdl_meta.py yt-dlp-wrapper.py yt-dlp-shortcut.sh yt-dlp-native-host.py; do
+for planned_file in ytdl_config.py ytdl_meta.py ytdl_version.py yt-dlp-wrapper.py yt-dlp-shortcut.sh yt-dlp-native-host.py; do
     assert_file_contains "$TMP/dry-run.out" "$planned_file" "installer dry-run lists $planned_file"
 done
 assert_file_contains "$TMP/dry-run.out" '.mozilla/native-messaging-hosts/firefox_youtube_downloader.json' \
@@ -444,6 +444,7 @@ assert_eq 'pre-existing shortcut' "$(<"$backup")" 'backup preserves the prior fi
 [[ -x "$install_home/.local/bin/yt-dlp-shortcut.sh" ]] || fail 'installed shortcut is not executable'
 [[ -f "$install_home/.local/bin/yt-dlp-wrapper.py" ]] || fail 'wrapper was not installed'
 [[ -f "$install_home/.local/bin/ytdl_meta.py" ]] || fail 'metadata helper was not installed'
+[[ -f "$install_home/.local/bin/ytdl_version.py" ]] || fail 'version helper was not installed'
 assert_file_contains "$install_home/.local/share/applications/net.local.yt-dlp-shortcut.sh.desktop" \
     "Exec=$install_home/.local/bin/yt-dlp-shortcut.sh audio" 'installed desktop Exec path rewrite'
 assert_eq 'default' "$(sed -n '1p' "$XDG_MIME_ARGS")" 'xdg-mime subcommand'
@@ -674,5 +675,26 @@ assert_file_contains "$TMP/check-deps.out" 'LMDE 7 (Cinnamon)' '--check-deps LMD
     || fail '--check-deps wrote files into HOME'
 [[ ! -e "$XDG_MIME_ARGS" ]] || fail '--check-deps registered a MIME handler'
 pass '--check-deps detects session prerequisites without writing files'
+
+macos_stubs="$TMP/macos-stubs"
+mkdir -p "$macos_stubs"
+cat > "$macos_stubs/uname" <<'STUB'
+#!/usr/bin/env bash
+printf 'Darwin\n'
+STUB
+chmod +x "$macos_stubs/uname"
+macos_home="$TMP/macos-home"
+HOME="$macos_home" PATH="$macos_stubs:$PATH" "$INSTALLER" --check-deps > "$TMP/macos-check-deps.out"
+assert_file_contains "$TMP/macos-check-deps.out" 'brew install yt-dlp ffmpeg rsgain python pillow' \
+    'macOS dependency suggestions'
+HOME="$macos_home" PATH="$macos_stubs:$PATH" "$INSTALLER" --install --yes > "$TMP/macos-install.out"
+macos_manifest="$macos_home/Library/Application Support/Mozilla/NativeMessagingHosts/firefox_youtube_downloader.json"
+[[ -f "$macos_manifest" ]] || fail 'macOS Native Messaging manifest was not installed'
+[[ ! -e "$macos_home/.mozilla/native-messaging-hosts/firefox_youtube_downloader.json" ]] \
+    || fail 'macOS installer also wrote the Linux native-messaging manifest'
+[[ ! -e "$macos_home/.local/share/applications" ]] \
+    || fail 'macOS installer staged Linux desktop entries'
+[[ ! -e "$XDG_MIME_ARGS" ]] || fail 'macOS installer registered a Linux MIME handler'
+pass 'macOS check-deps and install use the Library manifest without Linux desktop/MIME staging'
 
 printf '1..%s\n' "$PASS"

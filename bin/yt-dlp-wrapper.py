@@ -126,6 +126,12 @@ def wait_for_keypress(prompt: str = "\nPress any key to close...") -> None:
         return
     sys.stdout.write(prompt)
     sys.stdout.flush()
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.getch()
+        return
+
     import termios
     import tty
 

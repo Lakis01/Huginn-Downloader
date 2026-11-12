@@ -1,72 +1,182 @@
-# Firefox-Youtube-Downloader-Plugin
+# Firefox YouTube Downloader
 
-A Firefox WebExtension and user-level Linux companion for downloading YouTube
-audio, video, or a selected audio cut with `yt-dlp`. The extension provides a
-YouTube context-menu submenu, watch-page download controls, and a settings
-popup. Its Python Native Messaging host starts the existing download wrapper
-without an external-application confirmation dialog.
+A Firefox add-on and local companion for sending YouTube pages, links, and
+watch-page controls to `yt-dlp` for audio, video, or a selected audio cut. The
+add-on supplies the interface; a small Native Messaging host and `yt-dlp` run
+on your own computer. The companion is not bundled with the add-on, and the
+extension sends nothing to a project-owned server.
 
-The source tree is self-contained: build the XPI from `extension/`, then
-install the companion with `install.sh`. The installer uses per-user paths and
-does not modify Firefox profiles or `~/.config/yt-dlp/config`.
+## What you need
 
-## Features
+- Firefox 115 or newer.
+- The signed XPI from a GitHub Release or the [Firefox Add-ons listing](https://addons.mozilla.org/).
+- The matching local companion installed with `install.sh` (Linux/macOS) or
+  `install.ps1` (Windows).
+- `yt-dlp` and FFmpeg installed locally. Python 3, Mutagen, and Pillow enable
+  audio tagging and cover art; `rsgain` is optional and only used when
+  ReplayGain is enabled.
 
-- Context menu: **YouTube Downloader → Audio / Video / Cut Audio**.
-- Watch-page segmented controls for Audio, Video, and Cut.
-- Popup settings for default download directory, automatic tag extraction,
-  and ReplayGain (`rsgain`) normalization.
-- A standard Native Messaging host and manifests for Firefox.
-- Fast, single-pass audio downloads, stage/progress reporting, metadata and
-  cover-art handling, and optional ReplayGain processing.
-- Desktop-independent shortcut launcher with terminal, clipboard, selection,
-  and MPRIS auto-detection.
+The extension provides a YouTube right-click submenu, watch-page Audio/Video/
+Cut controls, and a settings popup. It uses Firefox Native Messaging to pass a
+user-selected mode and URL to the local companion. It does not download media
+itself.
 
-## Prerequisites and porting
+## Install the extension
 
-The installer can inspect the current desktop and session without installing
-anything:
+Install the **signed** XPI from the latest GitHub Release using Firefox's
+**Add-ons and themes → gear → Install Add-on From File…** action, or install
+the Listed version from AMO if the store listing is available. An unsigned
+local build is for development and cannot be permanently installed in normal
+Firefox Release. Developers can build it with `./scripts/build-xpi.sh` and
+temporarily load it from `about:debugging`.
+
+Project maintainers can create signed Unlisted release files or publish a
+Listed AMO add-on by following [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md).
+
+## Install the local companion
+
+Clone this repository, install the platform dependencies below, then run the
+OS-specific companion installer from the repository directory. Each installer
+has a dry-run default or a `--check-deps` command; neither installs operating
+system packages automatically.
+
+### Debian 13.7 (GNOME, Wayland)
 
 ```sh
+sudo apt update
+sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
+  nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools \
+  xdg-utils desktop-file-utils
+git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
+cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
+./install.sh --install --yes
 ```
 
-It reports available and missing commands and prints these suggested package
-commands. Review the list first; the installer never runs `apt` for you:
+GNOME normally includes `kgx` or `ptyxis`; `gnome-terminal` is only needed if
+you want it as an additional terminal option. `wl-clipboard` supplies
+Wayland clipboard/primary-selection support.
+
+### LMDE 7 (Cinnamon, X11)
 
 ```sh
-# Debian 13.7 (GNOME, Wayland)
-sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
-
-# LMDE 7 (Cinnamon, X11)
-sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils
+sudo apt update
+sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
+  nodejs gnome-terminal libnotify-bin xclip xsel playerctl \
+  qt6-tools-dev-tools xdg-utils desktop-file-utils
+git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
+cd Firefox-Youtube-Downloader-Plugin
+./install.sh --check-deps
+./install.sh --install --yes
 ```
 
-Debian GNOME normally includes `kgx` or `ptyxis`; install `gnome-terminal` only
-if you want that terminal. `wl-clipboard` provides Wayland clipboard support.
-LMDE Cinnamon defaults to X11, where `xclip` (or `xsel`) and
-`gnome-terminal` are the suggested clipboard and terminal tools.
+`xclip` or `xsel` supports clipboard access, and `gnome-terminal` is the
+suggested terminal. ReplayGain is optional; omit `rsgain` if you do not use it.
 
-The downloader also needs `ffmpeg`, Python 3 with `mutagen` and Pillow,
-`yt-dlp`, and a JavaScript runtime such as Node.js. `rsgain` is optional; it
-is needed only when ReplayGain normalization is enabled. `desktop-file-utils`
-provides `desktop-file-validate`. Package availability and names can vary
-between Debian-family releases, so use the package manager for your release.
+### General Linux
 
-Runtime selection is automatic:
+Install `yt-dlp`, FFmpeg, Python 3 with Mutagen and Pillow, and a terminal
+emulator. For the full shortcut integration, also install the clipboard and
+MPRIS tools for your session: `wl-clipboard` on Wayland; `xclip` or `xsel` on
+X11; and `playerctl` (or KDE's `qdbus6`). `rsgain` is optional. On Debian-based
+systems, for example:
 
-- **Terminals:** prefers `konsole` on KDE, `ptyxis`, `kgx`, then
-  `gnome-terminal` on GNOME, and `xfce4-terminal` or `mate-terminal` for those
-  desktops. It falls back through supported installed terminals. Set
-  `YTDL_TERMINAL` to choose a specific supported executable.
-- **Wayland:** uses `wl-paste` for clipboard and primary selection.
-- **X11:** uses `xclip` or `xsel` for clipboard and primary selection.
-- **MPRIS:** reads the active media URL with `playerctl`, then tries the
-  `qdbus6` / `qdbus` Plasma Browser Integration interface.
+```sh
+sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil \
+  xdg-utils desktop-file-utils
+# Optional features / desktop integrations:
+sudo apt install rsgain wl-clipboard xclip xsel playerctl
+git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
+cd Firefox-Youtube-Downloader-Plugin
+./install.sh --check-deps
+./install.sh --install --yes
+```
 
-For a new GNOME or Cinnamon keyboard shortcut, open **Settings → Keyboard →
-Keyboard Shortcuts → Custom Shortcuts** (the wording can vary by release) and
-add these commands, assigning any unused key combinations:
+On Fedora, Arch, openSUSE, or another distribution, use its package manager and
+package names instead. `./install.sh --check-deps` prints the detected desktop
+session and Debian/LMDE package suggestions; it never runs the package manager.
+The installer stages user-level binaries under `~/.local/bin`, the Firefox
+Native Messaging manifest, desktop shortcuts, and the `yt-dlp://` handler.
+
+### macOS
+
+Install Homebrew if needed, then install the command-line dependencies and
+Python libraries. `rsgain` is optional:
+
+```sh
+brew install yt-dlp ffmpeg python pillow
+python3 -m pip install --user mutagen
+# Optional ReplayGain support, if available for your Homebrew setup:
+brew install rsgain
+git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
+cd Firefox-Youtube-Downloader-Plugin
+./install.sh --check-deps
+./install.sh --install --yes
+```
+
+The macOS installer writes the Native Messaging manifest to
+`~/Library/Application Support/Mozilla/NativeMessagingHosts/` and skips
+Linux-only desktop/MIME registration. If Homebrew Python refuses a `--user`
+package install because of its environment policy, install Mutagen using your
+preferred Python package workflow for that Homebrew interpreter. Then install
+the signed XPI from a GitHub Release or AMO in Firefox.
+
+### Windows 10/11
+
+Open PowerShell, install Python 3 and the local command-line dependencies, then
+run the companion installer. Scoop or another trusted package source can be
+used for optional `rsgain` if desired.
+
+```powershell
+winget install yt-dlp.yt-dlp
+winget install Gyan.FFmpeg.Shared
+winget install Python.Python.3.12
+py -3 -m pip install mutagen Pillow
+git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
+cd Firefox-Youtube-Downloader-Plugin
+.\install.ps1 --check-deps
+.\install.ps1 --install --yes
+```
+
+The installer copies the Python host and helpers to
+`%LOCALAPPDATA%\FirefoxYouTubeDownloader\bin`, writes its manifest and config
+under `%LOCALAPPDATA%\FirefoxYouTubeDownloader`, registers the host for the
+current Windows user, and builds `dist\firefox-youtube-downloader.xpi` without
+requiring Bash. Install the **AMO-signed** XPI in Firefox separately; the local
+installer's XPI is an unsigned build artifact. If Windows Terminal (`wt.exe`)
+is installed, downloads open there; otherwise the host opens a new console.
+
+## Configuration and installer behavior
+
+The popup stores these options in the user's config file:
+
+| Option | Fresh-install default | Meaning |
+| --- | --- | --- |
+| Download directory | `~/Music/Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another directory or select `ytdlp-default`. |
+| Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
+| ReplayGain | Off | Run `rsgain` on finished audio/cut files. |
+
+Linux/macOS use `~/.config/youtube-downloader/config.json` or the equivalent
+under `$XDG_CONFIG_HOME`. Windows uses
+`%LOCALAPPDATA%\FirefoxYouTubeDownloader\config.json` unless
+`XDG_CONFIG_HOME` is explicitly set. The installers never create or modify an
+existing yt-dlp config such as `~/.config/yt-dlp/config` or
+`%APPDATA%\yt-dlp\config`.
+
+On Linux and macOS, a plain `./install.sh` invocation is a no-write dry run;
+`./install.sh --install` applies the install. On Windows,
+`py -3 install.py` is the no-write dry run and
+`py -3 install.py --install --yes` applies it (or use the PowerShell wrapper).
+`--download-dir=ytdlp-default`, `--auto-tag=true|false`, and
+`--rsgain=true|false` set values explicitly. Existing plugin configuration is
+preserved unless an option is provided.
+
+## Shortcuts and desktop integration
+
+On Linux, the shortcut resolves a URL in this order: explicit argument,
+primary selection, active media URL (MPRIS), then clipboard. It chooses a
+supported terminal automatically; set `YTDL_TERMINAL` to select one. A GNOME
+or Cinnamon custom keyboard shortcut can run:
 
 ```sh
 ~/.local/bin/yt-dlp-shortcut.sh audio
@@ -74,161 +184,61 @@ add these commands, assigning any unused key combinations:
 ~/.local/bin/yt-dlp-shortcut.sh cut
 ```
 
-KDE users can add the installed **YouTube Audio Download**, **YouTube Video
-Download**, and **YouTube Interactive Cut Audio** desktop launchers under
-**System Settings → Keyboard → Shortcuts → Custom Shortcuts**. The shortcut
-resolves URLs in this order: explicit URL argument, primary selection, active
-media URL (MPRIS), then clipboard. Use the Firefox context menu for a specific
-hovered video card.
+On macOS the native host opens Terminal for the download and removes its
+temporary launcher script after launch. On Windows it prefers Windows Terminal
+and falls back to a separate console window.
 
-## Build and install
-
-### 1. Install the Firefox extension
-
-Build `dist/firefox-youtube-downloader.xpi` from the checked-out extension
-source:
-
-```sh
-./scripts/build-xpi.sh
-```
-
-Firefox Release requires Mozilla signing before a packaged XPI can be
-permanently installed. Signing through Mozilla Add-ons (AMO) is free. For an
-AMO-distributed release, submit the add-on for signing; for an unlisted XPI,
-use Mozilla's signing API with `web-ext` and your AMO API credentials, for
-example:
-
-```sh
-npx web-ext sign --source-dir extension \
-  --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
-```
-
-The signed XPI can then be installed in Firefox Release. `npx web-ext sign`
-uses the free signing service; it does not mean an add-on is automatically
-listed in the AMO catalog. Firefox Nightly is useful for development and
-temporary loading through `about:debugging`. Debian's `firefox-esr` and LMDE's
-Firefox ESR can also be used for development/policy-managed installs; a
-normally distributed, permanent XPI should still be Mozilla-signed.
-
-### 2. Install the Linux companion
-
-Preview all planned paths first. A plain invocation is a no-write dry run:
-
-```sh
-./install.sh
-```
-
-Then install the companion and configure a fresh setup:
-
-```sh
-./install.sh --install
-```
-
-On a fresh interactive terminal, the installer asks for a download directory,
-automatic tagging, and ReplayGain. For automation, `--yes` accepts defaults;
-individual settings can be supplied explicitly:
-
-```sh
-./install.sh --install --yes \
-  --download-dir='~/Downloads/Youtube' --auto-tag=true --rsgain=false
-```
-
-Use `--download-dir=ytdlp-default` to defer to an existing yt-dlp config.
-The installer makes timestamped `.bak.*` copies of replaced files, builds the
-XPI, installs binaries and desktop entries under `~/.local`, writes the
-Firefox Native Messaging manifest to both `~/.mozilla/native-messaging-hosts/`
-and `${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/native-messaging-hosts/`, and
-registers the `yt-dlp://` URI desktop handler. If both manifest paths resolve
-to the same file, it installs that file once.
-
-Before writing anything or building the XPI, it checks all target files for
-directory conflicts, including symlinks that resolve to directories. The
-default dry run does not build the XPI or write configuration, binaries,
-manifests, desktop entries, or MIME registrations.
-
-## Configuration
-
-The companion and extension share
-`~/.config/youtube-downloader/config.json` (or the equivalent under
-`$XDG_CONFIG_HOME`). Supported fields:
-
-| Field | Fresh-install default | Meaning |
-| --- | --- | --- |
-| `download_dir` | `"~/Music/Youtube Downloads"` when there is no yt-dlp config; otherwise `null` | A custom path, or `null` to let yt-dlp choose its configured path. `~/Downloads/Youtube` is the other interactive quick choice. |
-| `auto_tag` | `true` | Extract description-derived tags and attach cover art for audio/cut downloads. |
-| `rsgain` | `false` | Run `rsgain` on finished audio/cut files. |
-
-An explicit `--download-dir=ytdlp-default` stores `null`. If the plugin config
-already exists, `--install` preserves it byte-for-byte unless one or more
-configuration flags are provided. The installer never creates or modifies
-`~/.config/yt-dlp/config` (including when it exists already). If that yt-dlp
-config exists and the plugin config is fresh, the default `download_dir` is
-`null` so yt-dlp's existing destination rules remain in control.
+KDE users can assign the installed **YouTube Audio Download**, **YouTube Video
+Download**, and **YouTube Interactive Cut Audio** launchers under **System
+Settings → Shortcuts → Custom Shortcuts**. On GNOME or Cinnamon, add the three
+commands above under **Settings → Keyboard → Keyboard Shortcuts → Custom
+Shortcuts** and choose unused key combinations.
 
 ## Retiring the previous Firefox setup
 
-Do this only after confirming the new XPI and native host work. Keep unrelated
-Firefox extensions and userscripts.
+Only do this after verifying the new add-on and companion. Remove or disable
+only the old YouTube downloader userscript in Tampermonkey; keep unrelated
+scripts and Tampermonkey if still needed. External Application Launcher is a
+separate old add-on: remove it only if no other extension uses its native host.
+The `ff2mpv` / *Play in MPV* add-on is separate and unaffected. Do not remove
+it as part of this migration.
 
-### External Application Launcher
+The Linux installer keeps timestamped `.bak.*` copies beside replaced files.
+To roll back, restore those files, remove only the Native Messaging manifests
+that did not exist before the install, and restore the previous `yt-dlp://`
+desktop association if needed. It does not modify Firefox profiles or yt-dlp
+configuration.
 
-- [ ] Remove the old **External Application Launcher** add-on from Firefox.
-- [ ] Retire its native host only after checking no other extension uses it.
-      Its shared system files are commonly located at
-      `/usr/share/com.add0n.node` and
-      `/usr/share/com.add0n.node/com.add0n.node.json`; remove the package or
-      files through the mechanism that installed them rather than deleting
-      files blindly.
-- [ ] Remove the old YouTube application entries/settings from the add-on if
-      you are keeping it for another purpose.
+## Troubleshooting
 
-**`ff2mpv` / *Play in MPV* is separate and unaffected.** Do not uninstall its
-Firefox add-on or native host as part of retiring External Application
-Launcher.
-
-### Tampermonkey
-
-- [ ] Verify the new extension's on-page controls on a YouTube watch page.
-- [ ] Remove or disable only the old YouTube downloader userscript in
-      Tampermonkey. Keep Tampermonkey and unrelated scripts if you still use
-      them.
-- [ ] Uninstall Tampermonkey only if it is no longer needed for any other
-      userscripts.
-
-## Troubleshooting and rollback
-
-- **No host connection in the popup:** confirm both manifests exist, their
-  `path` points to `~/.local/bin/yt-dlp-native-host.py`, and that file is
-  executable. Re-run `./install.sh --install` if needed.
-- **Shortcut reports no supported terminal:** install a supported terminal or
-  set `YTDL_TERMINAL` to its executable name.
-- **No clipboard/MPRIS fallback:** install the matching Wayland/X11 clipboard
-  tool and `playerctl` (or Plasma's `qdbus6` / `qdbus` integration).
-- **Missing tag or ReplayGain stage:** check `auto_tag` and `rsgain` in the
-  plugin popup/config and verify `mutagen`, Pillow, and `rsgain` are installed.
-
-Replaced files are backed up beside their destinations as
-`<name>.bak.<YYYYMMDD-HHMMSS>` (with a numeric suffix if necessary). To roll
-back, restore the exact backup files and remove the two Native Messaging
-manifests if they did not previously exist. Restore the previous
-`x-scheme-handler/yt-dlp` association in your desktop's default-application
-settings if necessary. No Firefox profile database or yt-dlp config needs to
-be edited.
+- **Popup says the companion is unavailable:** confirm the Native Messaging
+  manifest and host path. Re-run the matching companion installer.
+- **Download command is missing:** confirm `yt-dlp` and FFmpeg are on `PATH`;
+  open a new terminal after installing them.
+- **Tagging fails:** verify Python can import Mutagen and Pillow. Disable
+  automatic tagging in settings if you do not need it.
+- **No ReplayGain stage:** install `rsgain` and turn its option on.
+- **Terminal or clipboard fallback is unavailable on Linux:** install a
+  supported terminal and the clipboard/MPRIS tool matching Wayland or X11.
 
 ## Verification
 
-Run the repository checks from its root:
+Run these checks from the repository root. Counts should be updated with the
+suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 73 tests
-bash tests/test_shortcut.sh               # 42 checks: launcher, desktop entries, installer
+python3 -m unittest discover -s tests -v  # 111 Python tests
+bash tests/test_shortcut.sh               # 43 launcher/installer checks
 node tests/test_firefox_extension.js
 node tests/test_youtube_buttons.js
 bash scripts/build-xpi.sh
-bash -n install.sh bin/yt-dlp-shortcut.sh tests/test_shortcut.sh scripts/build-xpi.sh
+bash -n install.sh bin/yt-dlp-shortcut.sh scripts/build-xpi.sh tests/test_shortcut.sh
 desktop-file-validate desktop/*.desktop
-./install.sh                              # no-write dry run
+./install.sh
+python3 install.py
+git diff --check
 ```
 
-The browser-facing fixtures are Node DOM tests; manually confirm installation
-and behavior in Firefox on the target desktop after porting.
+The Node fixtures do not replace a final manual check in Firefox on each target
+OS. Test a signed XPI, companion install, menu action, watch-page controls, and
+popup settings before releasing.

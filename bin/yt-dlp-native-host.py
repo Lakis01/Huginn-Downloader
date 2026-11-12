@@ -5,10 +5,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 from ytdl_config import (
@@ -37,6 +39,10 @@ VERSION = "2.0.0"
 MAX_MESSAGE_SIZE = 1024 * 1024
 MODES = {"audio", "video", "cut"}
 YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+
+
+def _is_windows():
+    return os.name == "nt"
 
 
 def _is_youtube_url(value):
@@ -81,6 +87,88 @@ def _dependencies():
     }
 
 
+def _launch_download(mode: str, chosen_url: str) -> None:
+    """Launch a download in a user-visible terminal on the current OS."""
+    wrapper_py = Path(__file__).with_name("yt-dlp-wrapper.py")
+    if sys.platform.startswith("linux"):
+        shortcut = Path(
+            os.environ.get(
+                "YTDL_SHORTCUT", str(Path(__file__).with_name("yt-dlp-shortcut.sh"))
+            )
+        )
+        subprocess.Popen(
+            [str(shortcut), mode, chosen_url],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+
+    if sys.platform == "darwin":
+        descriptor, command_path = tempfile.mkstemp(
+            prefix="ytdl-launch-", suffix=".command"
+        )
+        try:
+            os.fchmod(descriptor, 0o700)
+            command = (
+                "#!/bin/sh\n"
+                'rm -f -- "$0"\n'
+                f"exec {shlex.quote(sys.executable)} "
+                f"{shlex.quote(str(wrapper_py))} --wait-keypress "
+                f"{shlex.quote(mode)} {shlex.quote(chosen_url)}\n"
+            )
+            stream = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
+            with stream:
+                stream.write(command)
+            subprocess.Popen(
+                ["open", "-a", "Terminal", command_path],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(command_path)
+            except OSError:
+                pass
+            raise
+        return
+
+    if _is_windows():
+        command = [
+            sys.executable,
+            str(wrapper_py),
+            "--wait-keypress",
+            mode,
+            chosen_url,
+        ]
+        terminal = shutil.which("wt")
+        if terminal:
+            command.insert(0, terminal)
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                command,
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return
+
+    raise OSError(f"Unsupported platform: {sys.platform}")
+
+
 def _config_response():
     config = load_config()
     try:
@@ -119,17 +207,8 @@ def _handle_download(message):
     if chosen_url is None:
         return {"ok": False, "error": "no valid YouTube URL was provided"}
 
-    shortcut = Path(
-        os.environ.get("YTDL_SHORTCUT", str(Path(__file__).with_name("yt-dlp-shortcut.sh")))
-    )
     try:
-        subprocess.Popen(
-            [str(shortcut), mode, chosen_url],
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        _launch_download(mode, chosen_url)
     except OSError as error:
         return {"ok": False, "error": str(error)}
     return {"ok": True, "launched": True, "mode": mode, "url": chosen_url}

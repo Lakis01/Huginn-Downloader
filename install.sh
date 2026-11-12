@@ -6,6 +6,8 @@ BIN_SOURCE="$ROOT/bin"
 DESKTOP_SOURCE="$ROOT/desktop"
 TARGET_HOME=${HOME:-}
 XPI_TARGET="$ROOT/dist/firefox-youtube-downloader.xpi"
+IS_MACOS=false
+[[ $(uname -s) == Darwin ]] && IS_MACOS=true
 
 usage() {
     cat <<EOF
@@ -14,8 +16,12 @@ Usage: ${0##*/} [--install [--download-dir=<path|ytdlp-default>] [--auto-tag=<tr
        ${0##*/} [--help]
 
 Without --install, show a no-write installation plan. --check-deps reports
-the current desktop/session and Debian package suggestions without installing.
+the current platform and dependency suggestions without installing anything.
 EOF
+}
+
+lowercase() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 INSTALL=false
@@ -74,7 +80,7 @@ fi
 
 BIN_TARGET="$TARGET_HOME/.local/bin"
 DESKTOP_TARGET="$TARGET_HOME/.local/share/applications"
-BIN_FILES=(ytdl_config.py ytdl_meta.py yt-dlp-wrapper.py yt-dlp-shortcut.sh yt-dlp-native-host.py)
+BIN_FILES=(ytdl_config.py ytdl_meta.py ytdl_version.py yt-dlp-wrapper.py yt-dlp-shortcut.sh yt-dlp-native-host.py)
 DESKTOP_FILES=(
     net.local.yt-dlp-shortcut.sh.desktop
     net.local.yt-dlp-shortcut.sh-2.desktop
@@ -85,13 +91,21 @@ DESKTOP_FILES=(
 for file in "${BIN_FILES[@]}"; do
     [[ -f $BIN_SOURCE/$file ]] || { printf 'Missing source: %s\n' "$BIN_SOURCE/$file" >&2; exit 1; }
 done
-for file in "${DESKTOP_FILES[@]}"; do
-    [[ -f $DESKTOP_SOURCE/$file ]] || { printf 'Missing source: %s\n' "$DESKTOP_SOURCE/$file" >&2; exit 1; }
-done
+if ! $IS_MACOS; then
+    for file in "${DESKTOP_FILES[@]}"; do
+        [[ -f $DESKTOP_SOURCE/$file ]] || { printf 'Missing source: %s\n' "$DESKTOP_SOURCE/$file" >&2; exit 1; }
+    done
+fi
 
 if $CHECK_DEPS; then
+    if $IS_MACOS; then
+        printf 'Platform: macOS (%s)\n' "$(sw_vers -productVersion 2>/dev/null || printf 'version unknown')"
+        printf 'Suggested dependencies (review; this command is not run):\n'
+        printf 'brew install yt-dlp ffmpeg rsgain python pillow\n'
+        exit 0
+    fi
     desktop_session=${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-unknown}}
-    case ${desktop_session,,} in
+    case $(lowercase "$desktop_session") in
         *kde*|*plasma*) desktop_label=KDE ;;
         *gnome*) desktop_label=GNOME ;;
         *cinnamon*) desktop_label=Cinnamon ;;
@@ -128,14 +142,20 @@ fi
 
 CONFIG_DEST=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import config_path; print(config_path())')
 XDG_CONFIG_HOME_RESOLVED=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import config_path; print(config_path().parents[1])')
-HOME_NATIVE_MANIFEST="$TARGET_HOME/.mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
-XDG_NATIVE_MANIFEST="$XDG_CONFIG_HOME_RESOLVED/mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
-NATIVE_MANIFESTS_SAME=$(python3 - "$HOME_NATIVE_MANIFEST" "$XDG_NATIVE_MANIFEST" <<'PY'
+if $IS_MACOS; then
+    HOME_NATIVE_MANIFEST="$TARGET_HOME/Library/Application Support/Mozilla/NativeMessagingHosts/firefox_youtube_downloader.json"
+    XDG_NATIVE_MANIFEST=
+    NATIVE_MANIFESTS_SAME=true
+else
+    HOME_NATIVE_MANIFEST="$TARGET_HOME/.mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
+    XDG_NATIVE_MANIFEST="$XDG_CONFIG_HOME_RESOLVED/mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
+    NATIVE_MANIFESTS_SAME=$(python3 - "$HOME_NATIVE_MANIFEST" "$XDG_NATIVE_MANIFEST" <<'PY'
 from pathlib import Path
 import sys
 print("true" if Path(sys.argv[1]).resolve() == Path(sys.argv[2]).resolve() else "false")
 PY
 )
+fi
 YTDLP_CONFIG_EXISTS=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import ytdlp_config_exists; print("true" if ytdlp_config_exists() else "false")')
 PLUGIN_CONFIG_EXISTS=false
 [[ -e $CONFIG_DEST || -L $CONFIG_DEST ]] && PLUGIN_CONFIG_EXISTS=true
@@ -145,15 +165,19 @@ if ! $INSTALL; then
     for file in "${BIN_FILES[@]}"; do
         printf '  %s -> %s/%s\n' "$BIN_SOURCE/$file" "$BIN_TARGET" "$file"
     done
-    for file in "${DESKTOP_FILES[@]}"; do
-        printf '  %s -> %s/%s\n' "$DESKTOP_SOURCE/$file" "$DESKTOP_TARGET" "$file"
-    done
+    if ! $IS_MACOS; then
+        for file in "${DESKTOP_FILES[@]}"; do
+            printf '  %s -> %s/%s\n' "$DESKTOP_SOURCE/$file" "$DESKTOP_TARGET" "$file"
+        done
+    fi
     printf '  Write native-messaging manifest: %s\n' "$HOME_NATIVE_MANIFEST"
-    if [[ $NATIVE_MANIFESTS_SAME == false ]]; then
+    if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
         printf '  Write native-messaging manifest: %s\n' "$XDG_NATIVE_MANIFEST"
     fi
     printf '  Build %s\n' "$XPI_TARGET"
-    printf '  Register x-scheme-handler/yt-dlp -> net.local.yt-dlp-uri.desktop\n'
+    if ! $IS_MACOS; then
+        printf '  Register x-scheme-handler/yt-dlp -> net.local.yt-dlp-uri.desktop\n'
+    fi
     printf '  Config: %s\n' "$CONFIG_DEST"
     if $PLUGIN_CONFIG_EXISTS; then
         printf '    Preserve existing plugin config unless an explicit option is supplied.\n'
@@ -183,17 +207,21 @@ check_destination() {
 for file in "${BIN_FILES[@]}"; do
     check_destination "$BIN_TARGET/$file"
 done
-for file in "${DESKTOP_FILES[@]}"; do
-    check_destination "$DESKTOP_TARGET/$file"
-done
+if ! $IS_MACOS; then
+    for file in "${DESKTOP_FILES[@]}"; do
+        check_destination "$DESKTOP_TARGET/$file"
+    done
+fi
 check_destination "$HOME_NATIVE_MANIFEST"
-if [[ $NATIVE_MANIFESTS_SAME == false ]]; then
+if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     check_destination "$XDG_NATIVE_MANIFEST"
 fi
 check_destination "$CONFIG_DEST"
 check_destination "$XPI_TARGET"
 
-command -v xdg-mime >/dev/null 2>&1 || { printf 'xdg-mime is required to register the URI handler.\n' >&2; exit 1; }
+if ! $IS_MACOS; then
+    command -v xdg-mime >/dev/null 2>&1 || { printf 'xdg-mime is required to register the URI handler.\n' >&2; exit 1; }
+fi
 command -v python3 >/dev/null 2>&1 || { printf 'python3 is required to install configuration and stage desktop entries.\n' >&2; exit 1; }
 
 TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
@@ -232,7 +260,7 @@ backup_if_present() {
             backup="$destination.bak.$TIMESTAMP.$suffix"
             suffix=$((suffix + 1))
         done
-        cp -a -- "$destination" "$backup"
+        cp -pPR "$destination" "$backup"
         printf 'Backed up %s -> %s\n' "$destination" "$backup"
     fi
 }
@@ -241,7 +269,7 @@ install_source() {
     local source=$1 destination=$2 mode=$3
     mkdir -p -- "$(dirname -- "$destination")"
     backup_if_present "$destination"
-    install -m "$mode" -- "$source" "$destination"
+    install -m "$mode" "$source" "$destination"
     printf 'Installed %s -> %s\n' "$source" "$destination"
 }
 
@@ -309,13 +337,13 @@ if ! $PLUGIN_CONFIG_EXISTS; then
             esac
         fi
         read -r -p 'Automatic tag extraction? [Y/n] ' auto_tag_choice
-        case ${auto_tag_choice,,} in
+        case $(lowercase "$auto_tag_choice") in
             ''|y|yes) selected_auto_tag=true ;;
             n|no) selected_auto_tag=false ;;
             *) printf 'Invalid automatic tag choice.\n' >&2; exit 2 ;;
         esac
         read -r -p 'ReplayGain rsgain normalization? [y/N] ' rsgain_choice
-        case ${rsgain_choice,,} in
+        case $(lowercase "$rsgain_choice") in
             y|yes) selected_rsgain=true ;;
             ''|n|no) selected_rsgain=false ;;
             *) printf 'Invalid ReplayGain choice.\n' >&2; exit 2 ;;
@@ -342,11 +370,13 @@ fi
 for file in "${BIN_FILES[@]}"; do
     install_source "$BIN_SOURCE/$file" "$BIN_TARGET/$file" 755
 done
-for file in "${DESKTOP_FILES[@]}"; do
-    staged="$STAGING_DIR/$file"
-    stage_desktop "$DESKTOP_SOURCE/$file" "$staged" "$BIN_TARGET/yt-dlp-shortcut.sh"
-    install_source "$staged" "$DESKTOP_TARGET/$file" 644
-done
+if ! $IS_MACOS; then
+    for file in "${DESKTOP_FILES[@]}"; do
+        staged="$STAGING_DIR/$file"
+        stage_desktop "$DESKTOP_SOURCE/$file" "$staged" "$BIN_TARGET/yt-dlp-shortcut.sh"
+        install_source "$staged" "$DESKTOP_TARGET/$file" 644
+    done
+fi
 
 manifest_template="$STAGING_DIR/firefox_youtube_downloader.json"
 python3 - "$manifest_template" "$BIN_TARGET/yt-dlp-native-host.py" <<'PY'
@@ -370,6 +400,8 @@ if [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     install_source "$manifest_template" "$XDG_NATIVE_MANIFEST" 644
 fi
 
-HOME="$TARGET_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME_RESOLVED" \
-    xdg-mime default net.local.yt-dlp-uri.desktop x-scheme-handler/yt-dlp
-printf 'Registered x-scheme-handler/yt-dlp with net.local.yt-dlp-uri.desktop.\n'
+if ! $IS_MACOS; then
+    HOME="$TARGET_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME_RESOLVED" \
+        xdg-mime default net.local.yt-dlp-uri.desktop x-scheme-handler/yt-dlp
+    printf 'Registered x-scheme-handler/yt-dlp with net.local.yt-dlp-uri.desktop.\n'
+fi

@@ -6,11 +6,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import termios
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+try:
+    import termios
+except ImportError:  # pragma: no cover - Windows does not provide termios
+    termios = None
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
@@ -1934,6 +1938,7 @@ class WrapperTests(unittest.TestCase):
 
 
 class WaitForKeypressTests(unittest.TestCase):
+    @unittest.skipIf(termios is None, "termios-specific behavior is POSIX-only")
     def test_noop_when_stdin_is_not_a_tty(self):
         wrapper = _load_wrapper(self)
         with mock.patch.object(wrapper.sys.stdin, "isatty", return_value=False):
@@ -1941,6 +1946,7 @@ class WaitForKeypressTests(unittest.TestCase):
                 wrapper.wait_for_keypress()
         get_attr.assert_not_called()
 
+    @unittest.skipIf(termios is None, "termios-specific behavior is POSIX-only")
     def test_reads_single_character_and_restores_terminal(self):
         wrapper = _load_wrapper(self)
         fake_stdin = mock.Mock()
@@ -1959,6 +1965,7 @@ class WaitForKeypressTests(unittest.TestCase):
         fake_stdin.read.assert_called_once_with(1)
         set_attr.assert_called_once_with(7, termios.TCSADRAIN, "saved-attrs")
 
+    @unittest.skipIf(termios is None, "termios-specific behavior is POSIX-only")
     def test_restores_terminal_when_read_fails(self):
         wrapper = _load_wrapper(self)
         fake_stdin = mock.Mock()
