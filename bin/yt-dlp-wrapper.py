@@ -13,6 +13,20 @@ import urllib.parse
 from ytdl_config import effective_download_dir, load_config
 from ytdl_meta import parse_info, sanitize_filename, strip_language_tags, tag_audio_file
 
+try:
+    from ytdl_version import check_ytdlp_update
+except ImportError:  # pragma: no cover - helper ships alongside the wrapper
+
+    def check_ytdlp_update(*args, **kwargs):
+        return {
+            "installed": None,
+            "latest": None,
+            "outdated": False,
+            "age_days": None,
+            "reason": "unknown",
+            "update_hint": "yt-dlp -U",
+        }
+
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
 _AUTH_ERROR_MARKERS = (
@@ -680,6 +694,57 @@ def interactive_cut(url, config=None):
         _remove_temp_file(temp_info_path)
 
 
+def _print_update_hint(status):
+    """Print an actionable out-of-date notice to stderr."""
+    installed = status.get("installed") or "unknown"
+    latest = status.get("latest")
+    age_days = status.get("age_days")
+    hint = status.get("update_hint") or "yt-dlp -U"
+    if latest:
+        print(
+            f"Your yt-dlp is out of date (installed {installed}, "
+            f"latest {latest}). Update with: {hint}",
+            file=sys.stderr,
+        )
+    elif isinstance(age_days, int):
+        print(
+            f"Your yt-dlp is out of date (installed {installed}, "
+            f"{age_days} days old). Update with: {hint}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Your yt-dlp may be out of date (installed {installed}). "
+            f"Update with: {hint}",
+            file=sys.stderr,
+        )
+
+
+def _print_update_notice(status):
+    """Print a concise one-line out-of-date notice to stderr."""
+    installed = status.get("installed") or "unknown"
+    latest = status.get("latest")
+    age_days = status.get("age_days")
+    hint = status.get("update_hint") or "yt-dlp -U"
+    if latest:
+        print(
+            f"Note: yt-dlp {installed} is outdated "
+            f"(latest {latest}); update with: {hint}",
+            file=sys.stderr,
+        )
+    elif isinstance(age_days, int):
+        print(
+            f"Note: yt-dlp {installed} is outdated "
+            f"({age_days} days old); update with: {hint}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Note: yt-dlp {installed} may be outdated; update with: {hint}",
+            file=sys.stderr,
+        )
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     args = list(argv[1:])
@@ -707,7 +772,19 @@ def main(argv=None):
                 return 1
         except _YtDlpError as error:
             print(f"yt-dlp failed: {error}", file=sys.stderr)
+            try:
+                status = check_ytdlp_update(allow_network=True)
+            except Exception:
+                status = None
+            if status and status.get("outdated"):
+                _print_update_hint(status)
             return 1
+        try:
+            status = check_ytdlp_update(allow_network=True)
+        except Exception:
+            status = None
+        if status and status.get("outdated"):
+            _print_update_notice(status)
         return 0
     finally:
         if wait_keypress and sys.stdin.isatty():

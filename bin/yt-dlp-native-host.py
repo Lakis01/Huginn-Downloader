@@ -18,6 +18,20 @@ from ytdl_config import (
     ytdlp_config_exists,
 )
 
+try:
+    from ytdl_version import check_ytdlp_update
+except ImportError:  # pragma: no cover - helper ships alongside the host
+
+    def check_ytdlp_update(*args, **kwargs):
+        return {
+            "installed": None,
+            "latest": None,
+            "outdated": False,
+            "age_days": None,
+            "reason": "unknown",
+            "update_hint": "yt-dlp -U",
+        }
+
 
 VERSION = "2.0.0"
 MAX_MESSAGE_SIZE = 1024 * 1024
@@ -69,6 +83,17 @@ def _dependencies():
 
 def _config_response():
     config = load_config()
+    try:
+        yt_dlp_status = check_ytdlp_update(allow_network=False)
+    except Exception:
+        yt_dlp_status = {
+            "installed": None,
+            "latest": None,
+            "outdated": False,
+            "age_days": None,
+            "reason": "unknown",
+            "update_hint": "yt-dlp -U",
+        }
     return {
         "ok": True,
         "version": VERSION,
@@ -76,6 +101,7 @@ def _config_response():
         "effective_download_dir": effective_download_dir(config),
         "ytdlp_config_exists": ytdlp_config_exists(),
         "deps": _dependencies(),
+        "yt_dlp_status": yt_dlp_status,
     }
 
 

@@ -26,6 +26,21 @@ def _load_wrapper(test_case):
     spec = importlib.util.spec_from_file_location("yt_dlp_wrapper", WRAPPER_PATH)
     wrapper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wrapper)
+    patcher = mock.patch.object(
+        wrapper,
+        "check_ytdlp_update",
+        return_value={
+            "installed": "2026.10.26",
+            "latest": "2026.10.26",
+            "outdated": False,
+            "age_days": 0,
+            "reason": "up_to_date",
+            "update_hint": "yt-dlp -U",
+        },
+        create=True,
+    )
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
     return wrapper
 
 
@@ -1825,6 +1840,97 @@ class WrapperTests(unittest.TestCase):
                     )
         self.assertEqual(result, 0)
         wait.assert_not_called()
+
+    def test_main_prints_update_hint_on_ytdlp_error_when_outdated(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.01.01",
+            "latest": "2026.10.26",
+            "outdated": True,
+            "age_days": 299,
+            "reason": "behind_latest",
+            "update_hint": "pipx upgrade yt-dlp",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", side_effect=wrapper._YtDlpError("boom")
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        output = stderr.getvalue()
+        self.assertEqual(result, 1)
+        wrapper.check_ytdlp_update.assert_called_once_with(allow_network=True)
+        self.assertIn("2026.01.01", output)
+        self.assertIn("2026.10.26", output)
+        self.assertIn("pipx upgrade yt-dlp", output)
+
+    def test_main_omits_update_hint_on_ytdlp_error_when_up_to_date(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.10.26",
+            "latest": "2026.10.26",
+            "outdated": False,
+            "age_days": 0,
+            "reason": "up_to_date",
+            "update_hint": "yt-dlp -U",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", side_effect=wrapper._YtDlpError("boom")
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        self.assertEqual(result, 1)
+        self.assertNotIn("yt-dlp -U", stderr.getvalue())
+
+    def test_main_prints_one_line_notice_on_success_when_outdated(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.01.01",
+            "latest": "2026.10.26",
+            "outdated": True,
+            "age_days": 299,
+            "reason": "behind_latest",
+            "update_hint": "brew upgrade yt-dlp",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", return_value="/tmp/done.opus"
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        self.assertEqual(result, 0)
+        lines = [line for line in stderr.getvalue().splitlines() if "yt-dlp" in line.lower()]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("2026.01.01", lines[0])
+        self.assertIn("brew upgrade yt-dlp", lines[0])
+
+    def test_main_omits_success_notice_when_up_to_date(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.10.26",
+            "latest": "2026.10.26",
+            "outdated": False,
+            "age_days": 0,
+            "reason": "up_to_date",
+            "update_hint": "yt-dlp -U",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", return_value="/tmp/done.opus"
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        self.assertEqual(result, 0)
+        self.assertNotIn("yt-dlp", stderr.getvalue().lower())
 
 
 class WaitForKeypressTests(unittest.TestCase):

@@ -173,6 +173,52 @@ class NativeHostTests(unittest.TestCase):
         self.assertFalse(responses[0]["ok"])
         self.assertIn("size", responses[0]["error"].lower())
 
+    def test_ping_includes_ytdlp_status_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"HOME": tmp}, clear=False
+        ):
+            with mock.patch(
+                "urllib.request.urlopen",
+                side_effect=AssertionError("ping must not use the network"),
+            ):
+                responses = run_host([{"action": "ping"}])
+
+        self.assertEqual(len(responses), 1)
+        self.assertTrue(responses[0]["ok"])
+        status = responses[0].get("yt_dlp_status")
+        self.assertIsInstance(status, dict)
+        for key in (
+            "installed",
+            "latest",
+            "outdated",
+            "age_days",
+            "reason",
+            "update_hint",
+        ):
+            self.assertIn(key, status)
+        self.assertIsInstance(status["outdated"], bool)
+        self.assertIn(status["reason"], ("behind_latest", "stale_age", "up_to_date", "unknown"))
+
+    def test_config_response_calls_version_check_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"HOME": tmp}, clear=False
+        ):
+            sentinel = {
+                "installed": "2026.10.26",
+                "latest": "2026.10.26",
+                "outdated": False,
+                "age_days": 1,
+                "reason": "up_to_date",
+                "update_hint": "yt-dlp -U",
+            }
+            with mock.patch.object(
+                HOST, "check_ytdlp_update", return_value=dict(sentinel)
+            ) as check:
+                responses = run_host([{"action": "ping"}])
+
+        check.assert_called_once_with(allow_network=False)
+        self.assertEqual(responses[0]["yt_dlp_status"], sentinel)
+
 
 class NativeHostPresenceTests(unittest.TestCase):
     def test_native_host_entrypoint_exists(self):
