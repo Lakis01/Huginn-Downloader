@@ -276,6 +276,12 @@ def _make_thumbnail(path, size=(1280, 720)):
     Image.new("RGB", size, (200, 30, 30)).save(path, "JPEG")
 
 
+def _make_webp_thumbnail(path, size=(1280, 720)):
+    from PIL import Image
+
+    Image.new("RGB", size, (200, 30, 30)).save(path, "WEBP")
+
+
 class TagAudioFileTests(unittest.TestCase):
     def test_opus_tags_are_multivalue_and_artwork_is_cropped_square(self):
         from mutagen.oggopus import OggOpus
@@ -340,10 +346,13 @@ class TagAudioFileTests(unittest.TestCase):
 
             picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
             self.assertEqual(picture.type, 3)
+            self.assertEqual(picture.mime, "image/webp")
             self.assertEqual((picture.width, picture.height), (720, 720))
+            self.assertTrue(picture.data.startswith(b"RIFF"))
+            self.assertEqual(picture.data[8:12], b"WEBP")
 
     def test_m4a_tags_standard_atoms_freeform_artists_and_cover(self):
-        from mutagen.mp4 import MP4, MP4FreeForm
+        from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 
         meta = parse_info({
             "description": OFFICIAL_DESCRIPTION,
@@ -418,6 +427,7 @@ class TagAudioFileTests(unittest.TestCase):
                 self.assertNotIn(stale, tagged)
             self.assertIn("covr", tagged)
             self.assertTrue(len(bytes(tagged["covr"][0])) > 0)
+            self.assertEqual(tagged["covr"][0].imageformat, MP4Cover.FORMAT_JPEG)
 
             tag_audio_file(src, {})
             retagged = MP4(src)
@@ -515,6 +525,9 @@ class TagAudioFileTests(unittest.TestCase):
             pictures = tagged.getall("APIC")
             self.assertEqual(len(pictures), 1)
             self.assertEqual(pictures[0].type, 3)
+            self.assertEqual(pictures[0].mime, "image/webp")
+            self.assertTrue(pictures[0].data.startswith(b"RIFF"))
+            self.assertEqual(pictures[0].data[8:12], b"WEBP")
 
             tag_audio_file(src, {})
             retagged = MP3(src).tags
@@ -550,6 +563,92 @@ class TagAudioFileTests(unittest.TestCase):
 
             picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
             self.assertEqual((picture.width, picture.height), (1280, 720))
+
+    def test_opus_and_mp3_embed_native_webp_and_transcode_other_covers(self):
+        from PIL import Image
+
+        standard_meta = parse_info({"title": "Regular upload", "channel": "Artist"})
+        official_meta = parse_info({
+            "description": OFFICIAL_DESCRIPTION,
+            "title": "Stay (feat. Earth, Wind & Fire)",
+        })
+
+        def embedded_cover(path):
+            if Path(path).suffix == ".opus":
+                import base64
+
+                from mutagen.flac import Picture
+                from mutagen.oggopus import OggOpus
+
+                picture = Picture(
+                    base64.b64decode(OggOpus(path).tags["metadata_block_picture"][0])
+                )
+                return picture.data, picture.mime, picture.width, picture.height
+
+            from mutagen.mp3 import MP3
+
+            picture = MP3(path).tags.getall("APIC")[0]
+            with Image.open(io.BytesIO(picture.data)) as image:
+                width, height = image.size
+            return picture.data, picture.mime, width, height
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for suffix, make_audio in (
+                (".opus", _make_silence_opus),
+                (".mp3", _make_silence_mp3),
+            ):
+                with self.subTest(suffix=suffix):
+                    native_audio = os.path.join(tmp, f"native{suffix}")
+                    native_thumb = os.path.join(tmp, "native.webp")
+                    make_audio(native_audio)
+                    _make_webp_thumbnail(native_thumb)
+                    native_bytes = Path(native_thumb).read_bytes()
+
+                    tag_audio_file(native_audio, standard_meta, native_thumb)
+
+                    data, mime, width, height = embedded_cover(native_audio)
+                    self.assertEqual(mime, "image/webp")
+                    self.assertEqual(data, native_bytes)
+                    self.assertEqual((width, height), (1280, 720))
+
+                    official_audio = os.path.join(tmp, f"official{suffix}")
+                    official_thumb = os.path.join(tmp, "official.webp")
+                    make_audio(official_audio)
+                    _make_webp_thumbnail(official_thumb, (1600, 900))
+
+                    tag_audio_file(official_audio, official_meta, official_thumb)
+
+                    data, mime, width, height = embedded_cover(official_audio)
+                    self.assertEqual(mime, "image/webp")
+                    self.assertEqual((width, height), (900, 900))
+                    self.assertTrue(data.startswith(b"RIFF"))
+                    self.assertEqual(data[8:12], b"WEBP")
+                    with Image.open(io.BytesIO(data)) as image:
+                        self.assertEqual(image.size, (900, 900))
+
+                    jpeg_audio = os.path.join(tmp, f"jpeg{suffix}")
+                    jpeg_thumb = os.path.join(tmp, "jpeg.jpg")
+                    make_audio(jpeg_audio)
+                    _make_thumbnail(jpeg_thumb, (640, 480))
+                    save_calls = []
+                    original_save = Image.Image.save
+
+                    def capture_save(image, fp, format=None, **params):
+                        save_calls.append((format, params.copy()))
+                        return original_save(image, fp, format=format, **params)
+
+                    with mock.patch.object(Image.Image, "save", new=capture_save):
+                        tag_audio_file(jpeg_audio, standard_meta, jpeg_thumb)
+
+                    data, mime, width, height = embedded_cover(jpeg_audio)
+                    self.assertEqual(mime, "image/webp")
+                    self.assertTrue(data.startswith(b"RIFF"))
+                    self.assertEqual(data[8:12], b"WEBP")
+                    self.assertEqual((width, height), (640, 480))
+                    self.assertEqual(len(save_calls), 1)
+                    self.assertEqual(save_calls[0][0], "WEBP")
+                    self.assertEqual(save_calls[0][1].get("quality"), 88)
+                    self.assertEqual(save_calls[0][1].get("method"), 6)
 
 
 class LanguageTagTests(unittest.TestCase):
@@ -674,7 +773,9 @@ class CoverEncodingTests(unittest.TestCase):
                 return original_save(image, fp, format=format, **params)
 
             with mock.patch.object(Image.Image, "save", new=capture_save):
-                data, mime, _width, _height = ytdl_meta._cover_image_bytes(thumbnail, False)
+                data, mime, _width, _height = ytdl_meta._cover_image_bytes(
+                    thumbnail, False, prefer_webp=False
+                )
 
         self.assertEqual(mime, "image/jpeg")
         self.assertNotEqual(mime, "image/webp")
@@ -938,7 +1039,10 @@ class WrapperTests(unittest.TestCase):
             self.assertNotIn("--embed-metadata", command)
             self.assertIn("--write-info-json", command)
             self.assertIn("--write-thumbnail", command)
+            self.assertIn("--quiet", command)
             self.assertIn("--progress", command)
+            self.assertNotIn("--no-warnings", command)
+            self.assertNotIn("--convert-thumbnails", command)
             self.assertIn("--ies", command)
             self.assertEqual(
                 command[command.index("--ies") + 1], "youtube,youtube:tab"
@@ -1003,6 +1107,10 @@ class WrapperTests(unittest.TestCase):
                     def fake_run(command, **kwargs):
                         calls.append((command, kwargs))
                         if command[0] == "yt-dlp":
+                            self.assertIn("--quiet", command)
+                            self.assertIn("--progress", command)
+                            self.assertNotIn("--no-warnings", command)
+                            self.assertNotIn("--convert-thumbnails", command)
                             self.assertIn("--embed-metadata", command)
                             self.assertIn("--embed-thumbnail", command)
                             self.assertNotIn("--write-info-json", command)
@@ -1282,6 +1390,10 @@ class WrapperTests(unittest.TestCase):
         cut_commands = [command for command in calls if "--download-sections" in command]
         self.assertEqual(len(cut_commands), 1)
         self.assertIn("--load-info-json", cut_commands[0])
+        self.assertIn("--quiet", cut_commands[0])
+        self.assertIn("--progress", cut_commands[0])
+        self.assertNotIn("--no-warnings", cut_commands[0])
+        self.assertNotIn("--convert-thumbnails", cut_commands[0])
         self.assertFalse(any(command[-2:] == ["--", url] for command in cut_commands))
 
     def test_cut_auth_failure_falls_back_and_retries_with_browser_cookies(self):
@@ -1510,6 +1622,10 @@ class WrapperTests(unittest.TestCase):
             self.assertNotIn("--embed-metadata", command)
             self.assertIn("--write-info-json", command)
             self.assertIn("--write-thumbnail", command)
+            self.assertIn("--quiet", command)
+            self.assertIn("--progress", command)
+            self.assertNotIn("--no-warnings", command)
+            self.assertNotIn("--convert-thumbnails", command)
             self.assertIn("--download-sections", command)
             self.assertIn("*10.0-50.0", command)
             self.assertIn("--load-info-json", command)
@@ -1545,7 +1661,9 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("--convert-thumbnails", command)
         self.assertIn("webp", command)
         self.assertIn("--embed-metadata", command)
+        self.assertIn("--quiet", command)
         self.assertIn("--progress", command)
+        self.assertNotIn("--no-warnings", command)
         self.assertIn(
             "post_process:[Stage] Merging video + audio into MKV"
             " & embedding thumbnail/metadata...",

@@ -1,6 +1,7 @@
 """Parse yt-dlp metadata and YouTube Music Art Track descriptions."""
 
 from datetime import date as calendar_date
+from pathlib import Path
 import re
 
 
@@ -492,14 +493,22 @@ _MP4_CLEAR_FREEFORMS_CASEFOLD = frozenset(
 _MP4_CLEAR_ATOMS = frozenset({"desc", "©cmt", "purl", "©url", "elng"})
 
 
-def _cover_image_bytes(thumbnail_path, is_official):
+def _cover_image_bytes(
+    thumbnail_path, is_official, prefer_webp=True
+) -> tuple[bytes, str, int, int]:
     """Return (data, mime, width, height) for the thumbnail to embed."""
     from PIL import Image
 
     with Image.open(thumbnail_path) as image:
+        src_format = (image.format or "").upper()
+        width, height = image.size
+        crop_official = is_official and width > height
+        if prefer_webp and not crop_official and src_format == "WEBP":
+            image.load()
+            return Path(thumbnail_path).read_bytes(), "image/webp", width, height
+
         frame = image.convert("RGB")
-        width, height = frame.size
-        if is_official and width > height:
+        if crop_official:
             side = height
             left = (width - side) // 2
             frame = frame.crop((left, 0, left + side, side))
@@ -507,6 +516,10 @@ def _cover_image_bytes(thumbnail_path, is_official):
         import io
 
         buffer = io.BytesIO()
+        if prefer_webp:
+            frame.save(buffer, "WEBP", quality=88, method=6)
+            return buffer.getvalue(), "image/webp", width, height
+
         frame.save(buffer, "JPEG", quality=88, optimize=True)
         return buffer.getvalue(), "image/jpeg", width, height
 
@@ -856,7 +869,12 @@ def tag_audio_file(filepath, meta, thumbnail_path=None) -> None:
     suffix = os.path.splitext(str(filepath))[1].lower()
     cover = None
     if thumbnail_path:
-        cover = _cover_image_bytes(thumbnail_path, bool((meta or {}).get("is_tagged")))
+        prefer_webp = suffix in {".opus", ".ogg", ".mp3"}
+        cover = _cover_image_bytes(
+            thumbnail_path,
+            bool((meta or {}).get("is_tagged")),
+            prefer_webp=prefer_webp,
+        )
 
     if suffix == ".opus":
         from mutagen.oggopus import OggOpus

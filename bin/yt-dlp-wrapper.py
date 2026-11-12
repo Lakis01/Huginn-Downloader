@@ -500,20 +500,18 @@ def download_audio(url, config=None):
             extras.extend([
                 "--write-info-json",
                 "--write-thumbnail",
-                "--convert-thumbnails", "jpg",
             ])
         else:
             extras.extend([
                 "--embed-metadata",
                 "--embed-thumbnail",
-                "--convert-thumbnails", "jpg",
             ])
         command = [
             "yt-dlp",
             *extras,
             "-f", "bestaudio",
             "-x", "--audio-format", "best",
-            "--no-warnings",
+            "--quiet",
             "--no-playlist",
             "--progress",
             "-o", "%(title)s.%(ext)s",
@@ -550,7 +548,7 @@ def download_video(url, config=None):
         "--embed-thumbnail",
         "--convert-thumbnails", "webp",
         "--embed-metadata",
-        "--no-warnings",
+        "--quiet",
         "--progress",
         "--print",
         "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
@@ -637,14 +635,12 @@ def interactive_cut(url, config=None):
                 extras.extend([
                     "--write-info-json",
                     "--write-thumbnail",
-                    "--convert-thumbnails", "jpg",
                 ])
                 output_template = _audio_output_template(meta, filename_suffix)
             else:
                 extras.extend([
                     "--embed-metadata",
                     "--embed-thumbnail",
-                    "--convert-thumbnails", "jpg",
                 ])
                 output_template = "%(title)s.%(ext)s"
             rest = [
@@ -653,7 +649,7 @@ def interactive_cut(url, config=None):
                 "--force-keyframes-at-cuts",
                 "-f", "bestaudio",
                 "-x", "--audio-format", "opus",
-                "--no-warnings",
+                "--quiet",
                 "--no-playlist",
                 "--progress",
                 "--postprocessor-args", f"ExtractAudio:{ffmpeg_options}",
