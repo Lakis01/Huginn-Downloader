@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YouTube Downloader</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<main class="panel" data-view="panel">
+  <h1>YouTube Downloader</h1>
+  <p class="status" role="status">
+    <span class="dot" id="statusDot" aria-hidden="true"></span>
+    <span id="statusText">Checking companion connection...</span>
+  </p>
+
+  <section id="connectedView" hidden>
+    <h2>Download settings</h2>
+    <label class="toggle">
+      <input type="checkbox" id="autoTag">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">Automatic tag extraction</span>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="rsgain">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">ReplayGain normalization (rsgain)</span>
+    </label>
+
+    <h2>Download folder</h2>
+    <div class="choices" role="radiogroup" aria-label="Download folder">
+      <label class="choice">
+        <input type="radio" name="folder" value="keep">
+        <span>Keep yt-dlp config</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="folder" value="music">
+        <span class="mono">~/Music/Youtube Downloads</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="folder" value="downloads">
+        <span class="mono">~/Downloads/Youtube</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="folder" value="custom">
+        <span>Custom folder</span>
+      </label>
+    </div>
+    <input type="text" id="customDir" class="path" placeholder="/home/user/Music/Youtube" aria-label="Custom download folder" hidden>
+    <p class="note" id="effectiveDir"></p>
+    <p class="note" id="depsLine"></p>
+  </section>
+
+  <section id="setupView" hidden>
+    <h2>Companion not found</h2>
+    <p>Install the native companion so the extension can start downloads:</p>
+    <code class="cmd" id="installCmd">./install.sh --install</code>
+    <div class="row">
+      <button type="button" class="primary" id="copyBtn">Copy install command</button>
+      <button type="button" id="retryBtn">Retry Connection</button>
+    </div>
+    <p class="note" id="copyNote" role="status"></p>
+  </section>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>

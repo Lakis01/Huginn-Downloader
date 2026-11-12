@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=YouTube Audio Download
+Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh audio
+NoDisplay=true
+Terminal=false
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true

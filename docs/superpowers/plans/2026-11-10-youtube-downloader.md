@@ -25,7 +25,7 @@
 1. DDEX artists such as `Simon & Garfunkel` must remain one artist; a feature such as `Artist A feat. Artist B` must preserve its display string and expose individual `artists` values (Task 1 tests).
 2. `Released on:` wins over ℗ and upload dates, partial dates stay partial, and an earlier ℗ year maps to `originaldate` (Task 1 tests).
 3. Credits with multiple roles and PRO suffixes must map to the right multi-value tags without duplication (Task 1 tests).
-4. Container-specific free-form fields and front-cover image dimensions must be correct for Opus and M4A (Task 2 tests).
+4. Every structured `parse_info()` field must be retained in Vorbis/Opus, MP4/M4A, and ID3/MP3, with distinct list values preserved and stale description/URL/synopsis/comment/mapped values cleared on retagging (Task 2 generated-media tests).
 5. Failed downloads, filename collisions, apostrophes in URLs, custom-scheme URLs, and unavailable MPRIS must fail safely or use the documented fallback (Tasks 3-4 tests).
 6. Repeated YouTube SPA navigation must not duplicate buttons; a direct click must encode the current watch URL into the custom scheme (Task 5 tests).
 
@@ -34,14 +34,20 @@
 ### Task 1: Parse Art Track and fallback metadata
 
 **Files:**
-- Create: `bin/ytdl_meta.py`
+- Create: `bin/ytdl_meta.py` (porting the user's existing parser)
 - Create: `tests/test_ytdl_meta.py`
 
 **Interfaces:**
-- Produces `parse_info(info: dict) -> dict` with backward-compatible keys plus `artists`, `albumartist`, `originaldate`, `label`, `copyright`, `publisher`, `isrc`, and multi-value `composers`, `lyricists`, `producers`, `arrangers`, `conductors`, `engineers`, and `performers`.
+- Produces `parse_info(info: dict) -> dict` with backward-compatible keys plus `artists`, `albumartist`, `originaldate`, `label`, `copyright`, `distributor`, `publisher`, `isrc`, `genre`, `recordingdate`, `studio`, and multi-value `composers`, `lyricists`, `producers`, `arrangers`, `conductors`, `engineers`, `performers`, and `instruments`.
 - Produces `sanitize_filename(text: str) -> str`.
 
 - [ ] Write parser tests for official Art Track detection, metadata and role credits, artist display/multi-value behavior, partial/full date handling, fallback cleanup, and safe filenames.
+- [ ] The official fixture must include `Provided to YouTube by Sony`, `Stay (feat. Earth, Wind & Fire) · Rihanna · Earth, Wind & Fire`, album `Unapologetic`, `℗ 1979 Def Jam Recordings`, `Released on: 2012-11-19`, `Composer, Lyricist: Mikky Ekko`, `Writer: Justin Parker   BMI`, `Producer: Mikky Ekko`, `Mixing Engineer: Manny Marroquin`, `Music Publisher: Kobalt Music Publishing`, `ISRC: USUM71212345`, `Genre: Pop`, `Recording Date: 2012`, and `Studio: Example Studios`. Assert `title == "Stay"`, `artist == "Rihanna feat. Earth, Wind & Fire"`, `artists == ["Rihanna", "Earth, Wind & Fire"]`, primary `albumartist == "Rihanna"`, album/date/originaldate/label/distributor, composers and lyricists both include Mikky Ekko, writer is included as composer, producer/engineer/publisher/isrc/genre/recordingdate/studio values.
+- [ ] Add an Art Track co-credit fixture `Mountains Falling · David Lynch · John Neff` and assert the two artists stay distinct. Add `The Sound of Silence · Simon & Garfunkel` and assert `Simon & Garfunkel` stays one entity.
+- [ ] Add labelled `Arranger`, `Conductor`, `Associated Performer`, `Studio Personnel, Recording Engineer`, `Studio Personnel, Mastering Engineer`, and instrument-role lines and assert their values are retained under their corresponding structured credit keys.
+- [ ] Test `Released on: 2020-05` → `date == "2020-05"`; ℗ only `2004` → `date == "2004"` and blank `originaldate`; `upload_date: "20240315"` → fallback date `2024-03-15`.
+- [ ] Test fallback title `Artist A featuring Artist B - My Song (Official Music Video) [4K]` → artist retains `Artist A featuring Artist B`, artists are the two names, title is `My Song`; also test `Cool Track (Lyrics) (feat. Guest)` with uploader/channel `MainActVEVO` / `Main Act - Topic` → artist `Main Act feat. Guest`, artists `Main Act` and `Guest`, title `Cool Track`.
+- [ ] Test `sanitize_filename('AC/DC: What\'s "Up"?*')` leaves no `/\\:*?"<>|` characters and strips trailing dots/spaces.
 - [ ] Run `python3 -m unittest discover -s tests -v` and confirm the new cases fail before implementation.
 - [ ] Implement the parser and sanitizer with conservative, role-labelled description parsing; do not split DDEX artist entities blindly on `&` or `and`.
 - [ ] Re-run the focused tests and verify legacy compatibility keys remain present.
@@ -55,7 +61,9 @@
 **Interfaces:**
 - Produces `tag_audio_file(filepath, meta, thumbnail_path=None) -> None`.
 
-- [ ] Add generated-media tests for Vorbis/Opus and M4A tags, including multivalue `artists` and credits, clean comment/URL fields, and front-cover metadata.
+- [ ] Add generated-media tests for Vorbis/Opus, M4A, and MP3 covering `artists`, albumartist, dates, label/copyright, distributor, publisher, ISRC, genre, recordingdate, studio, composers, lyricists, producers, arrangers, conductors, engineers, performers, and instruments; assert true multi-value storage and stale description/URL/synopsis/comment/mapped-value cleanup after retagging.
+- [ ] Assert Opus keeps native multi-value tags and clears description/purl/synopsis/comment/webpage_url, plus a square crop for official landscape Art Track thumbnails. For M4A and MP3, assert native atoms/frames where available, descriptive freeform/TXXX storage for remaining fields, preservation of all distinct values, stale-value cleanup, and front-cover metadata.
+- [ ] For a fallback non-Art-Track file, assert a 1280×720 thumbnail remains uncropped and single-artist metadata omits an `artists` field.
 - [ ] Run the focused tests and confirm they fail before implementation.
 - [ ] Implement native Mutagen tag mappings for Vorbis comments, MP4 free-form tags, and ID3 where available; center-crop only official landscape Art Track thumbnails.
 - [ ] Re-run tests and verify `yt-to-forerunner --help` can still import the compatibility parser once installed.
@@ -63,13 +71,14 @@
 ### Task 3: Finalize audio, video, and cut downloads
 
 **Files:**
-- Create: `bin/yt-dlp-wrapper.py`
+- Create: `bin/yt-dlp-wrapper.py` (porting the user's existing wrapper)
 - Modify: `tests/test_ytdl_meta.py`
 
 **Interfaces:**
 - Produces CLI `yt-dlp-wrapper.py [audio|video|cut] <url>` and testable `finalize_audio_download(...)`.
 
 - [ ] Add tests for info/thumbnail sidecar discovery, output rename/collision behavior, one-file rsgain invocation, and failure preservation.
+- [ ] Assert audio and cut omit `--embed-metadata`, include info JSON and thumbnail sidecars, use the post-move filepath, call `rsgain custom -s i` once per output file, and retain each cut's requested bitrate/channel/application args. Verify a failed retag leaves the downloaded original intact and a collision gets a numeric suffix.
 - [ ] Run the focused tests and confirm they fail before implementation.
 - [ ] Implement audio and cut downloads without `--embed-metadata`; tag using the saved yt-dlp info JSON, then run `rsgain custom -s i <file>` individually. Preserve the cut bitrate/channel/application FFmpeg arguments. Keep video mode's existing stream/thumbnail behavior.
 - [ ] Run unit tests and a mocked end-to-end wrapper test without downloading real media.
@@ -85,11 +94,15 @@
 **Interfaces:**
 - Shortcut mode resolution: explicit URL/URI first; otherwise validated primary selection, Plasma Browser Integration MPRIS active-media URL, then clipboard.
 - URI format: `yt-dlp://<audio|video|cut>?url=<percent-encoded-YouTube-URL>`.
+- Installer stages `bin/ytdl_meta.py`, `bin/yt-dlp-wrapper.py`, and `bin/yt-dlp-shortcut.sh` into `~/.local/bin`, and all four desktop entries into `~/.local/share/applications`.
+- Installation is dry-run by default; `--install` makes timestamped backups before replacing/deploying files.
 
-- [ ] Test mode/URI parsing, valid YouTube URL filtering, apostrophes and ampersands, MPRIS extraction, and clipboard fallback.
+- [ ] Test mode/URI parsing, valid YouTube URL filtering, apostrophes and ampersands, MPRIS extraction, clipboard fallback, and nonzero failure for malformed explicit URIs without trying fallback sources.
+- [ ] Shortcut URL precedence is explicit URL/URI, validated primary selection, Plasma Browser Integration MPRIS `xesam:url`, then validated clipboard; verify bad primary/clipboard values fall through and shell arguments are never evaluated.
 - [ ] Fix desktop `Exec=` paths to absolute paths and add the custom URL protocol entry.
 - [ ] Implement safe argument passing without shell interpolation, active-media URL lookup, and one-time backup installation behavior.
 - [ ] Verify `bash -n`, `desktop-file-validate`, and the shell tests.
+- [ ] Verify installer preflight rejects real and symlink-to-directory destinations before writing any files.
 - [ ] Document the available KDE shortcuts `Meta+Alt+A`, `Meta+Alt+V`, and `Meta+Alt+C`; do not silently change KDE bindings.
 
 ### Task 5: Firefox context menu and persistent player buttons
@@ -100,6 +113,9 @@
 - Create: `tests/test_youtube_buttons.js`
 
 - [ ] Test userscript URL encoding, current-watch URL selection, button de-duplication, and route/re-render reattachment with a lightweight DOM test harness.
+- [ ] A simulated `ytd-watch-metadata #top-row` with `#owner #subscribe-button` followed by `#actions` has exactly one custom control group between owner and actions. Buttons have names `Download audio`, `Download video`, and `Cut audio`, with accessible labels, keyboard focus, inline SVG icons, and hover/focus states.
+- [ ] Each button click emits the exact scheme mode and percent-encodes the current canonical watch URL. Repeated `yt-navigate-finish`, `yt-page-data-updated`, and observed DOM mutations do not duplicate controls; leaving a watch page removes the group.
+- [ ] A `contextmenu` event on a YouTube sidebar/feed card records that card's `/watch` or `/shorts/` link for External Application Launcher; a right-click outside a card falls back to current `location.href`.
 - [ ] Implement Tampermonkey controls between Subscribe and Like/Dislike, inline icons, SPA listeners, and a debounced mutation observer.
 - [ ] Make each direct user click navigate to a URI in the documented `yt-dlp://` format.
 - [ ] Document safe manual External Application Launcher setup for the three existing apps with YouTube page/frame/link/image/audio/video contexts and no destructive partial import; document Tampermonkey import and Firefox's URI confirmation.
