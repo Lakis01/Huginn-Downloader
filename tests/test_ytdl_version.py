@@ -131,8 +131,6 @@ class CheckUpdateTests(unittest.TestCase):
         self.assertEqual(status["reason"], "up_to_date")
 
     def test_fresh_cache_skips_fetch_latest(self):
-        import time
-
         with tempfile.TemporaryDirectory() as tmp:
             cache_home = os.path.join(tmp, ".cache")
             env = {"HOME": tmp, "XDG_CACHE_HOME": cache_home}
@@ -245,6 +243,40 @@ class CheckUpdateTests(unittest.TestCase):
                     today=date(2026, 10, 27),
                     platform_name="linux",
                 )
+        self.assertEqual(status["installed"], "2026.10.26")
+
+    def test_executable_version_wins_over_python_package(self):
+        # A stale `yt_dlp` Python package must not shadow the `yt-dlp`
+        # executable the wrapper actually runs (or vice versa).
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp, "XDG_CACHE_HOME": os.path.join(tmp, ".cache")}
+            fake_binary = os.path.join(tmp, "yt-dlp")
+            with mock.patch.object(
+                ytdl_version.subprocess,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0, stdout="2026.10.26\n"
+                ),
+            ) as run:
+                with mock.patch.dict(
+                    "sys.modules",
+                    {"yt_dlp.version": SimpleNamespace(__version__="2024.01.01")},
+                ):
+                    status = ytdl_version.check_ytdlp_update(
+                        allow_network=False,
+                        env=env,
+                        ytdlp_path=fake_binary,
+                        today=date(2026, 10, 27),
+                        platform_name="linux",
+                    )
+        run.assert_called_once_with(
+            [fake_binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
         self.assertEqual(status["installed"], "2026.10.26")
 
     def test_cache_paths_are_platform_specific(self):

@@ -209,12 +209,9 @@ def _write_cache(cache_file: str, latest_version: str, checked_at: float) -> Non
 
 
 def _installed_version(ytdlp_path: str | None = None) -> str | None:
-    try:
-        from yt_dlp.version import __version__ as bundled
-    except Exception:
-        bundled = None
-    if isinstance(bundled, str) and bundled.strip():
-        return bundled.strip()
+    # Query the executable first: the wrapper runs `yt-dlp` from PATH, so a
+    # stale `yt_dlp` Python package (e.g. system python3-yt-dlp) must not
+    # shadow a newer ~/.local/bin/yt-dlp or pipx binary (or vice versa).
     candidates: list[str] = []
     if ytdlp_path:
         candidates.append(str(ytdlp_path))
@@ -236,6 +233,12 @@ def _installed_version(ytdlp_path: str | None = None) -> str | None:
             continue
         if completed.returncode == 0 and completed.stdout.strip():
             return completed.stdout.strip().splitlines()[0].strip()
+    try:
+        from yt_dlp.version import __version__ as bundled
+    except Exception:
+        return None
+    if isinstance(bundled, str) and bundled.strip():
+        return bundled.strip()
     return None
 
 
