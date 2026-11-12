@@ -52,6 +52,33 @@ function presetKeyFor(downloadDir) {
   return 'custom';
 }
 
+function renderUpdateNote(status) {
+  const note = $('ytdlpUpdateNote');
+  if (!note) return;
+  if (!status || !status.outdated) {
+    note.hidden = true;
+    return;
+  }
+  note.hidden = false;
+  const installed = status.installed || 'unknown';
+  const latest = status.latest;
+  const age = status.age_days;
+  const hint = status.update_hint || 'yt-dlp -U';
+  let summary;
+  if (latest) {
+    summary = `Installed ${installed}, latest ${latest}.`;
+  } else if (typeof age === 'number') {
+    summary = `Installed ${installed}, ${age} days old.`;
+  } else {
+    summary = `Installed ${installed}.`;
+  }
+  const textEl = $('ytdlpUpdateText');
+  if (textEl) textEl.textContent = `yt-dlp is out of date. ${summary}`;
+  else note.textContent = `yt-dlp is out of date. ${summary} Update with: ${hint}`;
+  const hintEl = $('ytdlpUpdateHint');
+  if (hintEl) hintEl.textContent = hint;
+}
+
 function renderConnected(response) {
   setVisible(true);
   $('statusText').textContent = `Connected (companion ${response.version || 'unknown'})`;
@@ -77,12 +104,14 @@ function renderConnected(response) {
   $('depsLine').textContent = missing.length
     ? `Missing tools: ${missing.join(', ')}`
     : 'Tools ready: yt-dlp, ffmpeg, rsgain.';
+  renderUpdateNote(response.yt_dlp_status);
 }
 
 function renderDisconnected() {
   setVisible(false);
   $('statusText').textContent = 'Companion not connected';
   if ($('installCmd')) $('installCmd').textContent = INSTALL_CMD;
+  renderUpdateNote(null);
 }
 
 async function refresh() {

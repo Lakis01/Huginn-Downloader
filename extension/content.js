@@ -18,6 +18,8 @@
     'ytd-playlist-panel-video-renderer',
     'ytmusic-two-row-item-renderer',
     'ytmusic-responsive-list-item-renderer',
+    'ytd-video-preview',
+    '#video-preview',
   ].join(', ');
 
   const MODES = [
@@ -46,6 +48,8 @@
   };
 
   let lastContextUrl = null;
+  let lastPointerUrl = null;
+  let lastPointerAt = 0;
   let refreshTimer = null;
 
   function ext() {
@@ -207,6 +211,36 @@
       }
     }
     lastContextUrl = href;
+    return href;
+  }
+
+  function nowMs() {
+    try {
+      if (typeof Date !== 'undefined' && typeof Date.now === 'function') return Date.now();
+    } catch (_error) {
+      // Fall through to zero when clocks are unavailable.
+    }
+    return 0;
+  }
+
+  function handlePress(event) {
+    if (!event || event.button !== 2) return;
+    const found = captureContextHref(event);
+    if (found) {
+      lastPointerUrl = found;
+      lastPointerAt = nowMs();
+    }
+  }
+
+  function handleContextMenu(event) {
+    const found = captureContextHref(event);
+    if (found) return;
+    // YouTube may tear down or morph the hover-autoplay preview
+    // between pointerdown and contextmenu: keep a just-captured
+    // right-button URL for 500ms instead of clearing it.
+    if (lastPointerUrl && nowMs() - lastPointerAt < 500) {
+      lastContextUrl = lastPointerUrl;
+    }
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
@@ -229,7 +263,9 @@
     syncControls();
     document.addEventListener('yt-navigate-finish', syncControls);
     document.addEventListener('yt-page-data-updated', syncControls);
-    document.addEventListener('contextmenu', captureContextHref, true);
+    document.addEventListener('pointerdown', handlePress, true);
+    document.addEventListener('mousedown', handlePress, true);
+    document.addEventListener('contextmenu', handleContextMenu, true);
     const api = ext();
     if (api && api.runtime && api.runtime.onMessage) {
       api.runtime.onMessage.addListener(handleRuntimeMessage);

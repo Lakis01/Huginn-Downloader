@@ -34,6 +34,7 @@ function testManifest() {
   assert.equal(manifest.manifest_version, 2);
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
+  assert.equal(manifest.version, '2.1.0', 'manifest version is 2.1.0');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -93,10 +94,18 @@ function testBackgroundStatic() {
   assert.ok(src.includes('icons/audio.svg'), 'audio item uses audio icon');
   assert.ok(src.includes('icons/video.svg'), 'video item uses video icon');
   assert.ok(src.includes('icons/cut.svg'), 'cut item uses cut icon');
-  assert.ok(!src.includes('documentUrlPatterns'), 'menu creation omits restrictive documentUrlPatterns');
-  assert.ok(!src.includes('targetUrlPatterns'), 'menu creation omits targetUrlPatterns (rejected for bare pages, thumbnails, previews)');
-  assert.ok(src.includes('onShown'), 'menu visibility is gated by onShown');
-  assert.ok(src.includes('frameUrl'), 'onShown also considers frame targets');
+  assert.ok(src.includes('documentUrlPatterns'), 'menu creation declares static documentUrlPatterns');
+  assert.ok(src.includes('YT_DOC_PATTERNS') || src.includes('documentUrlPatterns'), 'YouTube document patterns constant');
+  for (const pattern of ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*']) {
+    assert.ok(src.includes(pattern), `documentUrlPatterns covers ${pattern}`);
+  }
+  assert.ok(!src.includes('targetUrlPatterns'), 'menu creation omits targetUrlPatterns');
+  assert.ok(!src.includes('onShown'), 'no menus.onShown listener (static patterns avoid preview race)');
+  assert.ok(src.includes('MENU_CONTEXTS') || src.includes("'selection'"), 'menu contexts include selection');
+  assert.ok(src.includes("'video'") && src.includes("'selection'"), 'contexts include video and selection');
+  assert.ok(src.includes('onInstalled'), 'setupMenus hooks runtime.onInstalled');
+  assert.ok(src.includes('onStartup'), 'setupMenus hooks runtime.onStartup');
+  assert.ok(src.includes('blob:'), 'isYouTubeUrl unwraps leading blob: URLs');
   assert.ok(src.includes('ytdl-get-context-url'), 'background queries content script for context URL');
   assert.ok(src.includes('sendNativeMessage'), 'background uses sendNativeMessage');
   assert.ok(src.includes('firefox_youtube_downloader'), 'background uses the native host id');
@@ -109,8 +118,8 @@ function testBackgroundStatic() {
 function runBackgroundFixture() {
   const src = readFile('extension/background.js');
   const created = [];
-  const handlers = { clicked: null, shown: null, message: null, installed: null };
-  const listenerCounts = { clicked: 0, shown: 0, message: 0, installed: 0 };
+  const handlers = { clicked: null, shown: null, message: null, installed: null, startup: null };
+  const listenerCounts = { clicked: 0, shown: 0, message: 0, installed: 0, startup: 0 };
   const calls = { nativeMessages: [], tabsCreated: [], sentTabMessages: [], updates: [], refreshes: 0 };
   let nativeShouldReject = false;
   let nativeResponse = { ok: true, launched: true };
@@ -136,6 +145,7 @@ function runBackgroundFixture() {
       },
       onMessage: { addListener(fn) { handlers.message = fn; listenerCounts.message += 1; } },
       onInstalled: { addListener(fn) { handlers.installed = fn; listenerCounts.installed += 1; } },
+      onStartup: { addListener(fn) { handlers.startup = fn; listenerCounts.startup += 1; } },
       getURL(p) { return `moz-extension://fake/${p}`; },
       lastError: undefined,
     },
@@ -149,10 +159,27 @@ function runBackgroundFixture() {
     listenerCounts,
     calls,
     fireInstalled() { if (handlers.installed) handlers.installed(); },
+    fireStartup() { if (handlers.startup) handlers.startup(); },
     setNativeReject(v) { nativeShouldReject = v; },
     setNativeResponse(v) { nativeResponse = v; },
     setTabMessageResponse(v) { tabMessageResponse = v; },
   };
+}
+
+function loadBackgroundExports() {
+  const src = readFile('extension/background.js');
+  const sandbox = {
+    module: { exports: {} },
+    browser: undefined,
+    chrome: undefined,
+    console,
+    setTimeout,
+    clearTimeout,
+    URL,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox, { filename: 'background.js' });
+  return sandbox.module.exports;
 }
 
 async function testBackgroundBehavior() {
@@ -165,8 +192,20 @@ async function testBackgroundBehavior() {
   assert.equal(byId.get('ytdl-audio').title, 'Audio');
   assert.equal(byId.get('ytdl-video').title, 'Video');
   assert.equal(byId.get('ytdl-cut').title, 'Cut Audio');
-  assert.ok(handlers.clicked, 'click handler registered');
-  assert.ok(handlers.message, 'runtime message handler registered');
+  const expectedPatterns = ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*'];
+  for (const [id, item] of byId) {
+    assert.equal(JSON.stringify(item.documentUrlPatterns), JSON.stringify(expectedPatterns), `${id} declares YouTube documentUrlPatterns`);
+    assert.ok(!('targetUrlPatterns' in item), `${id} omits targetUrlPatterns`);
+    assert.ok(item.contexts.includes('video'), `${id} contexts include video`);
+    assert.ok(item.contexts.includes('selection'), `${id} contexts include selection`);
+  }
+  assert.ok(handlers.clicked, 'click handler registered synchronously');
+  assert.ok(handlers.message, 'runtime message handler registered synchronously');
+  assert.equal(handlers.shown, null, 'no onShown listener hiding ytdl-root');
+  const { isYouTubeUrl } = loadBackgroundExports();
+  assert.equal(isYouTubeUrl('https://www.youtube.com/watch?v=abc123'), true);
+  assert.equal(isYouTubeUrl('blob:https://www.youtube.com/ab-cd'), true, 'blob: YouTube URL unwraps to YouTube');
+  assert.equal(isYouTubeUrl('https://example.com/'), false);
   await handlers.clicked({ menuItemId: 'ytdl-audio', pageUrl: 'https://www.youtube.com/watch?v=page1' }, { id: 7, url: 'https://www.youtube.com/watch?v=page1' });
   assert.equal(calls.nativeMessages.length, 1);
   assert.equal(calls.nativeMessages[0].host, 'firefox_youtube_downloader');
@@ -231,42 +270,31 @@ async function testBackgroundErrorResponseSkipsOnboarding() {
   }
 }
 
-async function testBackgroundOnShownGatesExternalLinks() {
-  const { created, handlers, listenerCounts, calls, fireInstalled } = runBackgroundFixture();
+async function testBackgroundStaticMenus() {
+  const { created, handlers, listenerCounts, fireInstalled, fireStartup } = runBackgroundFixture();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  const expectedContexts = ['page', 'frame', 'link', 'image', 'video', 'audio'];
+  const expectedContexts = ['page', 'frame', 'link', 'image', 'video', 'audio', 'selection'];
+  const expectedPatterns = ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*'];
   assert.equal(created.length, 4, 'four menu items created');
   for (const item of created) {
-    assert.ok(!('documentUrlPatterns' in item), `${item.id} omits documentUrlPatterns`);
+    assert.equal(JSON.stringify(item.documentUrlPatterns), JSON.stringify(expectedPatterns), `${item.id} declares YouTube documentUrlPatterns`);
     assert.ok(!('targetUrlPatterns' in item), `${item.id} omits targetUrlPatterns`);
-    assert.equal(JSON.stringify(item.contexts), JSON.stringify(expectedContexts), `${item.id} declares all six contexts`);
+    assert.equal(JSON.stringify(item.contexts), JSON.stringify(expectedContexts), `${item.id} declares all seven contexts`);
   }
-  assert.ok(handlers.shown, 'onShown handler registered');
+  assert.equal(handlers.shown, null, 'no onShown listener (static patterns fix preview race)');
+  assert.ok(handlers.clicked, 'click handler registered');
+  assert.ok(handlers.message, 'pill message handler registered');
+  assert.ok(handlers.installed, 'onInstalled hook registered');
+  assert.ok(handlers.startup, 'onStartup hook registered');
+  // onInstalled/onStartup re-runs setup without duplicating listener registrations.
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-  const lastVisible = () => calls.updates.filter((u) => u.id === 'ytdl-root').pop().props.visible;
-  // Watch page, video-preview target (blob: srcUrl), no linkUrl.
-  handlers.shown({ pageUrl: 'https://www.youtube.com/watch?v=abc123', srcUrl: 'blob:https://www.youtube.com/123' });
-  await tick();
-  assert.equal(lastVisible(), true, 'blob preview on watch page shows ytdl-root');
-  // Watch page, thumbnail target (i.ytimg.com srcUrl), no linkUrl.
-  handlers.shown({ pageUrl: 'https://www.youtube.com/watch?v=abc123', srcUrl: 'https://i.ytimg.com/vi/abc/hqdefault.jpg' });
-  await tick();
-  assert.equal(lastVisible(), true, 'thumbnail on watch page shows ytdl-root');
-  handlers.shown({ pageUrl: 'https://example.com/', linkUrl: 'https://www.youtube.com/watch?v=ext1' });
-  await tick();
-  assert.equal(lastVisible(), true, 'YouTube link on external site shows ytdl-root');
-  handlers.shown({ pageUrl: 'https://example.com/', linkUrl: 'https://example.com/other' });
-  await tick();
-  assert.equal(lastVisible(), false, 'non-YouTube link on external site hides ytdl-root');
-  handlers.shown({ pageUrl: 'https://example.com/' });
-  await tick();
-  assert.equal(lastVisible(), false, 'external page with no YouTube URL hides ytdl-root');
-  // onInstalled re-runs setup without duplicating listener registrations.
   fireInstalled();
   await tick();
   fireInstalled();
   await tick();
-  assert.deepEqual(listenerCounts, { clicked: 1, shown: 1, message: 1, installed: 1 }, 'listeners and hooks registered exactly once');
+  fireStartup();
+  await tick();
+  assert.equal(JSON.stringify(listenerCounts), JSON.stringify({ clicked: 1, shown: 0, message: 1, installed: 1, startup: 1 }), 'listeners and hooks registered exactly once');
 }
 
 // --- content.css ---
@@ -276,6 +304,9 @@ function testContentCss() {
   assert.ok(css.includes('[data-ytdl-controls]'), 'pill selector present');
   assert.ok(css.includes('40px'), 'pill height is 40px');
   assert.ok(css.includes('20px'), 'pill radius is 20px');
+  assert.ok(/\[data-ytdl-controls\][^{]*\{[^}]*height:\s*40px/s.test(css), '[data-ytdl-controls] retains height 40px');
+  assert.ok(/\[data-ytdl-controls\][^{]*\{[^}]*margin-top:\s*12px/s.test(css), '[data-ytdl-controls] aligns with margin-top 12px');
+  assert.ok(/\[data-ytdl-controls\][^{]*\{[^}]*align-self:\s*center/s.test(css), '[data-ytdl-controls] centers with align-self');
   assert.ok(css.includes('rgba(0, 0, 0, 0.05)') || css.includes('rgba(0,0,0,0.05)') || css.includes('rgba(0, 0, 0, .05)'), 'light pill surface');
   assert.ok(css.includes('#f2f2f2'), 'light fallback #f2f2f2');
   assert.ok(css.includes('rgba(255, 255, 255, 0.1)') || css.includes('rgba(255,255,255,0.1)') || css.includes('rgba(255, 255, 255, .1)'), 'dark pill surface');
@@ -307,6 +338,11 @@ function testContentStatic() {
   assert.ok(src.includes('ytdl-get-context-url'), 'answers context URL queries');
   assert.ok(src.includes('elementsFromPoint'), 'hit-testing with elementsFromPoint');
   assert.ok(src.includes('contextmenu'), 'contextmenu capture');
+  assert.ok(src.includes('pointerdown'), 'right-button pointerdown capture for preview overlays');
+  assert.ok(src.includes('mousedown'), 'right-button mousedown fallback capture');
+  assert.ok(/button\s*!==?\s*2/.test(src), 'only right-button presses capture context');
+  assert.ok(src.includes('ytd-video-preview'), 'inline preview card selector');
+  assert.ok(src.includes('#video-preview'), 'preview container id selector');
   assert.ok(src.includes('yt-lockup-view-model'), 'lockup selector');
   for (const sel of ['ytd-rich-item-renderer', 'ytd-video-renderer', 'ytd-grid-video-renderer', 'ytd-compact-video-renderer', 'ytd-rich-grid-media', 'ytd-reel-item-renderer', 'ytd-reel-video-renderer', 'ytd-playlist-video-renderer', 'ytd-playlist-panel-video-renderer', 'ytmusic-two-row-item-renderer', 'ytmusic-responsive-list-item-renderer']) {
     assert.ok(src.includes(sel), `card selector ${sel}`);
@@ -535,6 +571,33 @@ function testContentBehavior() {
   let vacant = null;
   responder({ type: 'ytdl-get-context-url' }, {}, (r) => { vacant = r; });
   assert.equal(vacant.url, null, 'empty non-card space yields no context URL');
+  // inline hover-autoplay preview: right-button pointerdown on
+  // ytd-video-preview captures even when contextmenu never reaches us.
+  const previewWrap = fx.document.createElement('div');
+  previewWrap.setAttribute('id', 'video-preview');
+  const loader = fx.document.createElement('ytd-video-preview-loader');
+  const loaderInner = fx.document.createElement('div');
+  const inlinePreview = fx.document.createElement('ytd-video-preview');
+  const previewLink = fx.document.createElement('a');
+  previewLink.setAttribute('href', '/watch?v=preview999');
+  inlinePreview.appendChild(previewLink);
+  const inlineControls = fx.document.createElement('yt-inline-player-controls');
+  inlinePreview.appendChild(inlineControls);
+  loaderInner.appendChild(inlinePreview);
+  loader.appendChild(loaderInner);
+  previewWrap.appendChild(loader);
+  fx.document.body.appendChild(previewWrap);
+  fx.setHitStackArr([inlinePreview, inlineControls]);
+  inlinePreview.dispatchEvent({ type: 'pointerdown', target: inlinePreview, bubbles: true, button: 2, clientX: 70, clientY: 80 });
+  let previewed = null;
+  responder({ type: 'ytdl-get-context-url' }, {}, (r) => { previewed = r; });
+  assert.equal(previewed.url, 'https://www.youtube.com/watch?v=preview999', 'right-button pointerdown on ytd-video-preview captures card URL without contextmenu');
+  // ordinary left-clicks must not overwrite the captured context URL.
+  fx.setHitStackArr([empty]);
+  empty.dispatchEvent({ type: 'pointerdown', target: empty, bubbles: true, button: 0, clientX: 51, clientY: 61 });
+  let kept = null;
+  responder({ type: 'ytdl-get-context-url' }, {}, (r) => { kept = r; });
+  assert.equal(kept.url, 'https://www.youtube.com/watch?v=preview999', 'left-button pointerdown preserves the right-click context URL');
 }
 
 // --- popup ---
@@ -546,6 +609,7 @@ function testPopup() {
   assertAsciiNoEmoji('extension/popup.css', css);
   assertAsciiNoEmoji('extension/popup.js', js);
   assert.ok(!/kicker|eyebrow/i.test(html), 'no kicker or eyebrow labels');
+  assert.ok(!/kicker|eyebrow/i.test(js), 'no kicker or eyebrow labels in popup logic');
   assert.ok(html.includes('popup.js') && html.includes('popup.css'), 'popup wires its assets');
   assert.ok(html.includes('data-view') || html.includes('view=options') || js.includes('view=options') || js.includes('onboarding'), 'popup supports options/onboarding views');
   assert.ok(js.includes('sendNativeMessage'), 'popup pings the native host');
@@ -562,6 +626,118 @@ function testPopup() {
   assert.ok(css.includes('::selection'), 'themed selection');
   const cardCount = (html.match(/class="card"/g) || []).length;
   assert.ok(cardCount <= 1, 'zero nested cards');
+  assert.ok(html.includes('ytdlpUpdateNote'), 'popup has #ytdlpUpdateNote banner element');
+  assert.ok(js.includes('ytdlpUpdateNote'), 'popup logic drives #ytdlpUpdateNote');
+  assert.ok(js.includes('yt_dlp_status'), 'popup reads yt_dlp_status from ping');
+  assert.ok(js.includes('outdated'), 'popup checks outdated flag');
+  assert.ok(js.includes('update_hint'), 'popup surfaces the update_hint command');
+  assert.ok(js.includes('installed') && (js.includes('latest') || js.includes('age_days')), 'popup shows installed vs latest or age in days');
+  assert.ok(css.includes('update-note') || css.includes('ytdlpUpdateNote'), 'popup styles the update note');
+  assert.ok(/border:\s*1px\s+solid/.test(css), 'update note uses a uniform 1px solid border');
+  assert.ok(!/border-left:\s*[2-9]/.test(css) && !/border-right:\s*[2-9]/.test(css), 'no thick side-border accents');
+}
+
+function createPopupFixture(pingResponse) {
+  const elements = new Map();
+  function mockEl(id) {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        id,
+        hidden: false,
+        checked: false,
+        value: '',
+        textContent: '',
+        dataset: {},
+        classList: { toggle() {}, add() {}, remove() {} },
+        listeners: {},
+        addEventListener(type, fn) {
+          if (!this.listeners[type]) this.listeners[type] = [];
+          this.listeners[type].push(fn);
+        },
+        setAttribute() {},
+        getAttribute() { return null; },
+      });
+    }
+    return elements.get(id);
+  }
+  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'customDir', 'effectiveDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+    mockEl(id);
+  }
+  const document = {
+    getElementById: (id) => mockEl(id),
+    querySelector: (sel) => {
+      if (sel === '.panel') return { setAttribute() {}, getAttribute() { return null; } };
+      return null;
+    },
+    querySelectorAll: () => [],
+    createElement: (tag) => mockEl(`created-${tag}-${elements.size}`),
+    addEventListener(type, fn) {
+      if (type === 'DOMContentLoaded') document._domReady = fn;
+    },
+    body: { appendChild() {} },
+    _domReady: null,
+  };
+  const window = { location: { search: '' } };
+  const browser = {
+    runtime: {
+      sendNativeMessage: async () => pingResponse,
+    },
+  };
+  const context = {
+    document, window, browser, chrome: undefined, navigator: {}, console, URLSearchParams, setTimeout, clearTimeout, URL,
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(EXT, 'popup.js'), 'utf8'), context, { filename: 'popup.js' });
+  return { document, elements, triggerReady: () => { if (document._domReady) document._domReady(); } };
+}
+
+async function testPopupUpdateNote() {
+  {
+    const fx = createPopupFixture({
+      ok: true,
+      version: '2.0.0',
+      config: {},
+      yt_dlp_status: {
+        outdated: true, installed: '2024.01.01', latest: '2025.12.01', age_days: 300, update_hint: 'pipx upgrade yt-dlp',
+      },
+    });
+    fx.triggerReady();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const note = fx.elements.get('ytdlpUpdateNote');
+    assert.equal(note.hidden, false, 'update note visible when yt_dlp outdated');
+    const combined = `${fx.elements.get('ytdlpUpdateText').textContent} ${fx.elements.get('ytdlpUpdateHint').textContent} ${note.textContent}`;
+    assert.ok(combined.includes('2024.01.01'), 'note shows the installed version');
+    assert.ok(combined.includes('pipx upgrade yt-dlp'), 'note shows the copyable update_hint');
+  }
+  {
+    const fx = createPopupFixture({
+      ok: true,
+      version: '2.0.0',
+      config: {},
+      yt_dlp_status: {
+        outdated: false, installed: '2025.12.01', latest: '2025.12.01', age_days: 5, update_hint: 'pipx upgrade yt-dlp',
+      },
+    });
+    fx.triggerReady();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(fx.elements.get('ytdlpUpdateNote').hidden, true, 'update note hidden when yt-dlp is current');
+  }
+  {
+    const fx = createPopupFixture({
+      ok: true,
+      version: '2.0.0',
+      config: {},
+      yt_dlp_status: {
+        outdated: true, installed: '2023.01.01', latest: null, age_days: 400, update_hint: 'yt-dlp -U',
+      },
+    });
+    fx.triggerReady();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const note = fx.elements.get('ytdlpUpdateNote');
+    assert.equal(note.hidden, false, 'update note visible when latest is unknown but stale');
+    const combined = `${fx.elements.get('ytdlpUpdateText').textContent} ${fx.elements.get('ytdlpUpdateHint').textContent}`;
+    assert.ok(combined.includes('400') || combined.includes('2023.01.01'), 'note shows age in days when latest is null');
+  }
 }
 
 // --- packaging + gitignore ---
@@ -604,11 +780,12 @@ async function main() {
   await testBackgroundOnboardingFallback();
   await testBackgroundLinkAndPageFallbacks();
   await testBackgroundErrorResponseSkipsOnboarding();
-  await testBackgroundOnShownGatesExternalLinks();
+  await testBackgroundStaticMenus();
   testContentCss();
   testContentStatic();
   testContentBehavior();
   testPopup();
+  await testPopupUpdateNote();
   testBuildScript();
   console.log('Firefox extension fixture tests passed');
 }
