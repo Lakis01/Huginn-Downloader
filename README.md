@@ -227,7 +227,7 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 120 Python tests
+python3 -m unittest discover -s tests -v  # 121 Python tests
 bash tests/test_shortcut.sh               # 43 launcher/installer checks
 node tests/test_firefox_extension.js
 node tests/test_youtube_buttons.js

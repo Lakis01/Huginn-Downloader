@@ -96,6 +96,8 @@ def detect_update_command(
     lowered = text_path.lower().replace("\\", "/")
 
     if platform == "nt":
+        if "pipx" in lowered:
+            return "pipx upgrade yt-dlp"
         if "scoop" in lowered:
             return "scoop update yt-dlp"
         if "winget" in lowered:

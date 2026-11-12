@@ -130,6 +130,13 @@ class DetectUpdateCommandTests(unittest.TestCase):
         )
         self.assertEqual(hint, "scoop update yt-dlp")
 
+    def test_windows_pipx_path_uses_pipx_upgrade(self):
+        hint = ytdl_version.detect_update_command(
+            ytdlp_path=r"C:\Users\alice\.local\pipx\venvs\yt-dlp\Scripts\yt-dlp.exe",
+            platform_name="nt",
+        )
+        self.assertEqual(hint, "pipx upgrade yt-dlp")
+
     def test_windows_winget_upgrade(self):
         hint = ytdl_version.detect_update_command(
             ytdlp_path=r"C:\Users\user\AppData\Local\Microsoft\WinGet\Packages\yt-dlp.yt-dlp\yt-dlp.exe",
