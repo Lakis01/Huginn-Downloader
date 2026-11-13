@@ -10,8 +10,8 @@ This runs **the exact same `yt-dlp` + `ffmpeg` pipeline already running on
 countless YouTube downloader websites** — but locally on your own machine, so it
 is **more accessible** (integrated into the YouTube UI, right-click context
 menu, and set-up-able global keyboard shortcuts), gives you **full control over
-codecs and bitrates** (native Opus/M4A, MP3 `V0`/`V2`/`V5`/`320k`, M4A, Ogg,
-FLAC, mono, cover art), and is **WAAAAY faster** (no upload queue, no ads, no
+codecs and bitrates** (native Opus/M4A, forced Opus, MP3 `V0`/`V2`/`V5`/`320k`,
+M4A, Ogg, FLAC, mono, cover art), and is **WAAAAY faster** (no upload queue, no ads, no
 re-encoding traps, direct native stream download).
 
 ## Screenshots & interface overview
@@ -26,10 +26,13 @@ Four touchpoints (three to start a download, plus popup settings):
    native audio stream, **Video** for best video+audio, or **Cut** to pick start
    / end timestamps and encoding settings interactively in your terminal.
 2. **Right-click `YouTube Downloader` ▸ `Audio` / `Video` / `Cut Audio`
-   submenu** (context menu) — available on pages, frames, links, images,
-   video/audio elements, and text selections. Works on cards in feeds and
-   search results. If hover-autoplay covers a card, right-click the card
-   itself; only the video element's own menu may show the browser defaults.
+   submenu** (context menu) — available broadly on pages, frames, links,
+   images, video/audio elements, and text selections, not just YouTube. On
+   YouTube it works on cards in feeds and search results: if hover-autoplay
+   covers a card, right-click the card itself; only the video element's own
+   menu may show the browser defaults. Any safe HTTP(S) URL is accepted and
+   handed to the local companion, so the menu works on any media site
+   `yt-dlp` supports.
 3. **Extension popup** — click the toolbar icon to check the companion
    connection, toggle automatic tagging, ReplayGain, cover art, channels, and
    long-audio routing, pick the audio format and MP3 quality, and choose the
@@ -39,8 +42,8 @@ Four touchpoints (three to start a download, plus popup settings):
    cut) to `~/.local/bin/yt-dlp-shortcut.sh audio|video|cut` under
    **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**
    (GNOME / Cinnamon) or **System Settings → Shortcuts → Custom Shortcuts**
-   (KDE). Unlike the watch-page pill and context menu, which are scoped to
-   YouTube, the shortcut script and CLI work on **almost any media site
+   (KDE). The watch-page pill is YouTube-specific, while the context menu,
+   the shortcut script, and the CLI work on **almost any media site
    supported by `yt-dlp`** — YouTube, SoundCloud, Vimeo, Bandcamp, Twitch,
    and hundreds more.
 
@@ -101,9 +104,13 @@ offers four qualities:
 | `V5` (~130 kbps stereo / ~85 kbps mono VBR — compact / speech) | Compact VBR | Speech, podcasts, or constrained storage. True psychoacoustic VBR, preferable to fixed `128k` CBR. |
 
 The remaining **Audio Format** options, selectable in the Firefox popup or via
-`audio_format` in `config.json` (`best`, `mp3`, `m4a`, `ogg`, `flac`;
+`audio_format` in `config.json` (`best`, `opus`, `mp3`, `m4a`, `ogg`, `flac`;
 `mp3_quality` defaults to `V0`):
 
+- **`opus`**: forces Opus output — prefers `bestaudio[acodec=opus]/bestaudio`,
+  copies the native Opus stream when stereo and available, and otherwise
+  transcodes to Opus via FFmpeg (`--audio-quality 128K` stereo, `75K` mono).
+  Cuts default to Opus at `128 kbps` VBR stereo / `75 kbps` mono.
 - **`m4a`**: downloads YouTube's native AAC `.m4a` stream without re-encoding
   whenever available (`bestaudio[ext=m4a]/bestaudio`), converting via FFmpeg
   only if no native `.m4a` stream exists.
@@ -140,10 +147,11 @@ defaulting to stereo); non-interactive runs fall back to stereo.
   audio tagging and cover art; `rsgain` is optional and only used when
   ReplayGain is enabled.
 
-The extension provides a YouTube right-click submenu, watch-page Audio/Video/
-Cut controls, and a settings popup. It uses Firefox Native Messaging to pass a
-user-selected mode and URL to the local companion. It does not download media
-itself.
+The extension provides a YouTube watch-page Audio/Video/Cut pill, a broadly
+available right-click submenu, and a settings popup. It uses Firefox Native
+Messaging to pass a user-selected mode and URL to the local companion. The
+pill is YouTube-specific; the menu accepts any safe HTTP(S) URL. The
+extension does not download media itself.
 
 ### Beginner-friendly dependency guide
 
@@ -312,7 +320,7 @@ The popup stores these options in the user's config file:
 | Download directory | `~/Music/Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another directory or select `ytdlp-default`. |
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
-| Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `m4a` downloads the native AAC stream when available. |
+| Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `opus`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `opus` forces Opus output (native stream copied when stereo and available, otherwise FFmpeg transcode); `m4a` downloads the native AAC stream when available. |
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |
 | Embed thumbnail picture | On | Download and embed cover art (`image/webp`, JPEG for M4A). Turn off to skip thumbnails entirely. |
 | Convert thumbnail to JPEG | Off | Transcode cover art to `image/jpeg` for legacy hardware/car players that cannot render embedded WebP. |

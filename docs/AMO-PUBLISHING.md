@@ -187,8 +187,10 @@ Unlisted release is installed from its signed XPI.
   downloader, ships no media-handling binary, sends nothing to a
   project-owned server, and declares `data_collection_permissions.required:
   ["none"]`. Reviewers evaluate the XPI on what it does — pass a
-  user-selected mode and URL to the user's own companion — which is why
-  bridges of this shape survive review.
+  user-selected mode and URL to the user's own companion. This architecture
+  may be reviewable under current AMO policy, but Mozilla independently
+  reviews each submission and can reject, require updates to, or remove it;
+  do not assume these examples guarantee approval.
 - **Why keeping `yt-dlp` external to the `.xpi` is essential.** Never bundle
   `yt-dlp`, FFmpeg, `rsgain`, or Python libraries inside the signed package.
   The XPI must remain a thin client: any downloading, transcoding, or tagging
@@ -204,15 +206,17 @@ Unlisted release is installed from its signed XPI.
   site the add-on interoperates with without claiming affiliation. The same
   rule applies to icons, screenshots, and descriptions: describe compatibility
   ("works on YouTube pages") rather than adopting YouTube branding.
-- **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases cannot be
-  broken by store delisting.** Unlisted signing produces a Mozilla signature
+- **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases are still
+  subject to Mozilla policy.** Unlisted signing produces a Mozilla signature
   without a catalog page, and the signed artifact is attached to a GitHub
-  Release that this project controls. If a Listed catalog page were ever
-  removed or delisted, installs from the Release-attached
-  `dist/firefox-youtube-downloader-signed.xpi` keep working: the signature is
-  already issued and verified locally by Firefox, and distribution never
-  depended on the store page. Keep Listed and Unlisted versions clearly
-  distinguished so a store action can never silently break direct installs.
+  Release that this project controls — but unlisted signing only means no
+  public catalog listing; signing does not grant policy immunity. Mozilla may
+  revoke or blocklist signatures or prevent installs under policy or security
+  action, and GitHub hosting doesn't override AMO/Firefox decisions. If a
+  Listed catalog page were ever removed, Release-attached
+  `dist/firefox-youtube-downloader-signed.xpi` installs are not automatically
+  protected: keep Listed and Unlisted versions clearly distinguished and do
+  not promise users that direct installs cannot be affected.
 
 ## Release checklist
 
