@@ -1032,48 +1032,75 @@ function testSignScript() {
   assert.ok(sh.includes('--channel=unlisted'), 'sign script uses the unlisted channel');
   assert.ok(sh.includes('--api-key') && sh.includes('--api-secret'), 'sign script passes AMO credentials to web-ext');
   assert.ok(sh.includes('python3 -m zipfile -t'), 'sign script validates the signed xpi');
+  assert.ok(sh.includes('trap') && sh.includes('.amo-upload-uuid'), 'sign script traps EXIT to remove the uuid artifact');
   assert.ok(sh.includes('firefox-youtube-downloader-signed.xpi'), 'sign script copies the signed artifact to dist');
   const stat = fs.statSync(path.join(ROOT, 'scripts', 'sign-xpi.sh'));
   assert.ok(stat.mode & 0o111, 'sign script is executable');
   const gi = readFile('.gitignore');
   assert.ok(gi.split('\n').some((line) => line.trim() === 'web-ext-artifacts/' || line.trim() === 'web-ext-artifacts'), '.gitignore lists web-ext-artifacts/');
+  assert.ok(gi.split('\n').some((line) => line.trim() === 'extension/.amo-upload-uuid'), '.gitignore lists extension/.amo-upload-uuid');
   const os = require('node:os');
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sign-xpi-test-'));
-  const binDir = path.join(tmp, 'bin');
-  fs.mkdirSync(binDir, { recursive: true });
-  const stub = path.join(binDir, 'npx');
-  const maker = path.join(tmp, 'make_xpi.py');
-  fs.writeFileSync(maker, 'import sys, zipfile\np = sys.argv[1]\nwith zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:\n    z.writestr("manifest.json", "{}")\n');
-  const stubLines = [
-    '#!/usr/bin/env bash',
-    'set -euo pipefail',
-    'art=""',
-    'prev=""',
-    'for arg in "$@"; do',
-    '  if [ "$prev" = "--artifacts-dir" ]; then art="$arg"; fi',
-    '  prev="$arg"',
-    'done',
-    'mkdir -p "$art"',
-  ];
-  stubLines.push('python3 "' + maker + '" "$art/stub-signed.xpi"');
-  fs.writeFileSync(stub, stubLines.join('\n') + '\n');
-  fs.chmodSync(stub, 0o755);
-  const env = { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`, AMO_JWT_ISSUER: 'test-issuer', AMO_JWT_SECRET: 'test-secret' };
-  const out = require('node:child_process').execFileSync('bash', [path.join(ROOT, 'scripts', 'sign-xpi.sh')], { cwd: ROOT, env, encoding: 'utf8' });
-  assert.ok(out.includes('firefox-youtube-downloader-signed.xpi'), 'sign script prints the signed output path');
   const signed = path.join(ROOT, 'dist', 'firefox-youtube-downloader-signed.xpi');
-  assert.ok(fs.existsSync(signed), 'stubbed sign produces the dist artifact');
-  require('node:child_process').execFileSync('python3', ['-m', 'zipfile', '-t', signed], { stdio: 'ignore' });
-  fs.rmSync(path.join(ROOT, 'web-ext-artifacts'), { recursive: true, force: true });
-  fs.rmSync(signed, { force: true });
-  fs.rmSync(tmp, { recursive: true, force: true });
-  let failed = false;
+  const artifactsDir = path.join(ROOT, 'web-ext-artifacts');
+  const uuidFile = path.join(ROOT, 'extension', '.amo-upload-uuid');
+  const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sign-xpi-backup-'));
+  const backupSigned = path.join(backupDir, 'signed.xpi');
+  const backupArtifacts = path.join(backupDir, 'web-ext-artifacts');
+  const backupUuid = path.join(backupDir, 'amo-upload-uuid');
+  const hadSigned = fs.existsSync(signed);
+  const hadArtifacts = fs.existsSync(artifactsDir);
+  const hadUuid = fs.existsSync(uuidFile);
+  let tmp = null;
   try {
-    require('node:child_process').execFileSync('bash', [path.join(ROOT, 'scripts', 'sign-xpi.sh')], { cwd: ROOT, env: { ...process.env, PATH: process.env.PATH, AMO_JWT_ISSUER: '', AMO_JWT_SECRET: '' }, stdio: 'ignore' });
-  } catch (_error) {
-    failed = true;
+    if (hadSigned) fs.copyFileSync(signed, backupSigned);
+    if (hadArtifacts) { fs.cpSync(artifactsDir, backupArtifacts, { recursive: true }); fs.rmSync(artifactsDir, { recursive: true, force: true }); }
+    if (hadUuid) fs.copyFileSync(uuidFile, backupUuid);
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sign-xpi-test-'));
+    const binDir = path.join(tmp, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'npx');
+    const maker = path.join(tmp, 'make_xpi.py');
+    fs.writeFileSync(maker, 'import sys, zipfile\np = sys.argv[1]\nwith zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:\n    z.writestr("manifest.json", "{}")\n');
+    const stubLines = [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'art=""',
+      'src=""',
+      'prev=""',
+      'for arg in "$@"; do',
+      '  if [ "$prev" = "--artifacts-dir" ]; then art="$arg"; fi',
+      '  if [ "$prev" = "--source-dir" ]; then src="$arg"; fi',
+      '  prev="$arg"',
+      'done',
+      'mkdir -p "$art"',
+      'if [ -n "$src" ]; then echo stub-uuid > "$src/.amo-upload-uuid"; fi',
+    ];
+    stubLines.push('python3 "' + maker + '" "$art/stub-signed.xpi"');
+    fs.writeFileSync(stub, stubLines.join('\n') + '\n');
+    fs.chmodSync(stub, 0o755);
+    const env = { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`, AMO_JWT_ISSUER: 'test-issuer', AMO_JWT_SECRET: 'test-secret' };
+    const out = require('node:child_process').execFileSync('bash', [path.join(ROOT, 'scripts', 'sign-xpi.sh')], { cwd: ROOT, env, encoding: 'utf8' });
+    assert.ok(out.includes('firefox-youtube-downloader-signed.xpi'), 'sign script prints the signed output path');
+    assert.ok(fs.existsSync(signed), 'stubbed sign produces the dist artifact');
+    require('node:child_process').execFileSync('python3', ['-m', 'zipfile', '-t', signed], { stdio: 'ignore' });
+    assert.ok(!fs.existsSync(uuidFile), 'sign script removes extension/.amo-upload-uuid on exit');
+    let failed = false;
+    try {
+      require('node:child_process').execFileSync('bash', [path.join(ROOT, 'scripts', 'sign-xpi.sh')], { cwd: ROOT, env: { ...process.env, PATH: process.env.PATH, AMO_JWT_ISSUER: '', AMO_JWT_SECRET: '' }, stdio: 'ignore' });
+    } catch (_error) {
+      failed = true;
+    }
+    assert.ok(failed, 'sign script fails without AMO credentials');
+  } finally {
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(artifactsDir, { recursive: true, force: true });
+    fs.rmSync(signed, { force: true });
+    fs.rmSync(uuidFile, { force: true });
+    if (hadSigned) fs.copyFileSync(backupSigned, signed);
+    if (hadArtifacts) fs.cpSync(backupArtifacts, artifactsDir, { recursive: true });
+    if (hadUuid) fs.copyFileSync(backupUuid, uuidFile);
+    fs.rmSync(backupDir, { recursive: true, force: true });
   }
-  assert.ok(failed, 'sign script fails without AMO credentials');
 }
 
 // --- packaging + gitignore ---

@@ -6,3 +6,4 @@ __pycache__/
 .coverage
 dist/
 web-ext-artifacts/
+extension/.amo-upload-uuid

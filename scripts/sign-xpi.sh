@@ -5,6 +5,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+trap 'rm -f "$ROOT/extension/.amo-upload-uuid"' EXIT
+
 if [[ -n ${AMO_JWT_ISSUER:-} && -n ${AMO_JWT_SECRET:-} ]]; then
   true
 else
