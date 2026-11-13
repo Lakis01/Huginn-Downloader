@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
+import ytdl_config
 from ytdl_config import (
     ALT_FRESH_DOWNLOAD_DIR,
     DEFAULT_FRESH_DOWNLOAD_DIR,
@@ -27,7 +28,13 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(
             config,
-            {"download_dir": None, "auto_tag": True, "rsgain": False},
+            {
+                "download_dir": None,
+                "auto_tag": True,
+                "rsgain": False,
+                "audio_format": "best",
+                "mp3_quality": "V0",
+            },
         )
         self.assertEqual(DEFAULT_FRESH_DOWNLOAD_DIR, "~/Music/Youtube Downloads")
         self.assertEqual(ALT_FRESH_DOWNLOAD_DIR, "~/Downloads/Youtube")
@@ -49,7 +56,13 @@ class ConfigTests(unittest.TestCase):
     def test_save_config_round_trips_valid_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = {"HOME": tmp}
-            expected = {"download_dir": "~/Music/custom", "auto_tag": False, "rsgain": True}
+            expected = {
+                "download_dir": "~/Music/custom",
+                "auto_tag": False,
+                "rsgain": True,
+                "audio_format": "best",
+                "mp3_quality": "V0",
+            }
 
             saved_path = save_config(expected, env)
             actual = load_config(env)
@@ -57,6 +70,55 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(saved_path, config_path(env))
             self.assertEqual(actual, expected)
             self.assertEqual(json.loads(saved_path.read_text(encoding="utf-8")), expected)
+
+    def test_audio_format_and_mp3_quality_have_supported_defaults(self):
+        self.assertEqual(
+            getattr(ytdl_config, "SUPPORTED_AUDIO_FORMATS", None),
+            ("best", "mp3", "m4a", "ogg", "flac"),
+        )
+        self.assertEqual(
+            getattr(ytdl_config, "SUPPORTED_MP3_QUALITIES", None),
+            ("V0", "320k", "V2", "128k"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = config_path({"HOME": tmp})
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"audio_format": "invalid", "mp3_quality": "bad"}))
+
+            config = load_config({"HOME": tmp})
+
+        self.assertEqual(config["audio_format"], "best")
+        self.assertEqual(config["mp3_quality"], "V0")
+
+    def test_save_config_round_trips_audio_format_and_mp3_quality(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            expected = {
+                "download_dir": None,
+                "auto_tag": True,
+                "rsgain": False,
+                "audio_format": "mp3",
+                "mp3_quality": "320k",
+            }
+
+            save_config(expected, env)
+
+            self.assertEqual(load_config(env), expected)
+
+    def test_save_config_rejects_unsupported_audio_format_and_mp3_quality(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            for key, invalid_value in (
+                ("audio_format", "wav"),
+                ("audio_format", None),
+                ("mp3_quality", "256k"),
+                ("mp3_quality", 0),
+            ):
+                with self.subTest(key=key, value=invalid_value):
+                    with self.assertRaises((TypeError, ValueError)):
+                        save_config({key: invalid_value}, env)
+
+            self.assertFalse(config_path(env).exists())
 
     def test_save_config_rejects_invalid_value_types(self):
         invalid_configs = (

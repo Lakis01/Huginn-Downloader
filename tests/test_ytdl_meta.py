@@ -289,6 +289,15 @@ def _make_silence_mp3(path):
     )
 
 
+def _make_silence_flac(path):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1",
+         "-c:a", "flac", path],
+        check=True,
+    )
+
+
 def _make_thumbnail(path, size=(1280, 720)):
     from PIL import Image
 
@@ -302,6 +311,39 @@ def _make_webp_thumbnail(path, size=(1280, 720)):
 
 
 class TagAudioFileTests(unittest.TestCase):
+    def test_flac_tags_vorbis_comments_and_embeds_native_webp_picture(self):
+        from mutagen.flac import FLAC, Picture
+
+        meta = parse_info({"title": "A Song", "channel": "The Band"})
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "track.flac")
+            thumb = os.path.join(tmp, "cover.webp")
+            _make_silence_flac(src)
+            _make_webp_thumbnail(thumb)
+            cover_bytes = Path(thumb).read_bytes()
+
+            seeded = FLAC(src)
+            seeded["description"] = ["old description"]
+            old_picture = Picture()
+            old_picture.type = 3
+            old_picture.mime = "image/jpeg"
+            old_picture.data = b"old cover"
+            seeded.add_picture(old_picture)
+            seeded.save()
+
+            tag_audio_file(src, meta, thumb)
+
+            tagged = FLAC(src)
+            self.assertEqual(tagged["title"], ["A Song"])
+            self.assertEqual(tagged["artist"], ["The Band"])
+            self.assertNotIn("description", tagged.tags)
+            self.assertNotIn("metadata_block_picture", tagged.tags)
+            self.assertEqual(len(tagged.pictures), 1)
+            self.assertEqual(tagged.pictures[0].type, 3)
+            self.assertEqual(tagged.pictures[0].mime, "image/webp")
+            self.assertEqual((tagged.pictures[0].width, tagged.pictures[0].height), (1280, 720))
+            self.assertEqual(tagged.pictures[0].data, cover_bytes)
+
     def test_opus_tags_are_multivalue_and_artwork_is_cropped_square(self):
         from mutagen.oggopus import OggOpus
 
@@ -680,15 +722,19 @@ class LanguageTagTests(unittest.TestCase):
             _make_silence_ogg(path)
         elif suffix == ".mp3":
             _make_silence_mp3(path)
+        elif suffix == ".flac":
+            _make_silence_flac(path)
         else:
             _make_silence_m4a(path)
 
     @staticmethod
     def _seed_language_tags(path):
         suffix = Path(path).suffix.lower()
-        if suffix in {".opus", ".ogg"}:
+        if suffix in {".opus", ".ogg", ".flac"}:
             if suffix == ".opus":
                 from mutagen.oggopus import OggOpus as Audio
+            elif suffix == ".flac":
+                from mutagen.flac import FLAC as Audio
             else:
                 from mutagen.oggvorbis import OggVorbis as Audio
             audio = Audio(path)
@@ -725,9 +771,11 @@ class LanguageTagTests(unittest.TestCase):
     @staticmethod
     def _assert_language_tags_absent(test_case, path):
         suffix = Path(path).suffix.lower()
-        if suffix in {".opus", ".ogg"}:
+        if suffix in {".opus", ".ogg", ".flac"}:
             if suffix == ".opus":
                 from mutagen.oggopus import OggOpus as Audio
+            elif suffix == ".flac":
+                from mutagen.flac import FLAC as Audio
             else:
                 from mutagen.oggvorbis import OggVorbis as Audio
             keys = {key.casefold() for key in Audio(path).tags.keys()}
@@ -754,7 +802,7 @@ class LanguageTagTests(unittest.TestCase):
 
     def test_tagging_and_standalone_stripping_remove_language_tags_in_all_audio_formats(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for suffix in (".opus", ".ogg", ".mp3", ".m4a"):
+            for suffix in (".opus", ".ogg", ".mp3", ".m4a", ".flac"):
                 with self.subTest(suffix=suffix):
                     path = os.path.join(tmp, f"track{suffix}")
                     self._make_audio(path)
@@ -818,6 +866,94 @@ class WrapperTests(unittest.TestCase):
     @staticmethod
     def _metadata():
         return parse_info({"title": "Track", "channel": "Artist", "duration": 100})
+
+    def test_audio_format_args_cover_supported_formats_and_mp3_qualities(self):
+        wrapper = _load_wrapper(self)
+        audio_format_args = getattr(wrapper, "_audio_format_args", None)
+        self.assertTrue(
+            callable(audio_format_args), "_audio_format_args is not implemented"
+        )
+
+        cases = (
+            (
+                {"audio_format": "best"},
+                ["-f", "bestaudio", "-x", "--audio-format", "best"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "V0"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "320k"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "320K"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "V2"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "2"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "128k"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "128K"],
+            ),
+            (
+                {"audio_format": "m4a"},
+                ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"],
+            ),
+            (
+                {"audio_format": "ogg"},
+                ["-f", "bestaudio", "-x", "--audio-format", "vorbis", "--audio-quality", "0"],
+            ),
+            (
+                {"audio_format": "flac"},
+                ["-f", "bestaudio", "-x", "--audio-format", "flac"],
+            ),
+        )
+        for config, expected in cases:
+            with self.subTest(config=config):
+                self.assertEqual(audio_format_args(config), expected)
+
+    def test_download_audio_uses_selected_format_and_mp3_quality_flags(self):
+        wrapper = _load_wrapper(self)
+        cases = (
+            {"audio_format": "best", "mp3_quality": "V0"},
+            {"audio_format": "mp3", "mp3_quality": "V0"},
+            {"audio_format": "mp3", "mp3_quality": "320k"},
+            {"audio_format": "mp3", "mp3_quality": "V2"},
+            {"audio_format": "mp3", "mp3_quality": "128k"},
+            {"audio_format": "m4a", "mp3_quality": "V0"},
+            {"audio_format": "ogg", "mp3_quality": "V0"},
+            {"audio_format": "flac", "mp3_quality": "V0"},
+        )
+        with tempfile.TemporaryDirectory():
+            for selection in cases:
+                with self.subTest(selection=selection):
+                    commands = []
+
+                    def fake_run(command, **kwargs):
+                        commands.append(command)
+                        if command[0] == "yt-dlp":
+                            output_path = command[command.index("--print-to-file") + 2]
+                            Path(output_path).write_text("/tmp/downloaded.audio\n")
+                        return SimpleNamespace(stdout="")
+
+                    config = {
+                        "download_dir": None,
+                        "auto_tag": False,
+                        "rsgain": False,
+                        **selection,
+                    }
+                    with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                        with mock.patch.object(wrapper, "strip_language_tags"):
+                            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                                wrapper.download_audio("https://example.invalid/audio", config)
+
+                    yt_dlp_command = next(command for command in commands if command[0] == "yt-dlp")
+                    self.assertEqual(
+                        yt_dlp_command[
+                            yt_dlp_command.index("-f"):yt_dlp_command.index("--quiet")
+                        ],
+                        wrapper._audio_format_args(selection),
+                    )
 
     def test_finalize_uses_appended_info_sidecar_renames_without_overwrite_and_runs_rsgain_once(self):
         wrapper = _load_wrapper(self)

@@ -52,7 +52,13 @@ class WindowsConfigTests(unittest.TestCase):
             self.assertEqual(saved, expected)
             self.assertEqual(
                 ytdl_config.load_config(env, "nt"),
-                {"download_dir": None, "auto_tag": False, "rsgain": True},
+                {
+                    "download_dir": None,
+                    "auto_tag": False,
+                    "rsgain": True,
+                    "audio_format": "best",
+                    "mp3_quality": "V0",
+                },
             )
             self.assertEqual(
                 ytdl_config.effective_download_dir({"download_dir": None}, env, "nt"),
@@ -448,7 +454,16 @@ class WindowsInstallerTests(unittest.TestCase):
             self.assertEqual(registry_values["value"], str(manifest_path))
             self.assertTrue(registry_values["closed"])
             config = json.loads((app / "config.json").read_text(encoding="utf-8"))
-            self.assertEqual(config, {"download_dir": None, "auto_tag": True, "rsgain": False})
+            self.assertEqual(
+                config,
+                {
+                    "download_dir": None,
+                    "auto_tag": True,
+                    "rsgain": False,
+                    "audio_format": "best",
+                    "mp3_quality": "V0",
+                },
+            )
             self.assertEqual(ytdlp_config.read_bytes(), original_ytdlp_config)
             xpi = ROOT / "dist/firefox-youtube-downloader.xpi"
             with zipfile.ZipFile(xpi) as archive:
@@ -480,7 +495,13 @@ class WindowsInstallerTests(unittest.TestCase):
                         ])
             self.assertEqual(
                 json.loads((app / "config.json").read_text(encoding="utf-8")),
-                {"download_dir": "~/Custom", "auto_tag": False, "rsgain": True},
+                {
+                    "download_dir": "~/Custom",
+                    "auto_tag": False,
+                    "rsgain": True,
+                    "audio_format": "best",
+                    "mp3_quality": "V0",
+                },
             )
 
 

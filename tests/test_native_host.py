@@ -72,7 +72,13 @@ class NativeHostTests(unittest.TestCase):
             self.assertEqual(response["version"], "2.0.0")
             self.assertEqual(
                 response["config"],
-                {"download_dir": None, "auto_tag": True, "rsgain": False},
+                {
+                    "download_dir": None,
+                    "auto_tag": True,
+                    "rsgain": False,
+                    "audio_format": "best",
+                    "mp3_quality": "V0",
+                },
             )
             self.assertEqual(response["effective_download_dir"], str(Path(tmp) / "Music/Youtube Downloads"))
             self.assertFalse(response["ytdlp_config_exists"])
@@ -96,7 +102,13 @@ class NativeHostTests(unittest.TestCase):
         self.assertTrue(responses[0]["ok"])
         self.assertEqual(
             responses[0]["config"],
-            {"download_dir": None, "auto_tag": False, "rsgain": False},
+            {
+                "download_dir": None,
+                "auto_tag": False,
+                "rsgain": False,
+                "audio_format": "best",
+                "mp3_quality": "V0",
+            },
         )
         self.assertEqual(persisted, responses[0]["config"])
 

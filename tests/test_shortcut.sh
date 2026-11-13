@@ -536,6 +536,8 @@ assert config == {
     "download_dir": "~/Music/Youtube Downloads",
     "auto_tag": True,
     "rsgain": False,
+    "audio_format": "best",
+    "mp3_quality": "V0",
 }, config
 for manifest in (
     home / ".mozilla/native-messaging-hosts/firefox_youtube_downloader.json",
@@ -629,6 +631,8 @@ assert config == {
     "download_dir": "~/Downloads/Youtube",
     "auto_tag": False,
     "rsgain": True,
+    "audio_format": "best",
+    "mp3_quality": "V0",
 }, config
 PY
 pass 'interactive TTY installer accepts download-dir, auto-tag, and ReplayGain choices'
@@ -649,6 +653,8 @@ with open(sys.argv[1], encoding="utf-8") as stream:
 assert config["download_dir"] is None, config
 assert config["auto_tag"] is True, config
 assert config["rsgain"] is False, config
+assert config["audio_format"] == "best", config
+assert config["mp3_quality"] == "V0", config
 PY
 HOME="$existing_ytdlp_home" "$INSTALLER" --install --yes \
     --download-dir=ytdlp-default --auto-tag=true --rsgain=true > "$TMP/existing-ytdlp-overrides.out"
@@ -658,7 +664,13 @@ import sys
 
 with open(sys.argv[1], encoding="utf-8") as stream:
     config = json.load(stream)
-assert config == {"download_dir": None, "auto_tag": True, "rsgain": True}, config
+assert config == {
+    "download_dir": None,
+    "auto_tag": True,
+    "rsgain": True,
+    "audio_format": "best",
+    "mp3_quality": "V0",
+}, config
 PY
 cmp -s "$TMP/existing-ytdlp.orig" "$existing_ytdlp_home/.config/yt-dlp/config" \
     || fail 'installer modified existing yt-dlp config while applying overrides'

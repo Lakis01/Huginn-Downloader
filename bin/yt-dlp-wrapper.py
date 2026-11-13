@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
+from collections.abc import Mapping
+from typing import Any
 
 from ytdl_config import effective_download_dir, load_config
 from ytdl_meta import parse_info, sanitize_filename, strip_language_tags, tag_audio_file
@@ -456,6 +458,35 @@ def _audio_output_template(meta, suffix=""):
     return f"{_final_stem(meta, suffix)}.%(ext)s"
 
 
+def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
+    cfg = dict(config) if config is not None else load_config()
+    audio_format = cfg.get("audio_format", "best")
+    if audio_format == "mp3":
+        quality = {
+            "V0": "0",
+            "320k": "320K",
+            "V2": "2",
+            "128k": "128K",
+        }.get(cfg.get("mp3_quality", "V0"), "0")
+        return [
+            "-f", "bestaudio", "-x", "--audio-format", "mp3",
+            "--audio-quality", quality,
+        ]
+    if audio_format == "m4a":
+        return [
+            "-f", "bestaudio[ext=m4a]/bestaudio", "-x",
+            "--audio-format", "m4a",
+        ]
+    if audio_format == "ogg":
+        return [
+            "-f", "bestaudio", "-x", "--audio-format", "vorbis",
+            "--audio-quality", "0",
+        ]
+    if audio_format == "flac":
+        return ["-f", "bestaudio", "-x", "--audio-format", "flac"]
+    return ["-f", "bestaudio", "-x", "--audio-format", "best"]
+
+
 def _run_with_auth_retry(command):
     """Run yt-dlp with TTY progress, retrying once with Firefox cookies on auth errors."""
     try:
@@ -529,8 +560,7 @@ def download_audio(url, config=None):
         command = [
             "yt-dlp",
             *extras,
-            "-f", "bestaudio",
-            "-x", "--audio-format", "best",
+            *_audio_format_args(cfg),
             "--quiet",
             "--no-playlist",
             "--progress",

@@ -10,11 +10,15 @@ from typing import Any
 
 DEFAULT_FRESH_DOWNLOAD_DIR = "~/Music/Youtube Downloads"
 ALT_FRESH_DOWNLOAD_DIR = "~/Downloads/Youtube"
+SUPPORTED_AUDIO_FORMATS = ("best", "mp3", "m4a", "ogg", "flac")
+SUPPORTED_MP3_QUALITIES = ("V0", "320k", "V2", "128k")
 
 _DEFAULT_CONFIG = {
     "download_dir": None,
     "auto_tag": True,
     "rsgain": False,
+    "audio_format": "best",
+    "mp3_quality": "V0",
 }
 
 
@@ -91,6 +95,13 @@ def load_config(
         value = stored.get(key, config[key])
         if isinstance(value, bool):
             config[key] = value
+    for key, supported_values in (
+        ("audio_format", SUPPORTED_AUDIO_FORMATS),
+        ("mp3_quality", SUPPORTED_MP3_QUALITIES),
+    ):
+        value = stored.get(key, config[key])
+        if isinstance(value, str) and value in supported_values:
+            config[key] = value
     return config
 
 
@@ -114,6 +125,17 @@ def save_config(
             value = config[key]
             if not isinstance(value, bool):
                 raise TypeError(f"{key} must be a bool")
+            normalized[key] = value
+    for key, supported_values in (
+        ("audio_format", SUPPORTED_AUDIO_FORMATS),
+        ("mp3_quality", SUPPORTED_MP3_QUALITIES),
+    ):
+        if key in config:
+            value = config[key]
+            if not isinstance(value, str):
+                raise TypeError(f"{key} must be a string")
+            if value not in supported_values:
+                raise ValueError(f"{key} must be one of {supported_values}")
             normalized[key] = value
 
     destination = config_path(env, platform_name)

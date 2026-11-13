@@ -795,7 +795,7 @@ def _tag_id3_frames(audio, meta, cover):
 
 def _strip_language_tags_from_audio(audio, suffix):
     """Remove stream-inherited language tags from an opened Mutagen object."""
-    if suffix in {".opus", ".ogg"}:
+    if suffix in {".opus", ".ogg", ".flac"}:
         tags = audio.tags
         if tags is None:
             return False
@@ -838,11 +838,15 @@ def strip_language_tags(filepath: str) -> None:
     import os
 
     suffix = os.path.splitext(str(filepath))[1].lower()
-    if suffix in {".opus", ".ogg"}:
+    if suffix in {".opus", ".ogg", ".flac"}:
         if suffix == ".opus":
             from mutagen.oggopus import OggOpus
 
             audio = OggOpus(filepath)
+        elif suffix == ".flac":
+            from mutagen.flac import FLAC
+
+            audio = FLAC(filepath)
         else:
             from mutagen.oggvorbis import OggVorbis
 
@@ -869,7 +873,7 @@ def tag_audio_file(filepath, meta, thumbnail_path=None) -> None:
     suffix = os.path.splitext(str(filepath))[1].lower()
     cover = None
     if thumbnail_path:
-        prefer_webp = suffix in {".opus", ".ogg", ".mp3"}
+        prefer_webp = suffix in {".opus", ".ogg", ".mp3", ".flac"}
         cover = _cover_image_bytes(
             thumbnail_path,
             bool((meta or {}).get("is_tagged")),
@@ -881,6 +885,22 @@ def tag_audio_file(filepath, meta, thumbnail_path=None) -> None:
 
         audio = OggOpus(filepath)
         _tag_vorbis_comments(audio, meta or {}, cover)
+        audio.save()
+    elif suffix == ".flac":
+        from mutagen.flac import FLAC, Picture
+
+        audio = FLAC(filepath)
+        _tag_vorbis_comments(audio, meta or {}, None)
+        if cover is not None:
+            data, mime, width, height = cover
+            audio.clear_pictures()
+            picture = Picture()
+            picture.type = 3
+            picture.mime = mime
+            picture.width = width
+            picture.height = height
+            picture.data = data
+            audio.add_picture(picture)
         audio.save()
     elif suffix == ".ogg":
         from mutagen.oggvorbis import OggVorbis
