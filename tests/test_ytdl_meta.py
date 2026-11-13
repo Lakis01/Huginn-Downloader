@@ -6,11 +6,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import termios
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+try:
+    import termios
+except ImportError:  # pragma: no cover - Windows does not provide termios
+    termios = None
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
@@ -26,6 +30,21 @@ def _load_wrapper(test_case):
     spec = importlib.util.spec_from_file_location("yt_dlp_wrapper", WRAPPER_PATH)
     wrapper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wrapper)
+    patcher = mock.patch.object(
+        wrapper,
+        "check_ytdlp_update",
+        return_value={
+            "installed": "2026.10.26",
+            "latest": "2026.10.26",
+            "outdated": False,
+            "age_days": 0,
+            "reason": "up_to_date",
+            "update_hint": "yt-dlp -U",
+        },
+        create=True,
+    )
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
     return wrapper
 
 
@@ -270,13 +289,61 @@ def _make_silence_mp3(path):
     )
 
 
+def _make_silence_flac(path):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1",
+         "-c:a", "flac", path],
+        check=True,
+    )
+
+
 def _make_thumbnail(path, size=(1280, 720)):
     from PIL import Image
 
     Image.new("RGB", size, (200, 30, 30)).save(path, "JPEG")
 
 
+def _make_webp_thumbnail(path, size=(1280, 720)):
+    from PIL import Image
+
+    Image.new("RGB", size, (200, 30, 30)).save(path, "WEBP")
+
+
 class TagAudioFileTests(unittest.TestCase):
+    def test_flac_tags_vorbis_comments_and_embeds_native_webp_picture(self):
+        from mutagen.flac import FLAC, Picture
+
+        meta = parse_info({"title": "A Song", "channel": "The Band"})
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "track.flac")
+            thumb = os.path.join(tmp, "cover.webp")
+            _make_silence_flac(src)
+            _make_webp_thumbnail(thumb)
+            cover_bytes = Path(thumb).read_bytes()
+
+            seeded = FLAC(src)
+            seeded["description"] = ["old description"]
+            old_picture = Picture()
+            old_picture.type = 3
+            old_picture.mime = "image/jpeg"
+            old_picture.data = b"old cover"
+            seeded.add_picture(old_picture)
+            seeded.save()
+
+            tag_audio_file(src, meta, thumb)
+
+            tagged = FLAC(src)
+            self.assertEqual(tagged["title"], ["A Song"])
+            self.assertEqual(tagged["artist"], ["The Band"])
+            self.assertNotIn("description", tagged.tags)
+            self.assertNotIn("metadata_block_picture", tagged.tags)
+            self.assertEqual(len(tagged.pictures), 1)
+            self.assertEqual(tagged.pictures[0].type, 3)
+            self.assertEqual(tagged.pictures[0].mime, "image/webp")
+            self.assertEqual((tagged.pictures[0].width, tagged.pictures[0].height), (1280, 720))
+            self.assertEqual(tagged.pictures[0].data, cover_bytes)
+
     def test_opus_tags_are_multivalue_and_artwork_is_cropped_square(self):
         from mutagen.oggopus import OggOpus
 
@@ -340,10 +407,13 @@ class TagAudioFileTests(unittest.TestCase):
 
             picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
             self.assertEqual(picture.type, 3)
+            self.assertEqual(picture.mime, "image/webp")
             self.assertEqual((picture.width, picture.height), (720, 720))
+            self.assertTrue(picture.data.startswith(b"RIFF"))
+            self.assertEqual(picture.data[8:12], b"WEBP")
 
     def test_m4a_tags_standard_atoms_freeform_artists_and_cover(self):
-        from mutagen.mp4 import MP4, MP4FreeForm
+        from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 
         meta = parse_info({
             "description": OFFICIAL_DESCRIPTION,
@@ -418,6 +488,7 @@ class TagAudioFileTests(unittest.TestCase):
                 self.assertNotIn(stale, tagged)
             self.assertIn("covr", tagged)
             self.assertTrue(len(bytes(tagged["covr"][0])) > 0)
+            self.assertEqual(tagged["covr"][0].imageformat, MP4Cover.FORMAT_JPEG)
 
             tag_audio_file(src, {})
             retagged = MP4(src)
@@ -515,6 +586,9 @@ class TagAudioFileTests(unittest.TestCase):
             pictures = tagged.getall("APIC")
             self.assertEqual(len(pictures), 1)
             self.assertEqual(pictures[0].type, 3)
+            self.assertEqual(pictures[0].mime, "image/webp")
+            self.assertTrue(pictures[0].data.startswith(b"RIFF"))
+            self.assertEqual(pictures[0].data[8:12], b"WEBP")
 
             tag_audio_file(src, {})
             retagged = MP3(src).tags
@@ -551,6 +625,92 @@ class TagAudioFileTests(unittest.TestCase):
             picture = Picture(base64.b64decode(tags["metadata_block_picture"][0]))
             self.assertEqual((picture.width, picture.height), (1280, 720))
 
+    def test_opus_and_mp3_embed_native_webp_and_transcode_other_covers(self):
+        from PIL import Image
+
+        standard_meta = parse_info({"title": "Regular upload", "channel": "Artist"})
+        official_meta = parse_info({
+            "description": OFFICIAL_DESCRIPTION,
+            "title": "Stay (feat. Earth, Wind & Fire)",
+        })
+
+        def embedded_cover(path):
+            if Path(path).suffix == ".opus":
+                import base64
+
+                from mutagen.flac import Picture
+                from mutagen.oggopus import OggOpus
+
+                picture = Picture(
+                    base64.b64decode(OggOpus(path).tags["metadata_block_picture"][0])
+                )
+                return picture.data, picture.mime, picture.width, picture.height
+
+            from mutagen.mp3 import MP3
+
+            picture = MP3(path).tags.getall("APIC")[0]
+            with Image.open(io.BytesIO(picture.data)) as image:
+                width, height = image.size
+            return picture.data, picture.mime, width, height
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for suffix, make_audio in (
+                (".opus", _make_silence_opus),
+                (".mp3", _make_silence_mp3),
+            ):
+                with self.subTest(suffix=suffix):
+                    native_audio = os.path.join(tmp, f"native{suffix}")
+                    native_thumb = os.path.join(tmp, "native.webp")
+                    make_audio(native_audio)
+                    _make_webp_thumbnail(native_thumb)
+                    native_bytes = Path(native_thumb).read_bytes()
+
+                    tag_audio_file(native_audio, standard_meta, native_thumb)
+
+                    data, mime, width, height = embedded_cover(native_audio)
+                    self.assertEqual(mime, "image/webp")
+                    self.assertEqual(data, native_bytes)
+                    self.assertEqual((width, height), (1280, 720))
+
+                    official_audio = os.path.join(tmp, f"official{suffix}")
+                    official_thumb = os.path.join(tmp, "official.webp")
+                    make_audio(official_audio)
+                    _make_webp_thumbnail(official_thumb, (1600, 900))
+
+                    tag_audio_file(official_audio, official_meta, official_thumb)
+
+                    data, mime, width, height = embedded_cover(official_audio)
+                    self.assertEqual(mime, "image/webp")
+                    self.assertEqual((width, height), (900, 900))
+                    self.assertTrue(data.startswith(b"RIFF"))
+                    self.assertEqual(data[8:12], b"WEBP")
+                    with Image.open(io.BytesIO(data)) as image:
+                        self.assertEqual(image.size, (900, 900))
+
+                    jpeg_audio = os.path.join(tmp, f"jpeg{suffix}")
+                    jpeg_thumb = os.path.join(tmp, "jpeg.jpg")
+                    make_audio(jpeg_audio)
+                    _make_thumbnail(jpeg_thumb, (640, 480))
+                    save_calls = []
+                    original_save = Image.Image.save
+
+                    def capture_save(image, fp, format=None, **params):
+                        save_calls.append((format, params.copy()))
+                        return original_save(image, fp, format=format, **params)
+
+                    with mock.patch.object(Image.Image, "save", new=capture_save):
+                        tag_audio_file(jpeg_audio, standard_meta, jpeg_thumb)
+
+                    data, mime, width, height = embedded_cover(jpeg_audio)
+                    self.assertEqual(mime, "image/webp")
+                    self.assertTrue(data.startswith(b"RIFF"))
+                    self.assertEqual(data[8:12], b"WEBP")
+                    self.assertEqual((width, height), (640, 480))
+                    self.assertEqual(len(save_calls), 1)
+                    self.assertEqual(save_calls[0][0], "WEBP")
+                    self.assertEqual(save_calls[0][1].get("quality"), 88)
+                    self.assertEqual(save_calls[0][1].get("method"), 6)
+
 
 class LanguageTagTests(unittest.TestCase):
     @staticmethod
@@ -562,15 +722,19 @@ class LanguageTagTests(unittest.TestCase):
             _make_silence_ogg(path)
         elif suffix == ".mp3":
             _make_silence_mp3(path)
+        elif suffix == ".flac":
+            _make_silence_flac(path)
         else:
             _make_silence_m4a(path)
 
     @staticmethod
     def _seed_language_tags(path):
         suffix = Path(path).suffix.lower()
-        if suffix in {".opus", ".ogg"}:
+        if suffix in {".opus", ".ogg", ".flac"}:
             if suffix == ".opus":
                 from mutagen.oggopus import OggOpus as Audio
+            elif suffix == ".flac":
+                from mutagen.flac import FLAC as Audio
             else:
                 from mutagen.oggvorbis import OggVorbis as Audio
             audio = Audio(path)
@@ -607,9 +771,11 @@ class LanguageTagTests(unittest.TestCase):
     @staticmethod
     def _assert_language_tags_absent(test_case, path):
         suffix = Path(path).suffix.lower()
-        if suffix in {".opus", ".ogg"}:
+        if suffix in {".opus", ".ogg", ".flac"}:
             if suffix == ".opus":
                 from mutagen.oggopus import OggOpus as Audio
+            elif suffix == ".flac":
+                from mutagen.flac import FLAC as Audio
             else:
                 from mutagen.oggvorbis import OggVorbis as Audio
             keys = {key.casefold() for key in Audio(path).tags.keys()}
@@ -636,7 +802,7 @@ class LanguageTagTests(unittest.TestCase):
 
     def test_tagging_and_standalone_stripping_remove_language_tags_in_all_audio_formats(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for suffix in (".opus", ".ogg", ".mp3", ".m4a"):
+            for suffix in (".opus", ".ogg", ".mp3", ".m4a", ".flac"):
                 with self.subTest(suffix=suffix):
                     path = os.path.join(tmp, f"track{suffix}")
                     self._make_audio(path)
@@ -674,7 +840,9 @@ class CoverEncodingTests(unittest.TestCase):
                 return original_save(image, fp, format=format, **params)
 
             with mock.patch.object(Image.Image, "save", new=capture_save):
-                data, mime, _width, _height = ytdl_meta._cover_image_bytes(thumbnail, False)
+                data, mime, _width, _height = ytdl_meta._cover_image_bytes(
+                    thumbnail, False, prefer_webp=False
+                )
 
         self.assertEqual(mime, "image/jpeg")
         self.assertNotEqual(mime, "image/webp")
@@ -698,6 +866,94 @@ class WrapperTests(unittest.TestCase):
     @staticmethod
     def _metadata():
         return parse_info({"title": "Track", "channel": "Artist", "duration": 100})
+
+    def test_audio_format_args_cover_supported_formats_and_mp3_qualities(self):
+        wrapper = _load_wrapper(self)
+        audio_format_args = getattr(wrapper, "_audio_format_args", None)
+        self.assertTrue(
+            callable(audio_format_args), "_audio_format_args is not implemented"
+        )
+
+        cases = (
+            (
+                {"audio_format": "best"},
+                ["-f", "bestaudio", "-x", "--audio-format", "best"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "V0"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "320k"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "320K"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "V2"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "2"],
+            ),
+            (
+                {"audio_format": "mp3", "mp3_quality": "128k"},
+                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "128K"],
+            ),
+            (
+                {"audio_format": "m4a"},
+                ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"],
+            ),
+            (
+                {"audio_format": "ogg"},
+                ["-f", "bestaudio", "-x", "--audio-format", "vorbis", "--audio-quality", "0"],
+            ),
+            (
+                {"audio_format": "flac"},
+                ["-f", "bestaudio", "-x", "--audio-format", "flac"],
+            ),
+        )
+        for config, expected in cases:
+            with self.subTest(config=config):
+                self.assertEqual(audio_format_args(config), expected)
+
+    def test_download_audio_uses_selected_format_and_mp3_quality_flags(self):
+        wrapper = _load_wrapper(self)
+        cases = (
+            {"audio_format": "best", "mp3_quality": "V0"},
+            {"audio_format": "mp3", "mp3_quality": "V0"},
+            {"audio_format": "mp3", "mp3_quality": "320k"},
+            {"audio_format": "mp3", "mp3_quality": "V2"},
+            {"audio_format": "mp3", "mp3_quality": "128k"},
+            {"audio_format": "m4a", "mp3_quality": "V0"},
+            {"audio_format": "ogg", "mp3_quality": "V0"},
+            {"audio_format": "flac", "mp3_quality": "V0"},
+        )
+        with tempfile.TemporaryDirectory():
+            for selection in cases:
+                with self.subTest(selection=selection):
+                    commands = []
+
+                    def fake_run(command, **kwargs):
+                        commands.append(command)
+                        if command[0] == "yt-dlp":
+                            output_path = command[command.index("--print-to-file") + 2]
+                            Path(output_path).write_text("/tmp/downloaded.audio\n")
+                        return SimpleNamespace(stdout="")
+
+                    config = {
+                        "download_dir": None,
+                        "auto_tag": False,
+                        "rsgain": False,
+                        **selection,
+                    }
+                    with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                        with mock.patch.object(wrapper, "strip_language_tags"):
+                            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                                wrapper.download_audio("https://example.invalid/audio", config)
+
+                    yt_dlp_command = next(command for command in commands if command[0] == "yt-dlp")
+                    self.assertEqual(
+                        yt_dlp_command[
+                            yt_dlp_command.index("-f"):yt_dlp_command.index("--quiet")
+                        ],
+                        wrapper._audio_format_args(selection),
+                    )
 
     def test_finalize_uses_appended_info_sidecar_renames_without_overwrite_and_runs_rsgain_once(self):
         wrapper = _load_wrapper(self)
@@ -938,7 +1194,10 @@ class WrapperTests(unittest.TestCase):
             self.assertNotIn("--embed-metadata", command)
             self.assertIn("--write-info-json", command)
             self.assertIn("--write-thumbnail", command)
+            self.assertIn("--quiet", command)
             self.assertIn("--progress", command)
+            self.assertNotIn("--no-warnings", command)
+            self.assertNotIn("--convert-thumbnails", command)
             self.assertIn("--ies", command)
             self.assertEqual(
                 command[command.index("--ies") + 1], "youtube,youtube:tab"
@@ -1003,6 +1262,10 @@ class WrapperTests(unittest.TestCase):
                     def fake_run(command, **kwargs):
                         calls.append((command, kwargs))
                         if command[0] == "yt-dlp":
+                            self.assertIn("--quiet", command)
+                            self.assertIn("--progress", command)
+                            self.assertNotIn("--no-warnings", command)
+                            self.assertNotIn("--convert-thumbnails", command)
                             self.assertIn("--embed-metadata", command)
                             self.assertIn("--embed-thumbnail", command)
                             self.assertNotIn("--write-info-json", command)
@@ -1282,6 +1545,10 @@ class WrapperTests(unittest.TestCase):
         cut_commands = [command for command in calls if "--download-sections" in command]
         self.assertEqual(len(cut_commands), 1)
         self.assertIn("--load-info-json", cut_commands[0])
+        self.assertIn("--quiet", cut_commands[0])
+        self.assertIn("--progress", cut_commands[0])
+        self.assertNotIn("--no-warnings", cut_commands[0])
+        self.assertNotIn("--convert-thumbnails", cut_commands[0])
         self.assertFalse(any(command[-2:] == ["--", url] for command in cut_commands))
 
     def test_cut_auth_failure_falls_back_and_retries_with_browser_cookies(self):
@@ -1510,6 +1777,10 @@ class WrapperTests(unittest.TestCase):
             self.assertNotIn("--embed-metadata", command)
             self.assertIn("--write-info-json", command)
             self.assertIn("--write-thumbnail", command)
+            self.assertIn("--quiet", command)
+            self.assertIn("--progress", command)
+            self.assertNotIn("--no-warnings", command)
+            self.assertNotIn("--convert-thumbnails", command)
             self.assertIn("--download-sections", command)
             self.assertIn("*10.0-50.0", command)
             self.assertIn("--load-info-json", command)
@@ -1545,7 +1816,9 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("--convert-thumbnails", command)
         self.assertIn("webp", command)
         self.assertIn("--embed-metadata", command)
+        self.assertIn("--quiet", command)
         self.assertIn("--progress", command)
+        self.assertNotIn("--no-warnings", command)
         self.assertIn(
             "post_process:[Stage] Merging video + audio into MKV"
             " & embedding thumbnail/metadata...",
@@ -1708,8 +1981,100 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(result, 0)
         wait.assert_not_called()
 
+    def test_main_prints_update_hint_on_ytdlp_error_when_outdated(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.01.01",
+            "latest": "2026.10.26",
+            "outdated": True,
+            "age_days": 299,
+            "reason": "behind_latest",
+            "update_hint": "pipx upgrade yt-dlp",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", side_effect=wrapper._YtDlpError("boom")
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        output = stderr.getvalue()
+        self.assertEqual(result, 1)
+        wrapper.check_ytdlp_update.assert_called_once_with(allow_network=True)
+        self.assertIn("2026.01.01", output)
+        self.assertIn("2026.10.26", output)
+        self.assertIn("pipx upgrade yt-dlp", output)
+
+    def test_main_omits_update_hint_on_ytdlp_error_when_up_to_date(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.10.26",
+            "latest": "2026.10.26",
+            "outdated": False,
+            "age_days": 0,
+            "reason": "up_to_date",
+            "update_hint": "yt-dlp -U",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", side_effect=wrapper._YtDlpError("boom")
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        self.assertEqual(result, 1)
+        self.assertNotIn("yt-dlp -U", stderr.getvalue())
+
+    def test_main_prints_one_line_notice_on_success_when_outdated(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.01.01",
+            "latest": "2026.10.26",
+            "outdated": True,
+            "age_days": 299,
+            "reason": "behind_latest",
+            "update_hint": "brew upgrade yt-dlp",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", return_value="/tmp/done.opus"
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        self.assertEqual(result, 0)
+        lines = [line for line in stderr.getvalue().splitlines() if "yt-dlp" in line.lower()]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("2026.01.01", lines[0])
+        self.assertIn("brew upgrade yt-dlp", lines[0])
+
+    def test_main_omits_success_notice_when_up_to_date(self):
+        wrapper = _load_wrapper(self)
+        wrapper.check_ytdlp_update.return_value = {
+            "installed": "2026.10.26",
+            "latest": "2026.10.26",
+            "outdated": False,
+            "age_days": 0,
+            "reason": "up_to_date",
+            "update_hint": "yt-dlp -U",
+        }
+        with mock.patch.object(
+            wrapper, "download_audio", return_value="/tmp/done.opus"
+        ):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    result = wrapper.main(
+                        ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                    )
+        self.assertEqual(result, 0)
+        self.assertNotIn("yt-dlp", stderr.getvalue().lower())
+
 
 class WaitForKeypressTests(unittest.TestCase):
+    @unittest.skipIf(termios is None, "termios-specific behavior is POSIX-only")
     def test_noop_when_stdin_is_not_a_tty(self):
         wrapper = _load_wrapper(self)
         with mock.patch.object(wrapper.sys.stdin, "isatty", return_value=False):
@@ -1717,6 +2082,7 @@ class WaitForKeypressTests(unittest.TestCase):
                 wrapper.wait_for_keypress()
         get_attr.assert_not_called()
 
+    @unittest.skipIf(termios is None, "termios-specific behavior is POSIX-only")
     def test_reads_single_character_and_restores_terminal(self):
         wrapper = _load_wrapper(self)
         fake_stdin = mock.Mock()
@@ -1735,6 +2101,7 @@ class WaitForKeypressTests(unittest.TestCase):
         fake_stdin.read.assert_called_once_with(1)
         set_attr.assert_called_once_with(7, termios.TCSADRAIN, "saved-attrs")
 
+    @unittest.skipIf(termios is None, "termios-specific behavior is POSIX-only")
     def test_restores_terminal_when_read_fails(self):
         wrapper = _load_wrapper(self)
         fake_stdin = mock.Mock()

@@ -12,17 +12,15 @@ const MENU_MODES = {
   'ytdl-cut': 'cut',
 };
 
-// Broad contexts with no URL patterns: Firefox rejects items blocked by
-// URL patterns or missing contexts before onShown ever runs (bare page
-// background has no target URL; thumbnails use i.ytimg.com srcUrl and
-// previews use blob: srcUrl), so the onShown gate below is the only
-// visibility control.
-const MENU_CONTEXTS = ['page', 'frame', 'link', 'image', 'video', 'audio'];
+// Static parent-process patterns: the menu shows on YouTube pages
+// without a dynamic visibility gate. Inline hover-autoplay previews
+// have no stable link target, so a dynamic gate hid the menu there.
+const YT_DOC_PATTERNS = ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*'];
+const MENU_CONTEXTS = ['page', 'frame', 'link', 'image', 'video', 'audio', 'selection'];
 
-// Guards so a second setupMenus() run (via onInstalled) never attaches
-// duplicate onClicked/onShown/onMessage listeners or hooks.
+// Guards so repeated setup runs never attach duplicate listeners.
 let listenersAttached = false;
-let installedHooked = false;
+let hooksAttached = false;
 
 function ext() {
   if (typeof browser !== 'undefined' && browser) return browser;
@@ -38,8 +36,10 @@ function menusApi() {
 
 function isYouTubeUrl(value) {
   if (typeof value !== 'string' || !value) return false;
+  let candidate = value;
+  if (candidate.startsWith('blob:')) candidate = candidate.slice(5);
   try {
-    const url = new URL(value);
+    const url = new URL(candidate);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
     return (
@@ -133,6 +133,7 @@ function setupMenus() {
       id: 'ytdl-root',
       title: 'YouTube Downloader',
       contexts: MENU_CONTEXTS.slice(),
+      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' },
     },
     {
@@ -140,6 +141,7 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Audio',
       contexts: MENU_CONTEXTS.slice(),
+      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/audio.svg', 32: 'icons/audio.svg' },
     },
     {
@@ -147,6 +149,7 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Video',
       contexts: MENU_CONTEXTS.slice(),
+      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/video.svg', 32: 'icons/video.svg' },
     },
     {
@@ -154,6 +157,7 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Cut Audio',
       contexts: MENU_CONTEXTS.slice(),
+      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/cut.svg', 32: 'icons/cut.svg' },
     },
   ];
@@ -169,42 +173,38 @@ function setupMenus() {
       // Re-installs may race duplicate creation; the menu still stands.
     }
   }
-  attachListeners(menus);
 }
 
-function attachListeners(menus) {
+function attachListeners() {
   if (listenersAttached) return;
   listenersAttached = true;
-  menus.onClicked.addListener(handleMenuClick);
-  if (menus.onShown && typeof menus.onShown.addListener === 'function') {
-    menus.onShown.addListener((info) => {
-      // Sole visibility gate: YouTube pages, YouTube frames, and
-      // YouTube link targets on any site, without duplicating items.
-      const visible =
-        isYouTubeUrl(info.pageUrl) ||
-        isYouTubeUrl(info.frameUrl) ||
-        isYouTubeUrl(info.linkUrl);
-      try {
-        const result = menus.update ? menus.update('ytdl-root', { visible }) : null;
-        if (result && typeof result.then === 'function') result.then(() => menus.refresh());
-        else if (menus.refresh) menus.refresh();
-      } catch (_error) {
-        // Menu visibility stays as declared; nothing to repair.
-      }
-    });
+  const menus = menusApi();
+  if (menus && menus.onClicked) {
+    menus.onClicked.addListener(handleMenuClick);
   }
   const api = ext();
   if (api && api.runtime && api.runtime.onMessage) {
     api.runtime.onMessage.addListener(handlePillMessage);
   }
-  if (api && api.runtime && api.runtime.onInstalled && !installedHooked) {
-    installedHooked = true;
+}
+
+function attachHooks() {
+  if (hooksAttached) return;
+  hooksAttached = true;
+  const api = ext();
+  if (!api || !api.runtime) return;
+  if (api.runtime.onInstalled) {
     api.runtime.onInstalled.addListener(setupMenus);
+  }
+  if (api.runtime.onStartup) {
+    api.runtime.onStartup.addListener(setupMenus);
   }
 }
 
+attachListeners();
+attachHooks();
 setupMenus();
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { HOST_ID, MENU_MODES, isYouTubeUrl, dedupeUrls };
+  module.exports = { HOST_ID, MENU_MODES, YT_DOC_PATTERNS, MENU_CONTEXTS, isYouTubeUrl, dedupeUrls };
 }

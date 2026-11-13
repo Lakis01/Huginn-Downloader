@@ -18,6 +18,8 @@
     'ytd-playlist-panel-video-renderer',
     'ytmusic-two-row-item-renderer',
     'ytmusic-responsive-list-item-renderer',
+    'ytd-video-preview',
+    '#video-preview',
   ].join(', ');
 
   const MODES = [
@@ -46,6 +48,9 @@
   };
 
   let lastContextUrl = null;
+  let lastPointerUrl = null;
+  let lastPointerAt = 0;
+  let lastPointerDownAt = 0;
   let refreshTimer = null;
 
   function ext() {
@@ -106,6 +111,7 @@
   function makeGroup() {
     const group = document.createElement('div');
     group.setAttribute('data-ytdl-controls', 'true');
+    group.setAttribute('data-ytdl-ext', 'true');
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', 'yt-dlp actions');
     for (const action of MODES) {
@@ -135,6 +141,14 @@
   }
 
   function syncControls() {
+    const legacyStyle = document.getElementById('ytdl-controls-style');
+    if (legacyStyle) legacyStyle.remove();
+    for (const stale of Array.from(document.querySelectorAll(GROUP_SELECTOR))) {
+      const isExt = stale.getAttribute && stale.getAttribute('data-ytdl-ext') === 'true';
+      const hasLinks = stale.querySelector && stale.querySelector('a');
+      const hasButtons = stale.querySelector && stale.querySelector('button');
+      if (!isExt || (hasLinks && !hasButtons)) stale.remove();
+    }
     if (!isWatchRoute()) {
       removeGroups();
       return;
@@ -207,6 +221,56 @@
       }
     }
     lastContextUrl = href;
+    return href;
+  }
+
+  function nowMs() {
+    try {
+      if (typeof Date !== 'undefined' && typeof Date.now === 'function') return Date.now();
+    } catch (_error) {
+      // Fall through to zero when clocks are unavailable.
+    }
+    return 0;
+  }
+
+  function handlePointerDown(event) {
+    if (!event || event.button !== 2) return;
+    // Start of a new right-click gesture: record even when unmatched
+    // so a bare link or empty space resets any prior gesture's URL.
+    const href = captureContextHref(event);
+    const now = nowMs();
+    lastPointerUrl = href;
+    lastPointerAt = now;
+    lastPointerDownAt = now;
+    lastContextUrl = href;
+  }
+
+  function handleMouseDown(event) {
+    if (!event || event.button !== 2) return;
+    const href = captureContextHref(event);
+    const now = nowMs();
+    if (href === null && lastPointerUrl && now - lastPointerDownAt < 80) {
+      // The preview vanished between pointerdown and mousedown for
+      // this same gesture: keep the pointerdown URL instead of wiping it.
+      lastContextUrl = lastPointerUrl;
+      return;
+    }
+    lastPointerUrl = href;
+    lastPointerAt = now;
+    lastContextUrl = href;
+  }
+
+  function handleContextMenu(event) {
+    let href = captureContextHref(event);
+    if (href === null && nowMs() - lastPointerAt < 500) {
+      // YouTube may tear down or morph the hover-autoplay preview
+      // between pointerdown and contextmenu: reuse this gesture's
+      // pointerdown URL (null when the gesture started on empty
+      // space or a non-card link, so nothing stale can leak).
+      href = lastPointerUrl;
+    }
+    lastContextUrl = href;
+    lastPointerUrl = null;
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
@@ -229,7 +293,9 @@
     syncControls();
     document.addEventListener('yt-navigate-finish', syncControls);
     document.addEventListener('yt-page-data-updated', syncControls);
-    document.addEventListener('contextmenu', captureContextHref, true);
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('mousedown', handleMouseDown, true);
+    document.addEventListener('contextmenu', handleContextMenu, true);
     const api = ext();
     if (api && api.runtime && api.runtime.onMessage) {
       api.runtime.onMessage.addListener(handleRuntimeMessage);

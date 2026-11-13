@@ -9,9 +9,25 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
+from collections.abc import Mapping
+from typing import Any
 
 from ytdl_config import effective_download_dir, load_config
 from ytdl_meta import parse_info, sanitize_filename, strip_language_tags, tag_audio_file
+
+try:
+    from ytdl_version import check_ytdlp_update
+except ImportError:  # pragma: no cover - helper ships alongside the wrapper
+
+    def check_ytdlp_update(*args, **kwargs):
+        return {
+            "installed": None,
+            "latest": None,
+            "outdated": False,
+            "age_days": None,
+            "reason": "unknown",
+            "update_hint": "yt-dlp -U",
+        }
 
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
@@ -112,6 +128,12 @@ def wait_for_keypress(prompt: str = "\nPress any key to close...") -> None:
         return
     sys.stdout.write(prompt)
     sys.stdout.flush()
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.getch()
+        return
+
     import termios
     import tty
 
@@ -436,6 +458,35 @@ def _audio_output_template(meta, suffix=""):
     return f"{_final_stem(meta, suffix)}.%(ext)s"
 
 
+def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
+    cfg = dict(config) if config is not None else load_config()
+    audio_format = cfg.get("audio_format", "best")
+    if audio_format == "mp3":
+        quality = {
+            "V0": "0",
+            "320k": "320K",
+            "V2": "2",
+            "128k": "128K",
+        }.get(cfg.get("mp3_quality", "V0"), "0")
+        return [
+            "-f", "bestaudio", "-x", "--audio-format", "mp3",
+            "--audio-quality", quality,
+        ]
+    if audio_format == "m4a":
+        return [
+            "-f", "bestaudio[ext=m4a]/bestaudio", "-x",
+            "--audio-format", "m4a",
+        ]
+    if audio_format == "ogg":
+        return [
+            "-f", "bestaudio", "-x", "--audio-format", "vorbis",
+            "--audio-quality", "0",
+        ]
+    if audio_format == "flac":
+        return ["-f", "bestaudio", "-x", "--audio-format", "flac"]
+    return ["-f", "bestaudio", "-x", "--audio-format", "best"]
+
+
 def _run_with_auth_retry(command):
     """Run yt-dlp with TTY progress, retrying once with Firefox cookies on auth errors."""
     try:
@@ -500,20 +551,17 @@ def download_audio(url, config=None):
             extras.extend([
                 "--write-info-json",
                 "--write-thumbnail",
-                "--convert-thumbnails", "jpg",
             ])
         else:
             extras.extend([
                 "--embed-metadata",
                 "--embed-thumbnail",
-                "--convert-thumbnails", "jpg",
             ])
         command = [
             "yt-dlp",
             *extras,
-            "-f", "bestaudio",
-            "-x", "--audio-format", "best",
-            "--no-warnings",
+            *_audio_format_args(cfg),
+            "--quiet",
             "--no-playlist",
             "--progress",
             "-o", "%(title)s.%(ext)s",
@@ -550,7 +598,7 @@ def download_video(url, config=None):
         "--embed-thumbnail",
         "--convert-thumbnails", "webp",
         "--embed-metadata",
-        "--no-warnings",
+        "--quiet",
         "--progress",
         "--print",
         "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
@@ -637,14 +685,12 @@ def interactive_cut(url, config=None):
                 extras.extend([
                     "--write-info-json",
                     "--write-thumbnail",
-                    "--convert-thumbnails", "jpg",
                 ])
                 output_template = _audio_output_template(meta, filename_suffix)
             else:
                 extras.extend([
                     "--embed-metadata",
                     "--embed-thumbnail",
-                    "--convert-thumbnails", "jpg",
                 ])
                 output_template = "%(title)s.%(ext)s"
             rest = [
@@ -653,7 +699,7 @@ def interactive_cut(url, config=None):
                 "--force-keyframes-at-cuts",
                 "-f", "bestaudio",
                 "-x", "--audio-format", "opus",
-                "--no-warnings",
+                "--quiet",
                 "--no-playlist",
                 "--progress",
                 "--postprocessor-args", f"ExtractAudio:{ffmpeg_options}",
@@ -684,6 +730,57 @@ def interactive_cut(url, config=None):
         _remove_temp_file(temp_info_path)
 
 
+def _print_update_hint(status):
+    """Print an actionable out-of-date notice to stderr."""
+    installed = status.get("installed") or "unknown"
+    latest = status.get("latest")
+    age_days = status.get("age_days")
+    hint = status.get("update_hint") or "yt-dlp -U"
+    if latest:
+        print(
+            f"Your yt-dlp is out of date (installed {installed}, "
+            f"latest {latest}). Update with: {hint}",
+            file=sys.stderr,
+        )
+    elif isinstance(age_days, int):
+        print(
+            f"Your yt-dlp is out of date (installed {installed}, "
+            f"{age_days} days old). Update with: {hint}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Your yt-dlp may be out of date (installed {installed}). "
+            f"Update with: {hint}",
+            file=sys.stderr,
+        )
+
+
+def _print_update_notice(status):
+    """Print a concise one-line out-of-date notice to stderr."""
+    installed = status.get("installed") or "unknown"
+    latest = status.get("latest")
+    age_days = status.get("age_days")
+    hint = status.get("update_hint") or "yt-dlp -U"
+    if latest:
+        print(
+            f"Note: yt-dlp {installed} is outdated "
+            f"(latest {latest}); update with: {hint}",
+            file=sys.stderr,
+        )
+    elif isinstance(age_days, int):
+        print(
+            f"Note: yt-dlp {installed} is outdated "
+            f"({age_days} days old); update with: {hint}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Note: yt-dlp {installed} may be outdated; update with: {hint}",
+            file=sys.stderr,
+        )
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     args = list(argv[1:])
@@ -711,7 +808,19 @@ def main(argv=None):
                 return 1
         except _YtDlpError as error:
             print(f"yt-dlp failed: {error}", file=sys.stderr)
+            try:
+                status = check_ytdlp_update(allow_network=True)
+            except Exception:
+                status = None
+            if status and status.get("outdated"):
+                _print_update_hint(status)
             return 1
+        try:
+            status = check_ytdlp_update(allow_network=True)
+        except Exception:
+            status = None
+        if status and status.get("outdated"):
+            _print_update_notice(status)
         return 0
     finally:
         if wait_keypress and sys.stdin.isatty():

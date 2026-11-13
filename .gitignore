@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 .coverage
 dist/
+web-ext-artifacts/
+extension/.amo-upload-uuid

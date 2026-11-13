@@ -5,10 +5,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 from ytdl_config import (
@@ -18,11 +20,49 @@ from ytdl_config import (
     ytdlp_config_exists,
 )
 
+try:
+    from ytdl_version import check_ytdlp_update
+except ImportError:  # pragma: no cover - helper ships alongside the host
+
+    def check_ytdlp_update(*args, **kwargs):
+        return {
+            "installed": None,
+            "latest": None,
+            "outdated": False,
+            "age_days": None,
+            "reason": "unknown",
+            "update_hint": "yt-dlp -U",
+        }
+
 
 VERSION = "2.0.0"
 MAX_MESSAGE_SIZE = 1024 * 1024
 MODES = {"audio", "video", "cut"}
 YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+
+
+def _is_windows():
+    return os.name == "nt"
+
+
+def _ensure_macos_gui_path():
+    """Add common package-manager paths missing from GUI-launched processes."""
+    if sys.platform != "darwin":
+        return
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    directories = (
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        os.path.expanduser("~/.local/bin"),
+    )
+    for directory in directories:
+        if os.path.isdir(directory) and directory not in path_entries:
+            path_entries.append(directory)
+    os.environ["PATH"] = os.pathsep.join(path_entries)
+
+
+if sys.platform == "darwin":
+    _ensure_macos_gui_path()
 
 
 def _is_youtube_url(value):
@@ -67,8 +107,102 @@ def _dependencies():
     }
 
 
+def _launch_download(mode: str, chosen_url: str) -> None:
+    """Launch a download in a user-visible terminal on the current OS."""
+    wrapper_py = Path(__file__).with_name("yt-dlp-wrapper.py")
+    if sys.platform.startswith("linux"):
+        shortcut = Path(
+            os.environ.get(
+                "YTDL_SHORTCUT", str(Path(__file__).with_name("yt-dlp-shortcut.sh"))
+            )
+        )
+        subprocess.Popen(
+            [str(shortcut), mode, chosen_url],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+
+    if sys.platform == "darwin":
+        descriptor, command_path = tempfile.mkstemp(
+            prefix="ytdl-launch-", suffix=".command"
+        )
+        try:
+            os.fchmod(descriptor, 0o700)
+            command = (
+                "#!/bin/sh\n"
+                'rm -f -- "$0"\n'
+                'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"\n'
+                f"exec {shlex.quote(sys.executable)} "
+                f"{shlex.quote(str(wrapper_py))} --wait-keypress "
+                f"{shlex.quote(mode)} {shlex.quote(chosen_url)}\n"
+            )
+            stream = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
+            with stream:
+                stream.write(command)
+            subprocess.Popen(
+                ["open", "-a", "Terminal", command_path],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(command_path)
+            except OSError:
+                pass
+            raise
+        return
+
+    if _is_windows():
+        command = [
+            sys.executable,
+            str(wrapper_py),
+            "--wait-keypress",
+            mode,
+            chosen_url,
+        ]
+        terminal = shutil.which("wt")
+        if terminal:
+            command.insert(0, terminal)
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                command,
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return
+
+    raise OSError(f"Unsupported platform: {sys.platform}")
+
+
 def _config_response():
     config = load_config()
+    try:
+        yt_dlp_status = check_ytdlp_update(allow_network=False)
+    except Exception:
+        yt_dlp_status = {
+            "installed": None,
+            "latest": None,
+            "outdated": False,
+            "age_days": None,
+            "reason": "unknown",
+            "update_hint": "yt-dlp -U",
+        }
     return {
         "ok": True,
         "version": VERSION,
@@ -76,6 +210,7 @@ def _config_response():
         "effective_download_dir": effective_download_dir(config),
         "ytdlp_config_exists": ytdlp_config_exists(),
         "deps": _dependencies(),
+        "yt_dlp_status": yt_dlp_status,
     }
 
 
@@ -93,17 +228,8 @@ def _handle_download(message):
     if chosen_url is None:
         return {"ok": False, "error": "no valid YouTube URL was provided"}
 
-    shortcut = Path(
-        os.environ.get("YTDL_SHORTCUT", str(Path(__file__).with_name("yt-dlp-shortcut.sh")))
-    )
     try:
-        subprocess.Popen(
-            [str(shortcut), mode, chosen_url],
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        _launch_download(mode, chosen_url)
     except OSError as error:
         return {"ok": False, "error": str(error)}
     return {"ok": True, "launched": True, "mode": mode, "url": chosen_url}
