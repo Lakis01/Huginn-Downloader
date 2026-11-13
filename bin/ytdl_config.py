@@ -10,7 +10,7 @@ from typing import Any
 
 DEFAULT_FRESH_DOWNLOAD_DIR = "~/Music/Youtube Downloads"
 ALT_FRESH_DOWNLOAD_DIR = "~/Downloads/Youtube"
-SUPPORTED_AUDIO_FORMATS = ("best", "mp3", "m4a", "ogg", "flac")
+SUPPORTED_AUDIO_FORMATS = ("best", "opus", "mp3", "m4a", "ogg", "flac")
 SUPPORTED_MP3_QUALITIES = ("V0", "320k", "V2", "V5")
 LEGACY_MP3_QUALITY_ALIASES = {"128k": "V5"}
 
@@ -22,7 +22,7 @@ _DEFAULT_CONFIG = {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
@@ -111,10 +111,15 @@ def load_config(
             value = LEGACY_MP3_QUALITY_ALIASES[value]
         if isinstance(value, str) and value in supported_values:
             config[key] = value
-    for key in ("embed_thumbnail", "thumbnail_jpg", "mono_audio", "long_audio_enabled"):
+    for key in ("embed_thumbnail", "thumbnail_jpg", "long_audio_enabled"):
         value = stored.get(key, config[key])
         if isinstance(value, bool):
             config[key] = value
+    channel_mode = stored.get("channel_mode")
+    if isinstance(channel_mode, str) and channel_mode in {"stereo", "ask", "mono"}:
+        config["channel_mode"] = channel_mode
+    elif isinstance(stored.get("mono_audio"), bool):
+        config["channel_mode"] = "mono" if stored["mono_audio"] else "stereo"
     minutes = stored.get("long_audio_minutes", config["long_audio_minutes"])
     if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes > 0:
         config["long_audio_minutes"] = minutes
@@ -158,12 +163,24 @@ def save_config(
             if value not in supported_values:
                 raise ValueError(f"{key} must be one of {supported_values}")
             normalized[key] = value
-    for key in ("embed_thumbnail", "thumbnail_jpg", "mono_audio", "long_audio_enabled"):
+    for key in ("embed_thumbnail", "thumbnail_jpg", "long_audio_enabled"):
         if key in config:
             value = config[key]
             if not isinstance(value, bool):
                 raise TypeError(f"{key} must be a bool")
             normalized[key] = value
+    if "channel_mode" in config:
+        value = config["channel_mode"]
+        if not isinstance(value, str):
+            raise TypeError("channel_mode must be a string")
+        if value not in {"stereo", "ask", "mono"}:
+            raise ValueError("channel_mode must be one of ('stereo', 'ask', 'mono')")
+        normalized["channel_mode"] = value
+    elif "mono_audio" in config:
+        value = config["mono_audio"]
+        if not isinstance(value, bool):
+            raise TypeError("mono_audio must be a bool")
+        normalized["channel_mode"] = "mono" if value else "stereo"
     if "long_audio_minutes" in config:
         value = config["long_audio_minutes"]
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:

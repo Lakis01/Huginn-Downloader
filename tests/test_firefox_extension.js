@@ -36,7 +36,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.3.0', 'manifest version is 2.3.0');
+  assert.equal(manifest.version, '2.4.0', 'manifest version is 2.4.0');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -122,6 +122,7 @@ function testBackgroundStatic() {
 function runBackgroundFixture() {
   const src = readFile('extension/background.js');
   const created = [];
+  const menuOrder = [];
   const handlers = { clicked: null, shown: null, message: null, installed: null, startup: null };
   const listenerCounts = { clicked: 0, shown: 0, message: 0, installed: 0, startup: 0 };
   const calls = { nativeMessages: [], tabsCreated: [], sentTabMessages: [], updates: [], refreshes: 0 };
@@ -130,7 +131,8 @@ function runBackgroundFixture() {
   let tabMessageResponse = { url: 'https://www.youtube.com/watch?v=ctx123' };
   const browser = {
     menus: {
-      create(item) { created.push(item); return Promise.resolve(item.id); },
+      removeAll() { menuOrder.push('removeAll'); return Promise.resolve(); },
+      create(item) { menuOrder.push(`create:${item.id}`); created.push(item); return Promise.resolve(item.id); },
       onClicked: { addListener(fn) { handlers.clicked = fn; listenerCounts.clicked += 1; } },
       onShown: { addListener(fn) { handlers.shown = fn; listenerCounts.shown += 1; } },
       refresh() { calls.refreshes += 1; return Promise.resolve(); },
@@ -159,6 +161,7 @@ function runBackgroundFixture() {
   vm.runInContext(src, context, { filename: 'background.js' });
   return {
     created,
+    menuOrder,
     handlers,
     listenerCounts,
     calls,
@@ -301,6 +304,67 @@ async function testBackgroundStaticMenus() {
   assert.equal(JSON.stringify(listenerCounts), JSON.stringify({ clicked: 1, shown: 0, message: 1, installed: 1, startup: 1 }), 'listeners and hooks registered exactly once');
 }
 
+async function testBackgroundRemoveAllOrdering() {
+  const { created, menuOrder } = runBackgroundFixture();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(menuOrder.length >= 5, 'removeAll plus four creates recorded');
+  assert.equal(menuOrder[0], 'removeAll', 'menus.removeAll() completes before any menu creation');
+  assert.deepEqual(menuOrder.slice(1, 5), ['create:ytdl-root', 'create:ytdl-audio', 'create:ytdl-video', 'create:ytdl-cut'], 'four menus created sequentially after removal');
+  assert.equal(created.length, 4, 'four menu definitions created');
+}
+
+async function testBackgroundSrcAndFrameFallbacks() {
+  // image srcUrl (plain HTTP(S)) wins over the page URL.
+  {
+    const { handlers, calls, setTabMessageResponse } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setTabMessageResponse({ url: null });
+    await handlers.clicked(
+      { menuItemId: 'ytdl-video', srcUrl: 'https://i.ytimg.com/vi/src123/hqdefault.jpg', pageUrl: 'https://www.youtube.com/watch?v=page9' },
+      { id: 9, url: 'https://www.youtube.com/watch?v=page9' },
+    );
+    assert.equal(calls.nativeMessages[0].msg.url, 'https://i.ytimg.com/vi/src123/hqdefault.jpg', 'http(s) srcUrl resolves before pageUrl');
+  }
+  // non-HTTP(S) srcUrl (blob:/data:) is skipped in favor of frameUrl.
+  {
+    const { handlers, calls, setTabMessageResponse } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setTabMessageResponse({ url: null });
+    await handlers.clicked(
+      { menuItemId: 'ytdl-video', srcUrl: 'blob:https://www.youtube.com/preview-1', frameUrl: 'https://www.youtube.com/embed/frame9', pageUrl: 'https://www.youtube.com/watch?v=page9' },
+      { id: 9, url: 'https://www.youtube.com/watch?v=page9' },
+    );
+    assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/embed/frame9', 'non-http srcUrl is skipped for frameUrl');
+  }
+  // frameUrl applies when no card, link, or usable src target exists.
+  {
+    const { handlers, calls, setTabMessageResponse } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setTabMessageResponse({ url: null });
+    await handlers.clicked(
+      { menuItemId: 'ytdl-audio', frameUrl: 'https://www.youtube.com/embed/frame7', pageUrl: 'https://www.youtube.com/watch?v=page7' },
+      { id: 7, url: 'https://www.youtube.com/watch?v=page7' },
+    );
+    assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/embed/frame7', 'frameUrl falls back before pageUrl');
+  }
+  // content-card URL still outranks every menu target.
+  {
+    const { handlers, calls } = runBackgroundFixture();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await handlers.clicked(
+      {
+        menuItemId: 'ytdl-audio',
+        linkUrl: 'https://www.youtube.com/watch?v=link9',
+        srcUrl: 'https://i.ytimg.com/vi/src9/hqdefault.jpg',
+        frameUrl: 'https://www.youtube.com/embed/frame9',
+        pageUrl: 'https://www.youtube.com/watch?v=page9',
+      },
+      { id: 9, url: 'https://www.youtube.com/watch?v=page9' },
+    );
+    assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/watch?v=ctx123', 'content-card URL outranks link/src/frame/page targets');
+  }
+}
+
 // --- content.css ---
 function testContentCss() {
   const css = readFile('extension/content.css');
@@ -356,9 +420,13 @@ function testContentStatic() {
   }
   assert.ok(src.includes('data-launching'), 'launching state');
   assert.ok(src.includes('viewBox') && src.includes('stroke-width'), 'inline SVG icons');
+  assert.ok(!src.includes('data-ytdl-ext'), 'no legacy userscript marker attribute');
+  assert.ok(!src.includes('ytdl-controls-style'), 'no legacy userscript style cleanup');
+  assert.ok(!src.includes("createElement('a'") && !src.includes('createElement("a"'), 'segments are buttons, not navigating links');
+  assert.ok(!src.toLowerCase().includes('userscript'), 'no userscript references in shipping content script');
 }
 
-// Minimal DOM fixture (mirrors tests/test_youtube_buttons.js) to run content.js.
+// Minimal DOM fixture to run content.js.
 function createContentFixture() {
   class El {
     constructor(tag) {
@@ -607,7 +675,7 @@ function testContentBehavior() {
   assert.equal(kept.url, 'https://www.youtube.com/watch?v=preview999', 'left-button pointerdown preserves the right-click context URL');
 }
 
-function testContentTampermonkeyCleanup() {
+function testContentPillMountsOnce() {
   const fx = createContentFixture();
   const topRow = fx.document.querySelector('ytd-watch-metadata').querySelector('#top-row');
   const extGroups = topRow.querySelectorAll('[data-ytdl-controls]');
@@ -735,6 +803,7 @@ function testPopup() {
   assert.ok(html.includes('aria-label="Audio format"'), 'audio format select is labelled');
   assert.ok(html.includes('class="select"'), 'selects use themed .select class');
   assert.ok(html.includes('value="best"') && html.includes('Native Opus / M4A (no conversion \u2014 best quality)'), 'best option verbatim');
+  assert.ok(html.includes('value="opus"'), 'popup offers forced opus format');
   assert.ok(html.includes('value="mp3"') && html.includes('MP3 (FFmpeg conversion for legacy devices)'), 'mp3 option verbatim');
   assert.ok(html.includes('value="m4a"') && html.includes('M4A / AAC (native when available)'), 'm4a option verbatim');
   assert.ok(html.includes('value="ogg"') && html.includes('Ogg Vorbis'), 'ogg option verbatim');
@@ -753,7 +822,13 @@ function testPopup() {
   assert.ok(html.includes('warn-note'), 'missing-rsgain note uses .warn-note');
   assert.ok(/id="rsgainMissingNote"[^>]*hidden/.test(html) || /hidden[^>]*id="rsgainMissingNote"/.test(html), 'rsgain note starts hidden');
   assert.ok(html.indexOf('id="rsgain"') < html.indexOf('id="rsgainMissingNote"'), 'rsgain note sits under the ReplayGain toggle');
-  assert.ok(html.indexOf('id="rsgainMissingNote"') < html.indexOf('id="audioFormat"'), 'rsgain note precedes the audio format section');
+  const flowOrder = ['id="audioFormat"', 'id="channelMode"', 'id="autoTag"', 'id="embedThumbnail"', 'id="rsgain"', 'id="downloadFolder"', 'id="longAudioEnabled"'];
+  let lastIndex = -1;
+  for (const marker of flowOrder) {
+    const at = html.indexOf(marker);
+    assert.ok(at > lastIndex, `${marker} follows the Operate flow order`);
+    lastIndex = at;
+  }
   assert.ok(css.includes('.select'), 'popup styles themed selects');
   assert.ok(css.includes('var(--input-bg)') && css.includes('var(--fg)') && css.includes('var(--line)') && css.includes('var(--focus)'), 'selects match input theme tokens');
   assert.ok(css.includes('.sub-row'), 'popup styles .sub-row');
@@ -767,15 +842,25 @@ function testPopup() {
   assert.ok(js.includes('mp3QualityRow'), 'popup toggles #mp3QualityRow');
   assert.ok(js.includes('audio_format'), 'popup sends audio_format in set_config');
   assert.ok(js.includes('mp3_quality'), 'popup sends mp3_quality in set_config');
+  assert.ok(js.includes('channel_mode'), 'popup sends channel_mode in set_config');
+  assert.ok(!js.includes('mono_audio'), 'popup no longer sends legacy mono_audio');
   assert.ok(html.includes('id="embedThumbnail"'), 'popup has #embedThumbnail toggle');
   assert.ok(html.includes('id="thumbnailJpg"'), 'popup has #thumbnailJpg toggle');
-  assert.ok(html.includes('id="monoAudio"'), 'popup has #monoAudio toggle');
+  assert.ok(html.includes('id="channelMode"'), 'popup has #channelMode selector');
+  assert.ok(html.includes('aria-label="Channels"'), 'channel selector is labelled');
+  assert.ok(html.includes('value="stereo"') && html.includes('Stereo'), 'stereo channel option');
+  assert.ok(html.includes('value="ask"') && html.includes('Ask'), 'ask channel option');
+  assert.ok(html.includes('value="mono"') && html.includes('Mono'), 'mono channel option');
+  assert.ok(!html.includes('id="monoAudio"'), 'legacy mono checkbox replaced by channel selector');
+  assert.ok(!html.includes('(on by default)') && !html.includes('(off by default)'), 'no on/off-by-default label suffixes');
+  assert.ok(html.includes('id="downloadFolder"'), 'popup has #downloadFolder dropdown');
+  assert.ok(html.indexOf('id="downloadFolder"') < html.indexOf('id="longAudioEnabled"'), 'long-audio routing sits underneath the download folder');
   assert.ok(html.includes('id="longAudioEnabled"'), 'popup has #longAudioEnabled toggle');
   assert.ok(html.includes('id="longAudioMinutes"'), 'popup has #longAudioMinutes input');
   assert.ok(html.includes('id="longAudioDir"'), 'popup has #longAudioDir input');
   assert.ok(js.includes('embed_thumbnail'), 'popup sends embed_thumbnail in set_config');
   assert.ok(js.includes('thumbnail_jpg'), 'popup sends thumbnail_jpg in set_config');
-  assert.ok(js.includes('mono_audio'), 'popup sends mono_audio in set_config');
+  assert.ok(js.includes('channel_mode'), 'popup sends channel_mode in set_config');
   assert.ok(js.includes('long_audio_enabled'), 'popup sends long_audio_enabled in set_config');
   assert.ok(js.includes('pushConfig') || js.includes('audio_format'), 'popup groups audio prefs in pushConfig');
   assert.ok(js.includes('rsgain is not installed'), 'rsgain guard explains the missing binary');
@@ -809,27 +894,16 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'monoAudio', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'customDir', 'effectiveDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
-  const folderRadios = ['keep', 'music', 'downloads', 'custom'].map((value) => ({
-    value,
-    checked: false,
-    listeners: {},
-    addEventListener(type, fn) {
-      if (!this.listeners[type]) this.listeners[type] = [];
-      this.listeners[type].push(fn);
-    },
-  }));
   const document = {
     getElementById: (id) => mockEl(id),
     querySelector: (sel) => {
       if (sel === '.panel') return { setAttribute() {}, getAttribute() { return null; } };
-      if (sel === 'input[name="folder"]:checked') return folderRadios.find((r) => r.checked) || null;
       return null;
     },
     querySelectorAll: (sel) => {
-      if (sel === 'input[name="folder"]') return folderRadios;
       return [];
     },
     createElement: (tag) => mockEl(`created-${tag}-${elements.size}`),
@@ -857,7 +931,7 @@ function createPopupFixture(pingResponse) {
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(EXT, 'popup.js'), 'utf8'), context, { filename: 'popup.js' });
-  return { document, elements, folderRadios, nativeCalls, triggerReady: () => { if (document._domReady) document._domReady(); } };
+  return { document, elements, nativeCalls, triggerReady: () => { if (document._domReady) document._domReady(); } };
 }
 
 async function testPopupUpdateNote() {
@@ -1010,6 +1084,84 @@ async function testPopupAudioFormatAndRsgainGuard() {
   }
 }
 
+async function testPopupChannelAndFolder() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function fire(el, type) {
+    const fns = (el.listeners && el.listeners[type]) || [];
+    for (const fn of fns) await fn({ target: el });
+  }
+  const fx = createPopupFixture({
+    ok: true,
+    version: '2.4.0',
+    config: { auto_tag: true, rsgain: false, audio_format: 'best', mp3_quality: 'V0', channel_mode: 'ask', download_dir: '~/Music/Youtube Downloads' },
+    deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
+    effective_download_dir: '/home/user/Music/Youtube Downloads',
+    ytdlp_config_exists: true,
+    yt_dlp_status: { outdated: false },
+  });
+  fx.triggerReady();
+  await tick(30);
+  assert.equal(fx.elements.get('channelMode').value, 'ask', 'renderConnected populates channelMode');
+  assert.equal(fx.elements.get('downloadFolder').value, 'music', 'renderConnected maps download_dir to the music preset');
+  assert.equal(fx.elements.get('customDir').hidden, true, 'custom dir hidden for preset folders');
+  fx.nativeCalls.length = 0;
+  const channelEl = fx.elements.get('channelMode');
+  channelEl.value = 'mono';
+  await fire(channelEl, 'change');
+  await tick(10);
+  const channelLast = [...fx.nativeCalls].reverse().find((c) => c.msg && c.msg.action === 'set_config' && c.msg.config && c.msg.config.channel_mode === 'mono');
+  assert.ok(channelLast, 'channel change sends set_config with channel_mode mono');
+  assert.ok(!('mono_audio' in (channelLast.msg.config || {})), 'channel change never sends legacy mono_audio');
+  const folderEl = fx.elements.get('downloadFolder');
+  folderEl.value = 'custom';
+  await fire(folderEl, 'change');
+  await tick(10);
+  assert.equal(fx.elements.get('customDir').hidden, false, 'custom dir revealed for custom folder');
+  fx.elements.get('customDir').value = '/home/user/Podcasts';
+  await fire(fx.elements.get('customDir'), 'change');
+  await tick(10);
+  const folderLast = [...fx.nativeCalls].reverse().find((c) => c.msg && c.msg.action === 'set_config' && c.msg.config && 'download_dir' in c.msg.config);
+  assert.ok(folderLast, 'custom folder change sends set_config with download_dir');
+  assert.equal(folderLast.msg.config.download_dir, '/home/user/Podcasts', 'custom download_dir persisted');
+}
+
+async function testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function fire(el, type) {
+    const fns = (el.listeners && el.listeners[type]) || [];
+    for (const fn of fns) await fn({ target: el });
+  }
+
+  for (const invalid of ['0', '-5', 'not-a-number', '1.5']) {
+    const fx = createPopupFixture({
+      ok: true,
+      version: '2.4.0',
+      config: { audio_format: 'best', channel_mode: 'stereo', long_audio_minutes: 30 },
+      deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
+      yt_dlp_status: { outdated: false },
+    });
+    fx.triggerReady();
+    await tick(20);
+    fx.nativeCalls.length = 0;
+    fx.elements.get('longAudioMinutes').value = invalid;
+    fx.elements.get('audioFormat').value = 'flac';
+    fx.elements.get('channelMode').value = 'mono';
+    fx.elements.get('longAudioEnabled').checked = true;
+    await fire(fx.elements.get('audioFormat'), 'change');
+    await tick(10);
+
+    const saved = [...fx.nativeCalls].reverse().find(
+      (call) => call.msg && call.msg.action === 'set_config'
+    );
+    assert.ok(saved, `invalid ${invalid} still allows the batch config save`);
+    assert.equal(saved.msg.config.long_audio_minutes, 30, `${invalid} is normalized to 30`);
+    assert.equal(saved.msg.config.audio_format, 'flac', 'the codec selection is retained');
+    assert.equal(saved.msg.config.channel_mode, 'mono', 'the channel selection is retained');
+    assert.equal(saved.msg.config.long_audio_enabled, true, 'the toggle is retained');
+    assert.equal(fx.elements.get('longAudioMinutes').value, '30', 'the input is corrected');
+  }
+}
+
 function testSignScript() {
   const sh = readFile('scripts/sign-xpi.sh');
   assertAsciiNoEmoji('scripts/sign-xpi.sh', sh);
@@ -1136,14 +1288,18 @@ async function main() {
   await testBackgroundLinkAndPageFallbacks();
   await testBackgroundErrorResponseSkipsOnboarding();
   await testBackgroundStaticMenus();
+  await testBackgroundRemoveAllOrdering();
+  await testBackgroundSrcAndFrameFallbacks();
   testContentCss();
   testContentStatic();
   testContentBehavior();
   await testContentGestureState();
-  testContentTampermonkeyCleanup();
+  testContentPillMountsOnce();
   testPopup();
   await testPopupUpdateNote();
   await testPopupAudioFormatAndRsgainGuard();
+  await testPopupChannelAndFolder();
+  await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   testSignScript();
   testBuildScript();
   console.log('Firefox extension fixture tests passed');

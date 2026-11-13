@@ -45,7 +45,7 @@ class WindowsConfigTests(unittest.TestCase):
 
             self.assertEqual(ytdl_config.config_path(env, "nt"), expected)
             saved = ytdl_config.save_config(
-                {"download_dir": None, "auto_tag": False, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"},
+                {"download_dir": None, "auto_tag": False, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"},
                 env,
                 "nt",
             )
@@ -60,7 +60,7 @@ class WindowsConfigTests(unittest.TestCase):
                     "mp3_quality": "V0",
                     "embed_thumbnail": True,
                     "thumbnail_jpg": False,
-                    "mono_audio": False,
+                    "channel_mode": "stereo",
                     "long_audio_enabled": False,
                     "long_audio_minutes": 30,
                     "long_audio_dir": "~/Podcasts",
@@ -470,7 +470,7 @@ class WindowsInstallerTests(unittest.TestCase):
                     "mp3_quality": "V0",
                     "embed_thumbnail": True,
                     "thumbnail_jpg": False,
-                    "mono_audio": False,
+                    "channel_mode": "stereo",
                     "long_audio_enabled": False,
                     "long_audio_minutes": 30,
                     "long_audio_dir": "~/Podcasts",
@@ -515,7 +515,7 @@ class WindowsInstallerTests(unittest.TestCase):
                     "mp3_quality": "V0",
                     "embed_thumbnail": True,
                     "thumbnail_jpg": False,
-                    "mono_audio": False,
+                    "channel_mode": "stereo",
                     "long_audio_enabled": False,
                     "long_audio_minutes": 30,
                     "long_audio_dir": "~/Podcasts",

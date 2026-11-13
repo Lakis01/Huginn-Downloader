@@ -36,7 +36,7 @@ class ConfigTests(unittest.TestCase):
                 "mp3_quality": "V0",
                 "embed_thumbnail": True,
                 "thumbnail_jpg": False,
-                "mono_audio": False,
+                "channel_mode": "stereo",
                 "long_audio_enabled": False,
                 "long_audio_minutes": 30,
                 "long_audio_dir": "~/Podcasts",
@@ -70,7 +70,7 @@ class ConfigTests(unittest.TestCase):
                 "mp3_quality": "V0",
                 "embed_thumbnail": True,
                 "thumbnail_jpg": False,
-                "mono_audio": False,
+                "channel_mode": "stereo",
                 "long_audio_enabled": False,
                 "long_audio_minutes": 30,
                 "long_audio_dir": "~/Podcasts",
@@ -86,7 +86,7 @@ class ConfigTests(unittest.TestCase):
     def test_audio_format_and_mp3_quality_have_supported_defaults(self):
         self.assertEqual(
             getattr(ytdl_config, "SUPPORTED_AUDIO_FORMATS", None),
-            ("best", "mp3", "m4a", "ogg", "flac"),
+            ("best", "opus", "mp3", "m4a", "ogg", "flac"),
         )
         self.assertEqual(
             getattr(ytdl_config, "SUPPORTED_MP3_QUALITIES", None),
@@ -113,7 +113,7 @@ class ConfigTests(unittest.TestCase):
                 "mp3_quality": "320k",
                 "embed_thumbnail": True,
                 "thumbnail_jpg": False,
-                "mono_audio": False,
+                "channel_mode": "stereo",
                 "long_audio_enabled": False,
                 "long_audio_minutes": 30,
                 "long_audio_dir": "~/Podcasts",
@@ -192,12 +192,13 @@ class ConfigTests(unittest.TestCase):
     def test_new_pipeline_defaults_and_legacy_mp3_alias(self):
         import ytdl_config
         self.assertEqual(ytdl_config.SUPPORTED_MP3_QUALITIES, ("V0", "320k", "V2", "V5"))
+        self.assertEqual(ytdl_config.SUPPORTED_AUDIO_FORMATS, ("best", "opus", "mp3", "m4a", "ogg", "flac"))
         with tempfile.TemporaryDirectory() as tmp:
             env = {"HOME": tmp}
             config = load_config(env)
             self.assertTrue(config["embed_thumbnail"])
             self.assertFalse(config["thumbnail_jpg"])
-            self.assertFalse(config["mono_audio"])
+            self.assertEqual(config["channel_mode"], "stereo")
             self.assertFalse(config["long_audio_enabled"])
             self.assertEqual(config["long_audio_minutes"], 30)
             self.assertEqual(config["long_audio_dir"], "~/Podcasts")
@@ -206,12 +207,14 @@ class ConfigTests(unittest.TestCase):
             import json
             path.write_text(json.dumps({"mp3_quality": "128k"}))
             self.assertEqual(load_config(env)["mp3_quality"], "V5")
-            save_config({"audio_format": "mp3", "mp3_quality": "V5", "embed_thumbnail": False, "thumbnail_jpg": True, "mono_audio": True, "long_audio_enabled": True, "long_audio_minutes": 45, "long_audio_dir": "~/Audiobooks"}, env)
+            save_config({"audio_format": "opus", "mp3_quality": "128k", "embed_thumbnail": False, "thumbnail_jpg": True, "channel_mode": "mono", "long_audio_enabled": True, "long_audio_minutes": 45, "long_audio_dir": "~/Audiobooks"}, env)
             reloaded = load_config(env)
+            self.assertEqual(reloaded["audio_format"], "opus")
             self.assertEqual(reloaded["mp3_quality"], "V5")
             self.assertFalse(reloaded["embed_thumbnail"])
             self.assertTrue(reloaded["thumbnail_jpg"])
-            self.assertTrue(reloaded["mono_audio"])
+            self.assertEqual(reloaded["channel_mode"], "mono")
+            self.assertNotIn("mono_audio", reloaded)
             self.assertTrue(reloaded["long_audio_enabled"])
             self.assertEqual(reloaded["long_audio_minutes"], 45)
             self.assertEqual(reloaded["long_audio_dir"], "~/Audiobooks")
@@ -219,6 +222,52 @@ class ConfigTests(unittest.TestCase):
                 save_config({"long_audio_minutes": 0}, env)
             with self.assertRaises((TypeError, ValueError)):
                 save_config({"long_audio_dir": "   "}, env)
+
+    def test_legacy_mono_audio_migrates_and_channel_mode_takes_precedence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            path = config_path(env)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"mono_audio": True, "audio_format": "mp3", "mp3_quality": "128k"}))
+
+            migrated = load_config(env)
+            save_config(migrated, env)
+            persisted = json.loads(path.read_text())
+            path.write_text(json.dumps({"mono_audio": True, "channel_mode": "ask"}))
+            overridden = load_config(env)
+
+        self.assertEqual(migrated["channel_mode"], "mono")
+        self.assertEqual(migrated["audio_format"], "mp3")
+        self.assertEqual(migrated["mp3_quality"], "V5")
+        self.assertEqual(persisted["channel_mode"], "mono")
+        self.assertNotIn("mono_audio", persisted)
+        self.assertEqual(overridden["channel_mode"], "ask")
+
+    def test_legacy_false_mono_audio_migrates_to_stereo_and_old_alias_saves_as_v5(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            path = config_path(env)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"mono_audio": False}))
+
+            self.assertEqual(load_config(env)["channel_mode"], "stereo")
+            save_config({"mp3_quality": "128k"}, env)
+            persisted = json.loads(path.read_text())
+
+        self.assertEqual(persisted["mp3_quality"], "V5")
+        self.assertNotIn("mono_audio", persisted)
+
+    def test_save_config_validates_channel_mode_and_new_audio_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            for value, error in (("surround", ValueError), (True, TypeError), (None, TypeError)):
+                with self.subTest(value=value), self.assertRaises(error):
+                    save_config({"channel_mode": value}, env)
+            save_config({"audio_format": "opus", "channel_mode": "ask"}, env)
+            config = load_config(env)
+
+        self.assertEqual(config["audio_format"], "opus")
+        self.assertEqual(config["channel_mode"], "ask")
 
 
 if __name__ == "__main__":

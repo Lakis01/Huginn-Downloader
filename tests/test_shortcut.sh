@@ -69,16 +69,11 @@ case " $* " in
     *) printf '%s' "${CLIPBOARD_SELECTION:-}" ;;
 esac
 STUB
-cat > "$TMP/stubs/xdg-mime" <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$@" > "$XDG_MIME_ARGS"
-STUB
 chmod +x "$TMP/stubs/"*
 
 export PATH="$TMP/stubs:$PATH"
 export CALL_ARGS="$TMP/call-args"
 export CALL_TERMINAL="$TMP/call-terminal"
-export XDG_MIME_ARGS="$TMP/xdg-mime-args"
 
 run_shortcut() {
     rm -f -- "$CALL_ARGS"
@@ -176,11 +171,9 @@ for unsafe_url in \
 done
 pass 'rejects unsafe schemes, userinfo, whitespace, and plain text'
 
-uri_url='https://www.youtube.com/watch?v=uri123&list=PL456'
-uri="yt-dlp://cut?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Duri123%26list%3DPL456"
-run_shortcut --uri "$uri"
-assert_launch cut "$uri_url" 'URI decoding'
-pass 'decodes supported yt-dlp URI mode and URL'
+run_shortcut audio --bogus "$valid_url"
+assert_launch audio "$valid_url" 'option-like first argument fallback'
+pass 'treats unknown option-like arguments as invalid candidates and uses the next valid URL'
 
 symlink_home="$TMP/symlink-home"
 outside_directory="$TMP/outside-destination"
@@ -196,39 +189,15 @@ fi
 assert_file_contains "$TMP/symlink.out" 'is a directory' 'symlink destination conflict report'
 pass 'installer rejects symlink-to-directory destinations before writing through them'
 
-for malformed_uri in \
-    'yt-dlp://cut?url=%ZZ' \
-    'yt-dlp://audio?url=https%3A%2F%2Fexample.invalid%2Fwatch' \
-    'yt-dlp://unknown?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dbad'; do
-    if PRIMARY_SELECTION=$other_url \
-        MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
-        CLIPBOARD_SELECTION="$valid_url" \
-        run_shortcut --uri "$malformed_uri" > "$TMP/malformed.out" 2>&1; then
-            fail "malformed explicit URI unexpectedly succeeded: $malformed_uri"
-    fi
-    [[ ! -e "$CALL_ARGS" ]] || fail "malformed explicit URI launched Konsole: $malformed_uri"
-    assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'explicit URI error report'
-done
-for malformed_uri in 'yt-dlp://cut?url=%ZZ' 'yt-dlp://bad-mode?url=https%3A%2F%2Fwww.youtube.com'; do
-    if PRIMARY_SELECTION=$other_url \
-        MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
-        CLIPBOARD_SELECTION="$valid_url" \
-        run_shortcut "$malformed_uri" > "$TMP/malformed.out" 2>&1; then
-            fail "malformed custom-scheme URI unexpectedly succeeded: $malformed_uri"
-    fi
-    [[ ! -e "$CALL_ARGS" ]] || fail "malformed custom URI launched Konsole: $malformed_uri"
-done
-pass 'rejects malformed explicit and custom-scheme URIs without trying valid fallbacks'
+run_shortcut audio 'gopher://example.com/x' "$valid_url"
+assert_launch audio "$valid_url" 'unsupported-scheme first candidate fallback'
+pass 'unsupported-scheme first candidate falls through to the next valid URL'
 
-if PRIMARY_SELECTION=$other_url \
+PRIMARY_SELECTION=$other_url \
     MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
-    CLIPBOARD_SELECTION="$valid_url" \
-    run_shortcut --uri '' > "$TMP/malformed.out" 2>&1; then
-    fail 'empty explicit URI unexpectedly succeeded'
-fi
-[[ ! -e "$CALL_ARGS" ]] || fail 'empty explicit URI launched Konsole'
-assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'empty URI error report'
-pass 'empty explicit URI remains fail-closed without trying valid fallbacks'
+    CLIPBOARD_SELECTION="$valid_url" run_shortcut audio 'not a URL' 'gopher://example.com/x'
+assert_launch audio "$other_url" 'all-invalid candidates fallback'
+pass 'all-invalid candidates fall through to the primary selection'
 
 shell_payload="https://www.youtube.com/watch?v=1&title=O'Brien&next=\$(touch\${IFS}$TMP/injected)"
 run_shortcut video "$shell_payload"
@@ -259,25 +228,12 @@ assert_launch video "$second_payload" 'second candidate shell metacharacters'
 [[ ! -e "$TMP/injected" ]] || fail 'second-candidate URL data was evaluated by a shell'
 pass 'second candidate preserves apostrophes and ampersands without evaluation'
 
-if PRIMARY_SELECTION=$other_url \
-    MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
-    CLIPBOARD_SELECTION="$valid_url" \
-    run_shortcut audio 'yt-dlp://cut?url=%ZZ' "$valid_url" > "$TMP/malformed.out" 2>&1; then
-    fail 'invalid custom-scheme first candidate unexpectedly succeeded'
+if PRIMARY_SELECTION='not a URL' MPRIS_OUTPUT='not a URL' CLIPBOARD_SELECTION='file:///etc/passwd' \
+    run_shortcut audio 'not a URL' 'gopher://example.com/x' > "$TMP/invalid.out" 2>&1; then
+    fail 'all-invalid candidates unexpectedly succeeded'
 fi
-[[ ! -e "$CALL_ARGS" ]] || fail 'invalid custom-scheme first candidate launched Konsole'
-assert_file_contains "$TMP/malformed.out" 'Invalid yt-dlp URI' 'candidate URI error report'
-pass 'invalid custom-scheme first candidate remains fail-closed'
-
-if PRIMARY_SELECTION=$other_url \
-    MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
-    CLIPBOARD_SELECTION="$valid_url" \
-    run_shortcut audio 'not a URL' 'yt-dlp://cut?url=%ZZ' > "$TMP/malformed-second.out" 2>&1; then
-    fail 'invalid custom-scheme second candidate unexpectedly succeeded'
-fi
-[[ ! -e "$CALL_ARGS" ]] || fail 'invalid custom-scheme second candidate launched Konsole'
-assert_file_contains "$TMP/malformed-second.out" 'Invalid yt-dlp URI' 'second candidate URI error report'
-pass 'malformed second custom-scheme candidate remains fail-closed after an invalid first'
+[[ ! -e "$CALL_ARGS" ]] || fail 'all-invalid candidates launched a terminal'
+pass 'all-invalid candidates remain fail-closed when no fallback URL is valid'
 
 PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='QString "xesam:url": "https://www.youtube.com/watch?v=mpris123"' \
     CLIPBOARD_SELECTION="$valid_url" run_shortcut video
@@ -402,8 +358,7 @@ pass 'uses xsel after xclip is unavailable'
 for desktop in \
     "$ROOT/desktop/net.local.yt-dlp-shortcut.sh.desktop" \
     "$ROOT/desktop/net.local.yt-dlp-shortcut.sh-2.desktop" \
-    "$ROOT/desktop/net.local.yt-dlp-shortcut.sh-3.desktop" \
-    "$ROOT/desktop/net.local.yt-dlp-uri.desktop"; do
+    "$ROOT/desktop/net.local.yt-dlp-shortcut.sh-3.desktop"; do
     [[ -f "$desktop" ]] || fail "missing staged desktop entry: $desktop"
     desktop-file-validate "$desktop" || fail "invalid desktop entry: $desktop"
 done
@@ -413,7 +368,6 @@ for desktop in \
     "$ROOT/desktop/net.local.yt-dlp-shortcut.sh-3.desktop"; do
     assert_file_contains "$desktop" 'Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh ' 'absolute launcher Exec path'
 done
-assert_file_contains "$ROOT/desktop/net.local.yt-dlp-uri.desktop" 'MimeType=x-scheme-handler/yt-dlp;' 'URI scheme registration'
 pass 'staged desktop entries validate and use absolute launcher paths'
 
 dry_home="$TMP/dry-home"
@@ -429,7 +383,6 @@ assert_file_contains "$TMP/dry-run.out" '.config/mozilla/native-messaging-hosts/
 assert_file_contains "$TMP/dry-run.out" 'dist/firefox-youtube-downloader.xpi' 'installer dry-run lists XPI target'
 [[ ! -e "$dry_home/.local/bin" ]] || fail 'default installer invocation created the bin directory'
 [[ ! -e "$dry_home/.local/share/applications" ]] || fail 'default installer invocation created the applications directory'
-[[ ! -e "$XDG_MIME_ARGS" ]] || fail 'default installer invocation registered a MIME handler'
 pass 'installer defaults to a no-write dry run'
 
 install_home="$TMP/install-home"
@@ -447,19 +400,7 @@ assert_eq 'pre-existing shortcut' "$(<"$backup")" 'backup preserves the prior fi
 [[ -f "$install_home/.local/bin/ytdl_version.py" ]] || fail 'version helper was not installed'
 assert_file_contains "$install_home/.local/share/applications/net.local.yt-dlp-shortcut.sh.desktop" \
     "Exec=$install_home/.local/bin/yt-dlp-shortcut.sh audio" 'installed desktop Exec path rewrite'
-assert_eq 'default' "$(sed -n '1p' "$XDG_MIME_ARGS")" 'xdg-mime subcommand'
-assert_eq 'net.local.yt-dlp-uri.desktop' "$(sed -n '2p' "$XDG_MIME_ARGS")" 'xdg-mime desktop id'
-assert_eq 'x-scheme-handler/yt-dlp' "$(sed -n '3p' "$XDG_MIME_ARGS")" 'xdg-mime scheme'
-pass 'installer backs up replaced files, installs staged sources, and registers the URI handler'
-
-conflict_home="$TMP/conflict-home"
-mkdir -p "$conflict_home/.local/share/applications/net.local.yt-dlp-uri.desktop"
-if HOME="$conflict_home" "$INSTALLER" --install > "$TMP/conflict.out" 2>&1; then
-    fail 'installer unexpectedly accepted a directory where the URI desktop file belongs'
-fi
-[[ ! -e "$conflict_home/.local/bin" ]] || fail 'installer wrote binaries before detecting a destination conflict'
-assert_file_contains "$TMP/conflict.out" 'is a directory' 'installer destination conflict report'
-pass 'installer detects conflicting destination directories before making changes'
+pass 'installer backs up replaced files and installs staged sources without a URI handler'
 
 assert_installer_preflight_conflict() {
     local label=$1 home=$2 conflict_destination=$3 xdg_config_home=${4:-}
@@ -540,7 +481,7 @@ assert config == {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
@@ -641,7 +582,7 @@ assert config == {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
@@ -669,7 +610,7 @@ assert config["audio_format"] == "best", config
 assert config["mp3_quality"] == "V0", config
 assert config["embed_thumbnail"] is True, config
 assert config["thumbnail_jpg"] is False, config
-assert config["mono_audio"] is False, config
+assert config["channel_mode"] == "stereo", config
 PY
 HOME="$existing_ytdlp_home" "$INSTALLER" --install --yes \
     --download-dir=ytdlp-default --auto-tag=true --rsgain=true > "$TMP/existing-ytdlp-overrides.out"
@@ -687,7 +628,7 @@ assert config == {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
@@ -698,7 +639,6 @@ cmp -s "$TMP/existing-ytdlp.orig" "$existing_ytdlp_home/.config/yt-dlp/config" \
 pass 'existing yt-dlp config remains byte-identical and ytdlp-default plus explicit flags are honored'
 
 deps_home="$TMP/deps-home"
-rm -f -- "$XDG_MIME_ARGS"
 HOME="$deps_home" "$INSTALLER" --check-deps > "$TMP/check-deps.out"
 assert_file_contains "$TMP/check-deps.out" 'Desktop session:' '--check-deps desktop detection'
 assert_file_contains "$TMP/check-deps.out" 'Display server:' '--check-deps display detection'
@@ -706,7 +646,6 @@ assert_file_contains "$TMP/check-deps.out" 'Debian 13.7 (GNOME)' '--check-deps D
 assert_file_contains "$TMP/check-deps.out" 'LMDE 7 (Cinnamon)' '--check-deps LMDE instructions'
 [[ ! -e "$deps_home/.local" && ! -e "$deps_home/.config" && ! -e "$deps_home/.mozilla" ]] \
     || fail '--check-deps wrote files into HOME'
-[[ ! -e "$XDG_MIME_ARGS" ]] || fail '--check-deps registered a MIME handler'
 pass '--check-deps detects session prerequisites without writing files'
 
 macos_stubs="$TMP/macos-stubs"
@@ -727,7 +666,6 @@ macos_manifest="$macos_home/Library/Application Support/Mozilla/NativeMessagingH
     || fail 'macOS installer also wrote the Linux native-messaging manifest'
 [[ ! -e "$macos_home/.local/share/applications" ]] \
     || fail 'macOS installer staged Linux desktop entries'
-[[ ! -e "$XDG_MIME_ARGS" ]] || fail 'macOS installer registered a Linux MIME handler'
-pass 'macOS check-deps and install use the Library manifest without Linux desktop/MIME staging'
+pass 'macOS check-deps and install use the Library manifest without Linux desktop staging'
 
 printf '1..%s\n' "$PASS"

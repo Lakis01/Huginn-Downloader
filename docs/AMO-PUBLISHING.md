@@ -141,11 +141,11 @@ it to AMO's review and content policies.
 
    | Permission | Suggested explanation for the form |
    | --- | --- |
-   | `nativeMessaging` | Sends a user-selected mode and YouTube URL to the user's locally installed companion, receives its settings/status, and starts a local `yt-dlp` download. It is the extension's only connection to the companion; the companion is installed and run by the user. |
-   | `menus` | Adds the YouTube Downloader submenu and its Audio, Video, and Cut Audio actions to Firefox's right-click menu. |
-   | `activeTab` | Reads the active page URL only in response to a user action so the extension can choose the current YouTube page when no link/card URL is available. It is not used to inspect unrelated browsing history. |
-   | `*://*.youtube.com/*`, `*://youtube.com/*` | Loads the download controls on YouTube pages and allows the context action to use YouTube page URLs. The content script is limited to YouTube pages. |
-   | `*://*.youtu.be/*`, `*://youtu.be/*` | Permits short YouTube links in browser context actions and validates them before passing a user-selected URL to the local companion. |
+   | `nativeMessaging` | After an explicit user action, sends the selected mode and safe HTTP(S) URL to the user's locally installed companion and receives its settings/status. The local companion runs `yt-dlp` on the user's computer; the extension does not send URLs to a project server. |
+   | `menus` | Adds Audio, Video, and Cut Audio actions to Firefox's right-click context menu. A user may explicitly select a safe HTTP(S) page or link on any site. |
+   | `activeTab` | Reads the active page URL only after the user invokes a context action and only when no link/card URL is available. The user-selected URL may be from any site; this permission is not used to inspect browsing history. |
+   | `*://*.youtube.com/*`, `*://youtube.com/*` | Loads the content script and watch-page download controls on YouTube pages. These controls remain scoped to `youtube.com`; the context menu can also pass a user-selected safe HTTP(S) URL from another site. |
+   | `*://*.youtu.be/*`, `*://youtu.be/*` | Supports short YouTube links in context actions. This host access does not expand the content script beyond `youtube.com`; context actions on other safe HTTP(S) sites are handled through the user-selected context URL. |
 
    Enter these explanations in AMO's permission-purpose fields, adjusting
    only if the manifest or implementation changes. Do not claim that a
@@ -154,9 +154,10 @@ it to AMO's review and content policies.
    collected** (or the equivalent option that means none). The Gecko manifest
    declares `data_collection_permissions.required: ["none"]`. The add-on has
    no analytics, advertising, account, or telemetry service and does not send
-   browsing data to its author. A URL and chosen mode cross Firefox's Native
-   Messaging boundary to the user's own companion only after the user selects
-   a download action; `yt-dlp` then makes the media request from that computer.
+   browsing data to its author or any project server. A user-selected safe
+   HTTP(S) URL and chosen mode cross Firefox's Native Messaging boundary to the
+   user's own companion only after an explicit click; the local companion and
+   `yt-dlp` handle the URL and make the media request from that computer.
    Re-answer if a future version adds analytics, cloud services, or other
    collection.
 7. Submit for review. Respond to AMO reviewer questions in the developer
@@ -187,8 +188,10 @@ Unlisted release is installed from its signed XPI.
   downloader, ships no media-handling binary, sends nothing to a
   project-owned server, and declares `data_collection_permissions.required:
   ["none"]`. Reviewers evaluate the XPI on what it does — pass a
-  user-selected mode and URL to the user's own companion — which is why
-  bridges of this shape survive review.
+  user-selected mode and URL to the user's own companion. This architecture
+  may be reviewable under current AMO policy, but Mozilla independently
+  reviews each submission and can reject, require updates to, or remove it;
+  do not assume these examples guarantee approval.
 - **Why keeping `yt-dlp` external to the `.xpi` is essential.** Never bundle
   `yt-dlp`, FFmpeg, `rsgain`, or Python libraries inside the signed package.
   The XPI must remain a thin client: any downloading, transcoding, or tagging
@@ -204,15 +207,17 @@ Unlisted release is installed from its signed XPI.
   site the add-on interoperates with without claiming affiliation. The same
   rule applies to icons, screenshots, and descriptions: describe compatibility
   ("works on YouTube pages") rather than adopting YouTube branding.
-- **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases cannot be
-  broken by store delisting.** Unlisted signing produces a Mozilla signature
+- **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases are still
+  subject to Mozilla policy.** Unlisted signing produces a Mozilla signature
   without a catalog page, and the signed artifact is attached to a GitHub
-  Release that this project controls. If a Listed catalog page were ever
-  removed or delisted, installs from the Release-attached
-  `dist/firefox-youtube-downloader-signed.xpi` keep working: the signature is
-  already issued and verified locally by Firefox, and distribution never
-  depended on the store page. Keep Listed and Unlisted versions clearly
-  distinguished so a store action can never silently break direct installs.
+  Release that this project controls — but unlisted signing only means no
+  public catalog listing; signing does not grant policy immunity. Mozilla may
+  revoke or blocklist signatures or prevent installs under policy or security
+  action, and GitHub hosting doesn't override AMO/Firefox decisions. If a
+  Listed catalog page were ever removed, Release-attached
+  `dist/firefox-youtube-downloader-signed.xpi` installs are not automatically
+  protected: keep Listed and Unlisted versions clearly distinguished and do
+  not promise users that direct installs cannot be affected.
 
 ## Release checklist
 

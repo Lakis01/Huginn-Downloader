@@ -85,7 +85,6 @@ DESKTOP_FILES=(
     net.local.yt-dlp-shortcut.sh.desktop
     net.local.yt-dlp-shortcut.sh-2.desktop
     net.local.yt-dlp-shortcut.sh-3.desktop
-    net.local.yt-dlp-uri.desktop
 )
 
 for file in "${BIN_FILES[@]}"; do
@@ -121,7 +120,7 @@ if $CHECK_DEPS; then
     printf 'Desktop session: %s (%s)\n' "$desktop_label" "$desktop_session"
     printf 'Display server: %s\n' "$display_server"
     printf 'Prerequisite tools (present / missing):\n'
-    for tool in yt-dlp ffmpeg rsgain python3 node nodejs konsole ptyxis kgx gnome-terminal xfce4-terminal x-terminal-emulator notify-send wl-paste xclip xsel playerctl qdbus6 qdbus xdg-mime desktop-file-validate; do
+    for tool in yt-dlp ffmpeg rsgain python3 node nodejs konsole ptyxis kgx gnome-terminal xfce4-terminal x-terminal-emulator notify-send wl-paste xclip xsel playerctl qdbus6 qdbus desktop-file-validate; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '  present: %s (%s)\n' "$tool" "$(command -v "$tool")"
         else
@@ -134,8 +133,8 @@ if $CHECK_DEPS; then
         printf '  missing: Python libraries mutagen, Pillow\n'
     fi
     printf '\nSuggested dependencies (review; this command is not run):\n'
-    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils\n'
-    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools xdg-utils desktop-file-utils\n'
+    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools desktop-file-utils\n'
+    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools desktop-file-utils\n'
     printf 'GNOME usually includes kgx or ptyxis; install gnome-terminal only if desired. Clipboard tools: wl-clipboard on Wayland, xclip or xsel on X11.\n'
     exit 0
 fi
@@ -161,7 +160,7 @@ PLUGIN_CONFIG_EXISTS=false
 [[ -e $CONFIG_DEST || -L $CONFIG_DEST ]] && PLUGIN_CONFIG_EXISTS=true
 
 if ! $INSTALL; then
-    printf 'Dry run: no files, configuration, MIME registrations, or build artifacts will be changed.\n'
+    printf 'Dry run: no files, configuration, or build artifacts will be changed.\n'
     for file in "${BIN_FILES[@]}"; do
         printf '  %s -> %s/%s\n' "$BIN_SOURCE/$file" "$BIN_TARGET" "$file"
     done
@@ -175,9 +174,6 @@ if ! $INSTALL; then
         printf '  Write native-messaging manifest: %s\n' "$XDG_NATIVE_MANIFEST"
     fi
     printf '  Build %s\n' "$XPI_TARGET"
-    if ! $IS_MACOS; then
-        printf '  Register x-scheme-handler/yt-dlp -> net.local.yt-dlp-uri.desktop\n'
-    fi
     printf '  Config: %s\n' "$CONFIG_DEST"
     if $PLUGIN_CONFIG_EXISTS; then
         printf '    Preserve existing plugin config unless an explicit option is supplied.\n'
@@ -219,9 +215,6 @@ fi
 check_destination "$CONFIG_DEST"
 check_destination "$XPI_TARGET"
 
-if ! $IS_MACOS; then
-    command -v xdg-mime >/dev/null 2>&1 || { printf 'xdg-mime is required to register the URI handler.\n' >&2; exit 1; }
-fi
 command -v python3 >/dev/null 2>&1 || { printf 'python3 is required to install configuration and stage desktop entries.\n' >&2; exit 1; }
 if $IS_MACOS; then
     PYTHON_BIN=$(command -v python3)
@@ -420,10 +413,4 @@ PY
 install_source "$manifest_template" "$HOME_NATIVE_MANIFEST" 644
 if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     install_source "$manifest_template" "$XDG_NATIVE_MANIFEST" 644
-fi
-
-if ! $IS_MACOS; then
-    HOME="$TARGET_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME_RESOLVED" \
-        xdg-mime default net.local.yt-dlp-uri.desktop x-scheme-handler/yt-dlp
-    printf 'Registered x-scheme-handler/yt-dlp with net.local.yt-dlp-uri.desktop.\n'
 fi

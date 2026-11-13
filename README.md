@@ -10,8 +10,8 @@ This runs **the exact same `yt-dlp` + `ffmpeg` pipeline already running on
 countless YouTube downloader websites** — but locally on your own machine, so it
 is **more accessible** (integrated into the YouTube UI, right-click context
 menu, and set-up-able global keyboard shortcuts), gives you **full control over
-codecs and bitrates** (native Opus/M4A, MP3 `V0`/`V2`/`V5`/`320k`, M4A, Ogg,
-FLAC, mono, cover art), and is **WAAAAY faster** (no upload queue, no ads, no
+codecs and bitrates** (native Opus/M4A, forced Opus, MP3 `V0`/`V2`/`V5`/`320k`,
+M4A, Ogg, FLAC, mono, cover art), and is **WAAAAY faster** (no upload queue, no ads, no
 re-encoding traps, direct native stream download).
 
 ## Screenshots & interface overview
@@ -26,12 +26,15 @@ Four touchpoints (three to start a download, plus popup settings):
    native audio stream, **Video** for best video+audio, or **Cut** to pick start
    / end timestamps and encoding settings interactively in your terminal.
 2. **Right-click `YouTube Downloader` ▸ `Audio` / `Video` / `Cut Audio`
-   submenu** (context menu) — available on pages, frames, links, images,
-   video/audio elements, and text selections. Works on cards in feeds and
-   search results. If hover-autoplay covers a card, right-click the card
-   itself; only the video element's own menu may show the browser defaults.
+   submenu** (context menu) — available broadly on pages, frames, links,
+   images, video/audio elements, and text selections, not just YouTube. On
+   YouTube it works on cards in feeds and search results: if hover-autoplay
+   covers a card, right-click the card itself; only the video element's own
+   menu may show the browser defaults. Any safe HTTP(S) URL is accepted and
+   handed to the local companion, so the menu works on any media site
+   `yt-dlp` supports.
 3. **Extension popup** — click the toolbar icon to check the companion
-   connection, toggle automatic tagging, ReplayGain, cover art, mono, and
+   connection, toggle automatic tagging, ReplayGain, cover art, channels, and
    long-audio routing, pick the audio format and MP3 quality, and choose the
    download folder.
 4. **Global keyboard shortcuts & CLI** — assign system-wide hotkeys (for
@@ -39,8 +42,8 @@ Four touchpoints (three to start a download, plus popup settings):
    cut) to `~/.local/bin/yt-dlp-shortcut.sh audio|video|cut` under
    **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**
    (GNOME / Cinnamon) or **System Settings → Shortcuts → Custom Shortcuts**
-   (KDE). Unlike the watch-page pill and context menu, which are scoped to
-   YouTube, the shortcut script and CLI work on **almost any media site
+   (KDE). The watch-page pill is YouTube-specific, while the context menu,
+   the shortcut script, and the CLI work on **almost any media site
    supported by `yt-dlp`** — YouTube, SoundCloud, Vimeo, Bandcamp, Twitch,
    and hundreds more.
 
@@ -101,30 +104,39 @@ offers four qualities:
 | `V5` (~130 kbps stereo / ~85 kbps mono VBR — compact / speech) | Compact VBR | Speech, podcasts, or constrained storage. True psychoacoustic VBR, preferable to fixed `128k` CBR. |
 
 The remaining **Audio Format** options, selectable in the Firefox popup or via
-`audio_format` in `config.json` (`best`, `mp3`, `m4a`, `ogg`, `flac`;
+`audio_format` in `config.json` (`best`, `opus`, `mp3`, `m4a`, `ogg`, `flac`;
 `mp3_quality` defaults to `V0`):
 
+- **`opus`**: forces Opus output — prefers `bestaudio[acodec=opus]/bestaudio`,
+  copies the native Opus stream when stereo and available, and otherwise
+  transcodes to Opus via FFmpeg (`--audio-quality 128K` stereo, `96K` mono).
+  Cuts default to Opus at `128 kbps` VBR stereo / `75 kbps` mono.
 - **`m4a`**: downloads YouTube's native AAC `.m4a` stream without re-encoding
   whenever available (`bestaudio[ext=m4a]/bestaudio`), converting via FFmpeg
-  only if no native `.m4a` stream exists.
+  if no native `.m4a` stream exists or a mono downmix is requested.
 - **`ogg`** (Vorbis, quality `0`) and **`flac`**: convert via FFmpeg. Note that
   FLAC cannot restore quality lost in the source stream — it only preserves
   the decoded source losslessly in a larger file.
 
-**`Cut Audio`** always encodes the selected section as **Opus** with FFmpeg
-defaults of **`117 kbps` VBR (`-vbr on`), 2-channel stereo (`-ac 2`),
-`-application audio`**. Each cut prompts interactively, so you can customize
-start/end timestamps, bitrate, channels (`1` mono or `2` stereo), and
-application mode (`audio`, or `voip` for speech/podcasts, which favors
-intelligibility at low bitrates). When **Encode as mono audio** is enabled in
-the popup, the cut prompt defaults to **`75 kbps` VBR mono** (`-ac 1`).
+**`Cut Audio`** resolves channels once from the **Channels** setting below
+(`Ask each time` prompts `(s)tereo or (m)ono` per download; non-interactive
+runs fall back to stereo), then prompts interactively for start/end
+timestamps. For Opus-family formats (`best`, `opus`) each cut also prompts
+for bitrate (default **`128 kbps` VBR stereo**, **`75 kbps` mono**) and
+application mode (**`audio`**, or **`voip`** for speech/podcasts, which favors
+intelligibility at low bitrates). Cuts in MP3/M4A/Ogg/FLAC modes reuse the
+configured format settings instead of prompting.
 
-**Mono audio (`mono_audio`, off by default):** downmixes to 1-channel mono
-(`-ac 1`) with psychoacoustic bitrate scaling (roughly 60–65% of stereo, not
-half, because stereo codecs already share mid/side information): native Opus
-`best` becomes Opus `96k` VBR mono; MP3 `V0`/`V2`/`V5` scale automatically via
-LAME VBR while `320k` CBR maps to `192k` CBR mono; `m4a`/`ogg`/`flac` add `-ac 1`
-with their existing quality settings.
+**Channels (`channel_mode`, Stereo by default):** `Stereo` keeps 2-channel
+output; `Mono` downmixes to 1-channel mono (`-ac 1`) with psychoacoustic
+bitrate scaling (roughly 60–75% of stereo, not half, because stereo codecs
+already share mid/side information): `best` and forced `opus` use Opus `96k`
+mono, while Opus cuts default to `75K` mono (vs `128K` stereo), MP3
+`V0`/`V2`/`V5` scale automatically via LAME VBR while `320k` CBR maps to
+`192k` CBR mono, and `m4a`/`ogg`/`flac` retain their configured qualities while
+the companion encodes a true one-channel output. `Ask each time` prompts per
+download (`(s)tereo or (m)ono`,
+defaulting to stereo); non-interactive runs fall back to stereo.
 
 ## What you need
 
@@ -136,10 +148,11 @@ with their existing quality settings.
   audio tagging and cover art; `rsgain` is optional and only used when
   ReplayGain is enabled.
 
-The extension provides a YouTube right-click submenu, watch-page Audio/Video/
-Cut controls, and a settings popup. It uses Firefox Native Messaging to pass a
-user-selected mode and URL to the local companion. It does not download media
-itself.
+The extension provides a YouTube watch-page Audio/Video/Cut pill, a broadly
+available right-click submenu, and a settings popup. It uses Firefox Native
+Messaging to pass a user-selected mode and URL to the local companion. The
+pill is YouTube-specific; the menu accepts any safe HTTP(S) URL. The
+extension does not download media itself.
 
 ### Beginner-friendly dependency guide
 
@@ -199,7 +212,7 @@ system packages automatically.
 sudo apt update
 sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
   nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools \
-  xdg-utils desktop-file-utils
+  desktop-file-utils
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
 cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
@@ -216,7 +229,7 @@ Wayland clipboard/primary-selection support.
 sudo apt update
 sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
   nodejs gnome-terminal libnotify-bin xclip xsel playerctl \
-  qt6-tools-dev-tools xdg-utils desktop-file-utils
+  qt6-tools-dev-tools desktop-file-utils
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
 cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
@@ -236,7 +249,7 @@ systems, for example:
 
 ```sh
 sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil \
-  xdg-utils desktop-file-utils
+  desktop-file-utils
 # Optional features / desktop integrations:
 sudo apt install rsgain wl-clipboard xclip xsel playerctl
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
@@ -249,7 +262,7 @@ On Fedora, Arch, openSUSE, or another distribution, use its package manager and
 package names instead. `./install.sh --check-deps` prints the detected desktop
 session and Debian/LMDE package suggestions; it never runs the package manager.
 The installer stages user-level binaries under `~/.local/bin`, the Firefox
-Native Messaging manifest, desktop shortcuts, and the `yt-dlp://` handler.
+Native Messaging manifest, and desktop shortcuts.
 
 ### macOS
 
@@ -269,7 +282,7 @@ cd Firefox-Youtube-Downloader-Plugin
 
 The macOS installer writes the Native Messaging manifest to
 `~/Library/Application Support/Mozilla/NativeMessagingHosts/` and skips
-Linux-only desktop/MIME registration. If Homebrew Python refuses a `--user`
+Linux-only desktop entries. If Homebrew Python refuses a `--user`
 package install because of its environment policy, install Mutagen using your
 preferred Python package workflow for that Homebrew interpreter. Then install
 the signed XPI from a GitHub Release or AMO in Firefox.
@@ -308,11 +321,11 @@ The popup stores these options in the user's config file:
 | Download directory | `~/Music/Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another directory or select `ytdlp-default`. |
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
-| Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `m4a` downloads the native AAC stream when available. |
+| Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `opus`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `opus` forces Opus output (native stream copied when stereo and available, otherwise FFmpeg transcode); `m4a` downloads the native AAC stream when available. |
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |
 | Embed thumbnail picture | On | Download and embed cover art (`image/webp`, JPEG for M4A). Turn off to skip thumbnails entirely. |
 | Convert thumbnail to JPEG | Off | Transcode cover art to `image/jpeg` for legacy hardware/car players that cannot render embedded WebP. |
-| Encode as mono audio | Off | Downmix to 1-channel mono (`-ac 1`) with psychoacoustic bitrate scaling (Opus `96k`, MP3 `320k`→`192k`). |
+| Channels | `Stereo` | `Stereo`, `Ask each time`, or `Mono` (`channel_mode` in `config.json`). `Mono` downmixes to 1-channel mono (`-ac 1`); native Opus `best` becomes `96k` mono and MP3 `320k` CBR becomes `192k`. |
 | Route long audio to a separate folder | Off | When on, finished audio longer than `long_audio_minutes` (default `30`) moves to `long_audio_dir` (default `~/Podcasts`, with `~/Audiobooks` or a custom path). Ideal for podcasts and audiobooks. |
 
 Linux/macOS use `~/.config/youtube-downloader/config.json` or the equivalent
@@ -427,8 +440,8 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 123 Python tests
-bash tests/test_shortcut.sh               # 43 launcher/installer checks
+python3 -m unittest discover -s tests -v  # 149 Python tests
+bash tests/test_shortcut.sh               # 41 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh
 bash scripts/sign-xpi.sh                  # requires AMO_JWT_ISSUER/AMO_JWT_SECRET

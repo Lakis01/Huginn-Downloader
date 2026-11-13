@@ -111,7 +111,6 @@
   function makeGroup() {
     const group = document.createElement('div');
     group.setAttribute('data-ytdl-controls', 'true');
-    group.setAttribute('data-ytdl-ext', 'true');
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', 'yt-dlp actions');
     for (const action of MODES) {

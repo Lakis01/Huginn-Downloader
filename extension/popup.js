@@ -61,6 +61,8 @@ function updateFormatNote() {
   const value = select && select.value ? select.value : 'best';
   if (value === 'mp3') {
     note.textContent = 'Converts YouTube\u0027s audio stream to MP3 via FFmpeg (V0 VBR recommended).';
+  } else if (value === 'opus') {
+    note.textContent = 'Forces the Opus container, keeping YouTube\u0027s native Opus stream without re-encoding when possible.';
   } else if (value === 'm4a') {
     note.textContent = 'Downloads the native M4A / AAC stream when available, otherwise converts via FFmpeg.';
   } else if (value === 'ogg') {
@@ -82,14 +84,21 @@ function updateMp3Row() {
 function pushConfig() {
   const audioEl = $('audioFormat');
   const qualityEl = $('mp3Quality');
+  const channelEl = $('channelMode');
+  const minutesEl = $('longAudioMinutes');
+  const minutesValue = minutesEl ? Number(minutesEl.value) : 30;
+  const longAudioMinutes = Number.isInteger(minutesValue) && minutesValue > 0
+    ? minutesValue
+    : 30;
+  if (minutesEl) minutesEl.value = String(longAudioMinutes);
   saveConfig({
     audio_format: audioEl && audioEl.value ? audioEl.value : 'best',
     mp3_quality: qualityEl && qualityEl.value ? qualityEl.value : 'V0',
+    channel_mode: channelEl && channelEl.value ? channelEl.value : 'stereo',
     embed_thumbnail: $('embedThumbnail') ? $('embedThumbnail').checked : true,
     thumbnail_jpg: $('thumbnailJpg') ? $('thumbnailJpg').checked : false,
-    mono_audio: $('monoAudio') ? $('monoAudio').checked : false,
     long_audio_enabled: $('longAudioEnabled') ? $('longAudioEnabled').checked : false,
-    long_audio_minutes: $('longAudioMinutes') && $('longAudioMinutes').value ? parseInt($('longAudioMinutes').value, 10) : 30,
+    long_audio_minutes: longAudioMinutes,
     long_audio_dir: $('longAudioDir') && $('longAudioDir').value.trim() ? $('longAudioDir').value.trim() : '~/Podcasts',
   });
 }
@@ -137,9 +146,11 @@ function renderConnected(response) {
   $('rsgain').checked = config.rsgain === true;
   if ($('audioFormat')) $('audioFormat').value = config.audio_format || 'best';
   if ($('mp3Quality')) $('mp3Quality').value = config.mp3_quality || 'V0';
+  if ($('channelMode')) {
+    $('channelMode').value = config.channel_mode || 'stereo';
+  }
   if ($('embedThumbnail')) $('embedThumbnail').checked = config.embed_thumbnail !== false;
   if ($('thumbnailJpg')) $('thumbnailJpg').checked = config.thumbnail_jpg === true;
-  if ($('monoAudio')) $('monoAudio').checked = config.mono_audio === true;
   if ($('longAudioEnabled')) $('longAudioEnabled').checked = config.long_audio_enabled === true;
   if ($('longAudioMinutes')) $('longAudioMinutes').value = String(config.long_audio_minutes || 30);
   if ($('longAudioDir')) $('longAudioDir').value = config.long_audio_dir || '~/Podcasts';
@@ -153,9 +164,7 @@ function renderConnected(response) {
   }
 
   const key = presetKeyFor(config.download_dir);
-  for (const radio of document.querySelectorAll('input[name="folder"]')) {
-    radio.checked = radio.value === key;
-  }
+  if ($('downloadFolder')) $('downloadFolder').value = key;
   $('customDir').hidden = key !== 'custom';
   if (key === 'custom') $('customDir').value = config.download_dir || '';
 
@@ -211,8 +220,8 @@ async function saveConfig(patch) {
 }
 
 function currentFolderValue() {
-  const checked = document.querySelector('input[name="folder"]:checked');
-  const key = checked ? checked.value : 'keep';
+  const select = $('downloadFolder');
+  const key = select && select.value ? select.value : 'keep';
   if (key === 'custom') {
     const custom = $('customDir').value.trim();
     return custom || null;
@@ -277,7 +286,7 @@ function main() {
       pushConfig();
     });
   }
-  for (const id of ['embedThumbnail', 'thumbnailJpg', 'monoAudio', 'longAudioEnabled']) {
+  for (const id of ['embedThumbnail', 'thumbnailJpg', 'longAudioEnabled']) {
     const el = $(id);
     if (el) {
       el.addEventListener('change', () => {
@@ -286,14 +295,19 @@ function main() {
       });
     }
   }
+  const channelModeEl = $('channelMode');
+  if (channelModeEl) {
+    channelModeEl.addEventListener('change', () => {
+      pushConfig();
+    });
+  }
   if ($('longAudioMinutes')) $('longAudioMinutes').addEventListener('change', () => pushConfig());
   if ($('longAudioDir')) $('longAudioDir').addEventListener('change', () => pushConfig());
-  for (const radio of document.querySelectorAll('input[name="folder"]')) {
-    radio.addEventListener('change', () => {
-      const checked = document.querySelector('input[name="folder"]:checked');
-      const isCustom = !!checked && checked.value === 'custom';
-      $('customDir').hidden = !isCustom;
-      if (!isCustom) saveConfig({ download_dir: currentFolderValue() });
+  const downloadFolderEl = $('downloadFolder');
+  if (downloadFolderEl) {
+    downloadFolderEl.addEventListener('change', () => {
+      $('customDir').hidden = downloadFolderEl.value !== 'custom';
+      if (downloadFolderEl.value !== 'custom') saveConfig({ download_dir: currentFolderValue() });
     });
   }
   $('customDir').addEventListener('change', () => {
