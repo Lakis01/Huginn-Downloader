@@ -36,7 +36,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.2.0', 'manifest version is 2.2.0');
+  assert.equal(manifest.version, '2.3.0', 'manifest version is 2.3.0');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -82,6 +82,11 @@ function testIcons() {
 }
 
 // --- background.js ---
+function created_items_omit_patterns(src) {
+  const lines = src.split('\n').filter((l) => !l.trim().startsWith('//'));
+  const code = lines.join('\n');
+  return !code.includes('documentUrlPatterns:') && !code.includes('targetUrlPatterns:');
+}
 function testBackgroundStatic() {
   const src = readFile('extension/background.js');
   assertAsciiNoEmoji('extension/background.js', src);
@@ -96,12 +101,9 @@ function testBackgroundStatic() {
   assert.ok(src.includes('icons/audio.svg'), 'audio item uses audio icon');
   assert.ok(src.includes('icons/video.svg'), 'video item uses video icon');
   assert.ok(src.includes('icons/cut.svg'), 'cut item uses cut icon');
-  assert.ok(src.includes('documentUrlPatterns'), 'menu creation declares static documentUrlPatterns');
-  assert.ok(src.includes('YT_DOC_PATTERNS') || src.includes('documentUrlPatterns'), 'YouTube document patterns constant');
-  for (const pattern of ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*']) {
-    assert.ok(src.includes(pattern), `documentUrlPatterns covers ${pattern}`);
-  }
-  assert.ok(!src.includes('targetUrlPatterns'), 'menu creation omits targetUrlPatterns');
+  assert.ok(src.includes('removeAll'), 'menu setup clears stale persisted menus (always present like Play in MPV)');
+  assert.ok(src.includes('removeAll'), 'menu setup clears stale persisted menus before creating');
+  assert.ok(created_items_omit_patterns(src), 'menu creation omits URL pattern properties');
   assert.ok(!src.includes('onShown'), 'no menus.onShown listener (static patterns avoid preview race)');
   assert.ok(src.includes('MENU_CONTEXTS') || src.includes("'selection'"), 'menu contexts include selection');
   assert.ok(src.includes("'video'") && src.includes("'selection'"), 'contexts include video and selection');
@@ -194,9 +196,9 @@ async function testBackgroundBehavior() {
   assert.equal(byId.get('ytdl-audio').title, 'Audio');
   assert.equal(byId.get('ytdl-video').title, 'Video');
   assert.equal(byId.get('ytdl-cut').title, 'Cut Audio');
-  const expectedPatterns = ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*'];
+  const expectedPatterns = [];
   for (const [id, item] of byId) {
-    assert.equal(JSON.stringify(item.documentUrlPatterns), JSON.stringify(expectedPatterns), `${id} declares YouTube documentUrlPatterns`);
+    assert.ok(!('documentUrlPatterns' in item), `${id} omits documentUrlPatterns`);
     assert.ok(!('targetUrlPatterns' in item), `${id} omits targetUrlPatterns`);
     assert.ok(item.contexts.includes('video'), `${id} contexts include video`);
     assert.ok(item.contexts.includes('selection'), `${id} contexts include selection`);
@@ -276,10 +278,10 @@ async function testBackgroundStaticMenus() {
   const { created, handlers, listenerCounts, fireInstalled, fireStartup } = runBackgroundFixture();
   await new Promise((resolve) => setTimeout(resolve, 0));
   const expectedContexts = ['page', 'frame', 'link', 'image', 'video', 'audio', 'selection'];
-  const expectedPatterns = ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*'];
+  const expectedPatterns = [];
   assert.equal(created.length, 4, 'four menu items created');
   for (const item of created) {
-    assert.equal(JSON.stringify(item.documentUrlPatterns), JSON.stringify(expectedPatterns), `${item.id} declares YouTube documentUrlPatterns`);
+    assert.ok(!('documentUrlPatterns' in item), `${item.id} omits documentUrlPatterns (always present like Play in MPV)`);
     assert.ok(!('targetUrlPatterns' in item), `${item.id} omits targetUrlPatterns`);
     assert.equal(JSON.stringify(item.contexts), JSON.stringify(expectedContexts), `${item.id} declares all seven contexts`);
   }
@@ -354,13 +356,6 @@ function testContentStatic() {
   }
   assert.ok(src.includes('data-launching'), 'launching state');
   assert.ok(src.includes('viewBox') && src.includes('stroke-width'), 'inline SVG icons');
-  assert.ok(src.includes("data-ytdl-ext"), 'marks extension group with data-ytdl-ext');
-  assert.ok(src.includes("setAttribute('data-ytdl-ext'") || src.includes('setAttribute("data-ytdl-ext"'), 'makeGroup sets data-ytdl-ext');
-  assert.ok(src.includes('ytdl-controls-style'), 'removes legacy Tampermonkey style element');
-  assert.ok(src.includes("getElementById('ytdl-controls-style')") || src.includes('getElementById("ytdl-controls-style")'), 'looks up legacy style by id');
-  assert.ok(src.includes("getAttribute('data-ytdl-ext')") || src.includes('getAttribute("data-ytdl-ext")'), 'detects non-extension groups');
-  assert.ok(src.includes("querySelector('a')") || src.includes('querySelector("a")'), 'detects legacy anchor groups');
-  assert.ok(src.includes("querySelector('button')") || src.includes('querySelector("button")'), 'distinguishes button groups');
 }
 
 // Minimal DOM fixture (mirrors tests/test_youtube_buttons.js) to run content.js.
@@ -617,26 +612,13 @@ function testContentTampermonkeyCleanup() {
   const topRow = fx.document.querySelector('ytd-watch-metadata').querySelector('#top-row');
   const extGroups = topRow.querySelectorAll('[data-ytdl-controls]');
   assert.equal(extGroups.length, 1, 'one extension pill mounted');
-  assert.equal(extGroups[0].getAttribute('data-ytdl-ext'), 'true', 'extension group carries data-ytdl-ext');
-  const style = fx.document.createElement('style');
-  style.setAttribute('id', 'ytdl-controls-style');
-  fx.document.head.appendChild(style);
-  assert.ok(fx.document.getElementById('ytdl-controls-style'), 'legacy style present before sync');
-  const legacy = fx.document.createElement('div');
-  legacy.setAttribute('data-ytdl-controls', 'true');
-  for (let i = 0; i < 2; i += 1) {
-    const link = fx.document.createElement('a');
-    link.setAttribute('href', 'https://www.youtube.com/watch?v=legacy' + i);
-    link.textContent = 'Legacy ' + i;
-    legacy.appendChild(link);
-  }
-  topRow.appendChild(legacy);
-  assert.equal(topRow.querySelectorAll('[data-ytdl-controls]').length, 2, 'legacy anchor group blocks alongside extension pill');
+  const duplicate = fx.document.createElement('div');
+  duplicate.setAttribute('data-ytdl-controls', 'true');
+  topRow.appendChild(duplicate);
+  assert.equal(topRow.querySelectorAll('[data-ytdl-controls]').length, 2, 'duplicate group present before sync');
   topRow.dispatchEvent({ type: 'yt-navigate-finish', target: topRow, bubbles: true });
-  assert.equal(fx.document.getElementById('ytdl-controls-style'), null, 'legacy style removed by syncControls');
   const remaining = topRow.querySelectorAll('[data-ytdl-controls]');
-  assert.equal(remaining.length, 1, 'legacy anchor group removed, single extension pill remains');
-  assert.equal(remaining[0].getAttribute('data-ytdl-ext'), 'true', 'remaining group is the extension pill');
+  assert.equal(remaining.length, 1, 'duplicate groups dedupe to a single extension pill');
   assert.equal(remaining[0].querySelectorAll('button').length, 3, 'extension pill keeps segmented buttons');
 }
 
@@ -765,7 +747,7 @@ function testPopup() {
   assert.ok(html.includes('value="V0"') && html.includes('V0 (~245 kbps VBR \u2014 Recommended)'), 'V0 option verbatim');
   assert.ok(html.includes('value="320k"') && html.includes('320 kbps CBR (maximum size)'), '320k option verbatim');
   assert.ok(html.includes('value="V2"') && html.includes('V2 (~190 kbps VBR \u2014 balanced)'), 'V2 option verbatim');
-  assert.ok(html.includes('value="128k"') && html.includes('128 kbps CBR (compact / speech)'), '128k option verbatim');
+  assert.ok(html.includes('value="V5"') && html.includes('compact / speech'), 'V5 option verbatim');
   assert.ok(html.includes('id="formatNote"'), 'popup has #formatNote');
   assert.ok(html.includes('id="rsgainMissingNote"'), 'popup has #rsgainMissingNote');
   assert.ok(html.includes('warn-note'), 'missing-rsgain note uses .warn-note');
@@ -785,6 +767,16 @@ function testPopup() {
   assert.ok(js.includes('mp3QualityRow'), 'popup toggles #mp3QualityRow');
   assert.ok(js.includes('audio_format'), 'popup sends audio_format in set_config');
   assert.ok(js.includes('mp3_quality'), 'popup sends mp3_quality in set_config');
+  assert.ok(html.includes('id="embedThumbnail"'), 'popup has #embedThumbnail toggle');
+  assert.ok(html.includes('id="thumbnailJpg"'), 'popup has #thumbnailJpg toggle');
+  assert.ok(html.includes('id="monoAudio"'), 'popup has #monoAudio toggle');
+  assert.ok(html.includes('id="longAudioEnabled"'), 'popup has #longAudioEnabled toggle');
+  assert.ok(html.includes('id="longAudioMinutes"'), 'popup has #longAudioMinutes input');
+  assert.ok(html.includes('id="longAudioDir"'), 'popup has #longAudioDir input');
+  assert.ok(js.includes('embed_thumbnail'), 'popup sends embed_thumbnail in set_config');
+  assert.ok(js.includes('thumbnail_jpg'), 'popup sends thumbnail_jpg in set_config');
+  assert.ok(js.includes('mono_audio'), 'popup sends mono_audio in set_config');
+  assert.ok(js.includes('long_audio_enabled'), 'popup sends long_audio_enabled in set_config');
   assert.ok(js.includes('pushConfig') || js.includes('audio_format'), 'popup groups audio prefs in pushConfig');
   assert.ok(js.includes('rsgain is not installed'), 'rsgain guard explains the missing binary');
   assert.ok(js.includes('sudo apt install rsgain'), 'rsgain guard shows apt install hint');
@@ -817,7 +809,7 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'customDir', 'effectiveDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'monoAudio', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'customDir', 'effectiveDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
   const folderRadios = ['keep', 'music', 'downloads', 'custom'].map((value) => ({

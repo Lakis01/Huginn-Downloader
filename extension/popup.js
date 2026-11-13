@@ -85,7 +85,20 @@ function pushConfig() {
   saveConfig({
     audio_format: audioEl && audioEl.value ? audioEl.value : 'best',
     mp3_quality: qualityEl && qualityEl.value ? qualityEl.value : 'V0',
+    embed_thumbnail: $('embedThumbnail') ? $('embedThumbnail').checked : true,
+    thumbnail_jpg: $('thumbnailJpg') ? $('thumbnailJpg').checked : false,
+    mono_audio: $('monoAudio') ? $('monoAudio').checked : false,
+    long_audio_enabled: $('longAudioEnabled') ? $('longAudioEnabled').checked : false,
+    long_audio_minutes: $('longAudioMinutes') && $('longAudioMinutes').value ? parseInt($('longAudioMinutes').value, 10) : 30,
+    long_audio_dir: $('longAudioDir') && $('longAudioDir').value.trim() ? $('longAudioDir').value.trim() : '~/Podcasts',
   });
+}
+
+function updateLongAudioRow() {
+  const row = $('longAudioRow');
+  if (!row) return;
+  const enabled = $('longAudioEnabled');
+  row.hidden = !enabled || !enabled.checked;
 }
 
 function renderUpdateNote(status) {
@@ -124,8 +137,15 @@ function renderConnected(response) {
   $('rsgain').checked = config.rsgain === true;
   if ($('audioFormat')) $('audioFormat').value = config.audio_format || 'best';
   if ($('mp3Quality')) $('mp3Quality').value = config.mp3_quality || 'V0';
+  if ($('embedThumbnail')) $('embedThumbnail').checked = config.embed_thumbnail !== false;
+  if ($('thumbnailJpg')) $('thumbnailJpg').checked = config.thumbnail_jpg === true;
+  if ($('monoAudio')) $('monoAudio').checked = config.mono_audio === true;
+  if ($('longAudioEnabled')) $('longAudioEnabled').checked = config.long_audio_enabled === true;
+  if ($('longAudioMinutes')) $('longAudioMinutes').value = String(config.long_audio_minutes || 30);
+  if ($('longAudioDir')) $('longAudioDir').value = config.long_audio_dir || '~/Podcasts';
   updateMp3Row();
   updateFormatNote();
+  updateLongAudioRow();
   const missingNote = $('rsgainMissingNote');
   if (missingNote) {
     if (lastDeps && lastDeps.rsgain === true) missingNote.hidden = true;
@@ -257,6 +277,17 @@ function main() {
       pushConfig();
     });
   }
+  for (const id of ['embedThumbnail', 'thumbnailJpg', 'monoAudio', 'longAudioEnabled']) {
+    const el = $(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        if (id === 'longAudioEnabled') updateLongAudioRow();
+        pushConfig();
+      });
+    }
+  }
+  if ($('longAudioMinutes')) $('longAudioMinutes').addEventListener('change', () => pushConfig());
+  if ($('longAudioDir')) $('longAudioDir').addEventListener('change', () => pushConfig());
   for (const radio of document.querySelectorAll('input[name="folder"]')) {
     radio.addEventListener('change', () => {
       const checked = document.querySelector('input[name="folder"]:checked');

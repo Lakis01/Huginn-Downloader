@@ -78,6 +78,12 @@ class NativeHostTests(unittest.TestCase):
                     "rsgain": False,
                     "audio_format": "best",
                     "mp3_quality": "V0",
+                    "embed_thumbnail": True,
+                    "thumbnail_jpg": False,
+                    "mono_audio": False,
+                    "long_audio_enabled": False,
+                    "long_audio_minutes": 30,
+                    "long_audio_dir": "~/Podcasts",
                 },
             )
             self.assertEqual(response["effective_download_dir"], str(Path(tmp) / "Music/Youtube Downloads"))
@@ -108,6 +114,12 @@ class NativeHostTests(unittest.TestCase):
                 "rsgain": False,
                 "audio_format": "best",
                 "mp3_quality": "V0",
+                "embed_thumbnail": True,
+                "thumbnail_jpg": False,
+                "mono_audio": False,
+                "long_audio_enabled": False,
+                "long_audio_minutes": 30,
+                "long_audio_dir": "~/Podcasts",
             },
         )
         self.assertEqual(persisted, responses[0]["config"])
@@ -116,9 +128,9 @@ class NativeHostTests(unittest.TestCase):
         request = {
             "action": "download",
             "mode": "cut",
-            "url": "https://soundcloud.com/example/track",
+            "url": "file:///etc/passwd",
             "fallbacks": [
-                "https://youtube.com.evil.invalid/watch?v=no",
+                "https://soundcloud.com/example/track",
                 "https://m.youtube.com/watch?v=yes",
             ],
         }
@@ -134,12 +146,12 @@ class NativeHostTests(unittest.TestCase):
                     "ok": True,
                     "launched": True,
                     "mode": "cut",
-                    "url": "https://m.youtube.com/watch?v=yes",
+                    "url": "https://soundcloud.com/example/track",
                 }
             ],
         )
         popen.assert_called_once_with(
-            ["/tmp/fake-shortcut", "cut", "https://m.youtube.com/watch?v=yes"],
+            ["/tmp/fake-shortcut", "cut", "https://soundcloud.com/example/track"],
             start_new_session=True,
             stdin=HOST.subprocess.DEVNULL,
             stdout=HOST.subprocess.DEVNULL,
@@ -147,16 +159,21 @@ class NativeHostTests(unittest.TestCase):
         )
 
     def test_download_rejects_non_youtube_and_invalid_mode_cleanly(self):
-        responses = run_host(
-            [
-                {"action": "download", "mode": "audio", "url": "https://vimeo.com/123"},
-                {"action": "download", "mode": "shell", "url": "https://youtube.com/watch?v=x"},
-            ]
-        )
+        with mock.patch.dict(os.environ, {"YTDL_SHORTCUT": "/tmp/fake-shortcut"}), mock.patch.object(
+            HOST.subprocess, "Popen"
+        ):
+            responses = run_host(
+                [
+                    {"action": "download", "mode": "audio", "url": "https://vimeo.com/123"},
+                    {"action": "download", "mode": "shell", "url": "https://youtube.com/watch?v=x"},
+                    {"action": "download", "mode": "audio", "url": "file:///etc/passwd"},
+                ]
+            )
 
-        self.assertEqual(len(responses), 2)
-        self.assertTrue(all(response["ok"] is False for response in responses))
-        self.assertTrue(all(isinstance(response["error"], str) for response in responses))
+        self.assertEqual(len(responses), 3)
+        self.assertTrue(responses[0]["ok"] is True and responses[0]["url"] == "https://vimeo.com/123")
+        self.assertTrue(all(response["ok"] is False for response in responses[1:]))
+        self.assertTrue(all(isinstance(response["error"], str) for response in responses[1:]))
 
     def test_download_rejects_userinfo_and_nonstandard_ports(self):
         with mock.patch.object(HOST.subprocess, "Popen") as popen:

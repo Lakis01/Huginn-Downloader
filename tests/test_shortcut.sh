@@ -538,6 +538,12 @@ assert config == {
     "rsgain": False,
     "audio_format": "best",
     "mp3_quality": "V0",
+    "embed_thumbnail": True,
+    "thumbnail_jpg": False,
+    "mono_audio": False,
+    "long_audio_enabled": False,
+    "long_audio_minutes": 30,
+    "long_audio_dir": "~/Podcasts",
 }, config
 for manifest in (
     home / ".mozilla/native-messaging-hosts/firefox_youtube_downloader.json",
@@ -633,6 +639,12 @@ assert config == {
     "rsgain": True,
     "audio_format": "best",
     "mp3_quality": "V0",
+    "embed_thumbnail": True,
+    "thumbnail_jpg": False,
+    "mono_audio": False,
+    "long_audio_enabled": False,
+    "long_audio_minutes": 30,
+    "long_audio_dir": "~/Podcasts",
 }, config
 PY
 pass 'interactive TTY installer accepts download-dir, auto-tag, and ReplayGain choices'
@@ -655,6 +667,9 @@ assert config["auto_tag"] is True, config
 assert config["rsgain"] is False, config
 assert config["audio_format"] == "best", config
 assert config["mp3_quality"] == "V0", config
+assert config["embed_thumbnail"] is True, config
+assert config["thumbnail_jpg"] is False, config
+assert config["mono_audio"] is False, config
 PY
 HOME="$existing_ytdlp_home" "$INSTALLER" --install --yes \
     --download-dir=ytdlp-default --auto-tag=true --rsgain=true > "$TMP/existing-ytdlp-overrides.out"
@@ -670,6 +685,12 @@ assert config == {
     "rsgain": True,
     "audio_format": "best",
     "mp3_quality": "V0",
+    "embed_thumbnail": True,
+    "thumbnail_jpg": False,
+    "mono_audio": False,
+    "long_audio_enabled": False,
+    "long_audio_minutes": 30,
+    "long_audio_dir": "~/Podcasts",
 }, config
 PY
 cmp -s "$TMP/existing-ytdlp.orig" "$existing_ytdlp_home/.config/yt-dlp/config" \
