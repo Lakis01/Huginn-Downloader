@@ -31,7 +31,7 @@ Four touchpoints (three to start a download, plus popup settings):
    search results. If hover-autoplay covers a card, right-click the card
    itself; only the video element's own menu may show the browser defaults.
 3. **Extension popup** — click the toolbar icon to check the companion
-   connection, toggle automatic tagging, ReplayGain, cover art, mono, and
+   connection, toggle automatic tagging, ReplayGain, cover art, channels, and
    long-audio routing, pick the audio format and MP3 quality, and choose the
    download folder.
 4. **Global keyboard shortcuts & CLI** — assign system-wide hotkeys (for
@@ -111,20 +111,24 @@ The remaining **Audio Format** options, selectable in the Firefox popup or via
   FLAC cannot restore quality lost in the source stream — it only preserves
   the decoded source losslessly in a larger file.
 
-**`Cut Audio`** always encodes the selected section as **Opus** with FFmpeg
-defaults of **`117 kbps` VBR (`-vbr on`), 2-channel stereo (`-ac 2`),
-`-application audio`**. Each cut prompts interactively, so you can customize
-start/end timestamps, bitrate, channels (`1` mono or `2` stereo), and
-application mode (`audio`, or `voip` for speech/podcasts, which favors
-intelligibility at low bitrates). When **Encode as mono audio** is enabled in
-the popup, the cut prompt defaults to **`75 kbps` VBR mono** (`-ac 1`).
+**`Cut Audio`** resolves channels once from the **Channels** setting below
+(`Ask each time` prompts `(s)tereo or (m)ono` per download; non-interactive
+runs fall back to stereo), then prompts interactively for start/end
+timestamps. For Opus-family formats (`best`, `opus`) each cut also prompts
+for bitrate (default **`128 kbps` VBR stereo**, **`75 kbps` mono**) and
+application mode (**`audio`**, or **`voip`** for speech/podcasts, which favors
+intelligibility at low bitrates). Cuts in MP3/M4A/Ogg/FLAC modes reuse the
+configured format settings instead of prompting.
 
-**Mono audio (`mono_audio`, off by default):** downmixes to 1-channel mono
-(`-ac 1`) with psychoacoustic bitrate scaling (roughly 60–65% of stereo, not
-half, because stereo codecs already share mid/side information): native Opus
-`best` becomes Opus `96k` VBR mono; MP3 `V0`/`V2`/`V5` scale automatically via
-LAME VBR while `320k` CBR maps to `192k` CBR mono; `m4a`/`ogg`/`flac` add `-ac 1`
-with their existing quality settings.
+**Channels (`channel_mode`, Stereo by default):** `Stereo` keeps 2-channel
+output; `Mono` downmixes to 1-channel mono (`-ac 1`) with psychoacoustic
+bitrate scaling (roughly 60–65% of stereo, not half, because stereo codecs
+already share mid/side information): native Opus `best` becomes Opus `96k`
+VBR mono, the `opus` format becomes `75K` mono (vs `128K` stereo), MP3
+`V0`/`V2`/`V5` scale automatically via LAME VBR while `320k` CBR maps to
+`192k` CBR mono, and `m4a`/`ogg`/`flac` add `-ac 1` with their existing
+quality settings. `Ask each time` prompts per download (`(s)tereo or (m)ono`,
+defaulting to stereo); non-interactive runs fall back to stereo.
 
 ## What you need
 
@@ -249,7 +253,7 @@ On Fedora, Arch, openSUSE, or another distribution, use its package manager and
 package names instead. `./install.sh --check-deps` prints the detected desktop
 session and Debian/LMDE package suggestions; it never runs the package manager.
 The installer stages user-level binaries under `~/.local/bin`, the Firefox
-Native Messaging manifest, desktop shortcuts, and the `yt-dlp://` handler.
+Native Messaging manifest, and desktop shortcuts.
 
 ### macOS
 
@@ -269,7 +273,7 @@ cd Firefox-Youtube-Downloader-Plugin
 
 The macOS installer writes the Native Messaging manifest to
 `~/Library/Application Support/Mozilla/NativeMessagingHosts/` and skips
-Linux-only desktop/MIME registration. If Homebrew Python refuses a `--user`
+Linux-only desktop entries. If Homebrew Python refuses a `--user`
 package install because of its environment policy, install Mutagen using your
 preferred Python package workflow for that Homebrew interpreter. Then install
 the signed XPI from a GitHub Release or AMO in Firefox.
@@ -312,7 +316,7 @@ The popup stores these options in the user's config file:
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |
 | Embed thumbnail picture | On | Download and embed cover art (`image/webp`, JPEG for M4A). Turn off to skip thumbnails entirely. |
 | Convert thumbnail to JPEG | Off | Transcode cover art to `image/jpeg` for legacy hardware/car players that cannot render embedded WebP. |
-| Encode as mono audio | Off | Downmix to 1-channel mono (`-ac 1`) with psychoacoustic bitrate scaling (Opus `96k`, MP3 `320k`→`192k`). |
+| Channels | `Stereo` | `Stereo`, `Ask each time`, or `Mono` (`channel_mode` in `config.json`). `Mono` downmixes to 1-channel mono (`-ac 1`); native Opus `best` becomes `96k` mono and MP3 `320k` CBR becomes `192k`. |
 | Route long audio to a separate folder | Off | When on, finished audio longer than `long_audio_minutes` (default `30`) moves to `long_audio_dir` (default `~/Podcasts`, with `~/Audiobooks` or a custom path). Ideal for podcasts and audiobooks. |
 
 Linux/macOS use `~/.config/youtube-downloader/config.json` or the equivalent
@@ -427,8 +431,8 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 123 Python tests
-bash tests/test_shortcut.sh               # 43 launcher/installer checks
+python3 -m unittest discover -s tests -v  # 139 Python tests
+bash tests/test_shortcut.sh               # 41 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh
 bash scripts/sign-xpi.sh                  # requires AMO_JWT_ISSUER/AMO_JWT_SECRET

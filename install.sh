@@ -120,7 +120,7 @@ if $CHECK_DEPS; then
     printf 'Desktop session: %s (%s)\n' "$desktop_label" "$desktop_session"
     printf 'Display server: %s\n' "$display_server"
     printf 'Prerequisite tools (present / missing):\n'
-    for tool in yt-dlp ffmpeg rsgain python3 node nodejs konsole ptyxis kgx gnome-terminal xfce4-terminal x-terminal-emulator notify-send wl-paste xclip xsel playerctl qdbus6 qdbus xdg-mime desktop-file-validate; do
+    for tool in yt-dlp ffmpeg rsgain python3 node nodejs konsole ptyxis kgx gnome-terminal xfce4-terminal x-terminal-emulator notify-send wl-paste xclip xsel playerctl qdbus6 qdbus desktop-file-validate; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '  present: %s (%s)\n' "$tool" "$(command -v "$tool")"
         else
@@ -160,7 +160,7 @@ PLUGIN_CONFIG_EXISTS=false
 [[ -e $CONFIG_DEST || -L $CONFIG_DEST ]] && PLUGIN_CONFIG_EXISTS=true
 
 if ! $INSTALL; then
-    printf 'Dry run: no files, configuration, MIME registrations, or build artifacts will be changed.\n'
+    printf 'Dry run: no files, configuration, or build artifacts will be changed.\n'
     for file in "${BIN_FILES[@]}"; do
         printf '  %s -> %s/%s\n' "$BIN_SOURCE/$file" "$BIN_TARGET" "$file"
     done
@@ -215,9 +215,6 @@ fi
 check_destination "$CONFIG_DEST"
 check_destination "$XPI_TARGET"
 
-if ! $IS_MACOS; then
-    command -v xdg-mime >/dev/null 2>&1 || { printf 'xdg-mime is required to register the URI handler.\n' >&2; exit 1; }
-fi
 command -v python3 >/dev/null 2>&1 || { printf 'python3 is required to install configuration and stage desktop entries.\n' >&2; exit 1; }
 if $IS_MACOS; then
     PYTHON_BIN=$(command -v python3)

@@ -422,7 +422,7 @@ function testContentStatic() {
   assert.ok(src.includes('viewBox') && src.includes('stroke-width'), 'inline SVG icons');
   assert.ok(!src.includes('data-ytdl-ext'), 'no legacy userscript marker attribute');
   assert.ok(!src.includes('ytdl-controls-style'), 'no legacy userscript style cleanup');
-  assert.ok(!src.includes('tampermonkey'), 'no Tampermonkey references in shipping content script');
+  assert.ok(!src.includes("createElement('a'") && !src.includes('createElement("a"'), 'segments are buttons, not navigating links');
   assert.ok(!src.toLowerCase().includes('userscript'), 'no userscript references in shipping content script');
 }
 
