@@ -35,10 +35,9 @@ except ImportError:  # pragma: no cover - helper ships alongside the host
         }
 
 
-VERSION = "2.0.0"
+VERSION = "2.4.0"
 MAX_MESSAGE_SIZE = 1024 * 1024
 MODES = {"audio", "video", "cut"}
-YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
 
 
 def _is_windows():
@@ -81,40 +80,6 @@ def _is_allowed_url(value):
         if hostname.endswith("."):
             hostname = hostname[:-1]
         if not hostname or len(hostname) > 253:
-            return False
-        for label in hostname.split("."):
-            ascii_label = label.encode("idna").decode("ascii")
-            if not ascii_label or len(ascii_label) > 63 or not re.fullmatch(
-                r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", ascii_label
-            ):
-                return False
-        if parsed.port not in {None, 80, 443}:
-            return False
-    except (ValueError, UnicodeError):
-        return False
-    return True
-
-
-def _is_youtube_url(value):
-    if not isinstance(value, str) or not value or value.startswith("-"):
-        return False
-    if any(ord(char) <= 0x20 or ord(char) == 0x7F for char in value):
-        return False
-    try:
-        parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"}:
-            return False
-        if parsed.username is not None or parsed.password is not None:
-            return False
-        hostname = (parsed.hostname or "").lower()
-        if hostname.endswith("."):
-            hostname = hostname[:-1]
-        if not hostname or not any(
-            hostname == domain or hostname.endswith("." + domain)
-            for domain in YOUTUBE_HOSTS
-        ):
-            return False
-        if hostname.endswith(".") or len(hostname) > 253:
             return False
         for label in hostname.split("."):
             ascii_label = label.encode("idna").decode("ascii")

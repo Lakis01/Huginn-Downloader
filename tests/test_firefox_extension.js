@@ -426,7 +426,7 @@ function testContentStatic() {
   assert.ok(!src.toLowerCase().includes('userscript'), 'no userscript references in shipping content script');
 }
 
-// Minimal DOM fixture (mirrors tests/test_youtube_buttons.js) to run content.js.
+// Minimal DOM fixture to run content.js.
 function createContentFixture() {
   class El {
     constructor(tag) {
@@ -1125,6 +1125,43 @@ async function testPopupChannelAndFolder() {
   assert.equal(folderLast.msg.config.download_dir, '/home/user/Podcasts', 'custom download_dir persisted');
 }
 
+async function testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function fire(el, type) {
+    const fns = (el.listeners && el.listeners[type]) || [];
+    for (const fn of fns) await fn({ target: el });
+  }
+
+  for (const invalid of ['0', '-5', 'not-a-number', '1.5']) {
+    const fx = createPopupFixture({
+      ok: true,
+      version: '2.4.0',
+      config: { audio_format: 'best', channel_mode: 'stereo', long_audio_minutes: 30 },
+      deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
+      yt_dlp_status: { outdated: false },
+    });
+    fx.triggerReady();
+    await tick(20);
+    fx.nativeCalls.length = 0;
+    fx.elements.get('longAudioMinutes').value = invalid;
+    fx.elements.get('audioFormat').value = 'flac';
+    fx.elements.get('channelMode').value = 'mono';
+    fx.elements.get('longAudioEnabled').checked = true;
+    await fire(fx.elements.get('audioFormat'), 'change');
+    await tick(10);
+
+    const saved = [...fx.nativeCalls].reverse().find(
+      (call) => call.msg && call.msg.action === 'set_config'
+    );
+    assert.ok(saved, `invalid ${invalid} still allows the batch config save`);
+    assert.equal(saved.msg.config.long_audio_minutes, 30, `${invalid} is normalized to 30`);
+    assert.equal(saved.msg.config.audio_format, 'flac', 'the codec selection is retained');
+    assert.equal(saved.msg.config.channel_mode, 'mono', 'the channel selection is retained');
+    assert.equal(saved.msg.config.long_audio_enabled, true, 'the toggle is retained');
+    assert.equal(fx.elements.get('longAudioMinutes').value, '30', 'the input is corrected');
+  }
+}
+
 function testSignScript() {
   const sh = readFile('scripts/sign-xpi.sh');
   assertAsciiNoEmoji('scripts/sign-xpi.sh', sh);
@@ -1262,6 +1299,7 @@ async function main() {
   await testPopupUpdateNote();
   await testPopupAudioFormatAndRsgainGuard();
   await testPopupChannelAndFolder();
+  await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   testSignScript();
   testBuildScript();
   console.log('Firefox extension fixture tests passed');

@@ -109,11 +109,11 @@ The remaining **Audio Format** options, selectable in the Firefox popup or via
 
 - **`opus`**: forces Opus output — prefers `bestaudio[acodec=opus]/bestaudio`,
   copies the native Opus stream when stereo and available, and otherwise
-  transcodes to Opus via FFmpeg (`--audio-quality 128K` stereo, `75K` mono).
+  transcodes to Opus via FFmpeg (`--audio-quality 128K` stereo, `96K` mono).
   Cuts default to Opus at `128 kbps` VBR stereo / `75 kbps` mono.
 - **`m4a`**: downloads YouTube's native AAC `.m4a` stream without re-encoding
   whenever available (`bestaudio[ext=m4a]/bestaudio`), converting via FFmpeg
-  only if no native `.m4a` stream exists.
+  if no native `.m4a` stream exists or a mono downmix is requested.
 - **`ogg`** (Vorbis, quality `0`) and **`flac`**: convert via FFmpeg. Note that
   FLAC cannot restore quality lost in the source stream — it only preserves
   the decoded source losslessly in a larger file.
@@ -129,12 +129,13 @@ configured format settings instead of prompting.
 
 **Channels (`channel_mode`, Stereo by default):** `Stereo` keeps 2-channel
 output; `Mono` downmixes to 1-channel mono (`-ac 1`) with psychoacoustic
-bitrate scaling (roughly 60–65% of stereo, not half, because stereo codecs
-already share mid/side information): native Opus `best` becomes Opus `96k`
-VBR mono, the `opus` format becomes `75K` mono (vs `128K` stereo), MP3
+bitrate scaling (roughly 60–75% of stereo, not half, because stereo codecs
+already share mid/side information): `best` and forced `opus` use Opus `96k`
+mono, while Opus cuts default to `75K` mono (vs `128K` stereo), MP3
 `V0`/`V2`/`V5` scale automatically via LAME VBR while `320k` CBR maps to
-`192k` CBR mono, and `m4a`/`ogg`/`flac` add `-ac 1` with their existing
-quality settings. `Ask each time` prompts per download (`(s)tereo or (m)ono`,
+`192k` CBR mono, and `m4a`/`ogg`/`flac` retain their configured qualities while
+the companion encodes a true one-channel output. `Ask each time` prompts per
+download (`(s)tereo or (m)ono`,
 defaulting to stereo); non-interactive runs fall back to stereo.
 
 ## What you need
@@ -211,7 +212,7 @@ system packages automatically.
 sudo apt update
 sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
   nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools \
-  xdg-utils desktop-file-utils
+  desktop-file-utils
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
 cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
@@ -228,7 +229,7 @@ Wayland clipboard/primary-selection support.
 sudo apt update
 sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
   nodejs gnome-terminal libnotify-bin xclip xsel playerctl \
-  qt6-tools-dev-tools xdg-utils desktop-file-utils
+  qt6-tools-dev-tools desktop-file-utils
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
 cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
@@ -248,7 +249,7 @@ systems, for example:
 
 ```sh
 sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil \
-  xdg-utils desktop-file-utils
+  desktop-file-utils
 # Optional features / desktop integrations:
 sudo apt install rsgain wl-clipboard xclip xsel playerctl
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
@@ -439,7 +440,7 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 139 Python tests
+python3 -m unittest discover -s tests -v  # 149 Python tests
 bash tests/test_shortcut.sh               # 41 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh

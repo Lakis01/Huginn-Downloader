@@ -141,11 +141,11 @@ it to AMO's review and content policies.
 
    | Permission | Suggested explanation for the form |
    | --- | --- |
-   | `nativeMessaging` | Sends a user-selected mode and YouTube URL to the user's locally installed companion, receives its settings/status, and starts a local `yt-dlp` download. It is the extension's only connection to the companion; the companion is installed and run by the user. |
-   | `menus` | Adds the YouTube Downloader submenu and its Audio, Video, and Cut Audio actions to Firefox's right-click menu. |
-   | `activeTab` | Reads the active page URL only in response to a user action so the extension can choose the current YouTube page when no link/card URL is available. It is not used to inspect unrelated browsing history. |
-   | `*://*.youtube.com/*`, `*://youtube.com/*` | Loads the download controls on YouTube pages and allows the context action to use YouTube page URLs. The content script is limited to YouTube pages. |
-   | `*://*.youtu.be/*`, `*://youtu.be/*` | Permits short YouTube links in browser context actions and validates them before passing a user-selected URL to the local companion. |
+   | `nativeMessaging` | After an explicit user action, sends the selected mode and safe HTTP(S) URL to the user's locally installed companion and receives its settings/status. The local companion runs `yt-dlp` on the user's computer; the extension does not send URLs to a project server. |
+   | `menus` | Adds Audio, Video, and Cut Audio actions to Firefox's right-click context menu. A user may explicitly select a safe HTTP(S) page or link on any site. |
+   | `activeTab` | Reads the active page URL only after the user invokes a context action and only when no link/card URL is available. The user-selected URL may be from any site; this permission is not used to inspect browsing history. |
+   | `*://*.youtube.com/*`, `*://youtube.com/*` | Loads the content script and watch-page download controls on YouTube pages. These controls remain scoped to `youtube.com`; the context menu can also pass a user-selected safe HTTP(S) URL from another site. |
+   | `*://*.youtu.be/*`, `*://youtu.be/*` | Supports short YouTube links in context actions. This host access does not expand the content script beyond `youtube.com`; context actions on other safe HTTP(S) sites are handled through the user-selected context URL. |
 
    Enter these explanations in AMO's permission-purpose fields, adjusting
    only if the manifest or implementation changes. Do not claim that a
@@ -154,9 +154,10 @@ it to AMO's review and content policies.
    collected** (or the equivalent option that means none). The Gecko manifest
    declares `data_collection_permissions.required: ["none"]`. The add-on has
    no analytics, advertising, account, or telemetry service and does not send
-   browsing data to its author. A URL and chosen mode cross Firefox's Native
-   Messaging boundary to the user's own companion only after the user selects
-   a download action; `yt-dlp` then makes the media request from that computer.
+   browsing data to its author or any project server. A user-selected safe
+   HTTP(S) URL and chosen mode cross Firefox's Native Messaging boundary to the
+   user's own companion only after an explicit click; the local companion and
+   `yt-dlp` handle the URL and make the media request from that computer.
    Re-answer if a future version adds analytics, cloud services, or other
    collection.
 7. Submit for review. Respond to AMO reviewer questions in the developer

@@ -343,10 +343,24 @@ def _move_collision_safe(source_path, target_path):
             try:
                 shutil.copy2(source_path, temporary_path)
                 try:
-                    os.link(temporary_path, candidate)
+                    descriptor = os.open(
+                        candidate,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                    )
                 except FileExistsError:
                     number += 1
                     continue
+                try:
+                    with os.fdopen(descriptor, "wb") as destination:
+                        with temporary_path.open("rb") as source:
+                            shutil.copyfileobj(source, destination)
+                        destination.flush()
+                        os.fsync(destination.fileno())
+                    shutil.copystat(temporary_path, candidate)
+                except Exception:
+                    candidate.unlink(missing_ok=True)
+                    raise
             finally:
                 temporary_path.unlink(missing_ok=True)
         source_path.unlink()
@@ -384,6 +398,11 @@ def _read_track_gain(final_path):
 
             tags = OggVorbis(final_path).tags
             values = tags.get("REPLAYGAIN_TRACK_GAIN", []) if tags is not None else []
+            return values[0] if values else None
+        if suffix == ".flac":
+            from mutagen.flac import FLAC
+
+            values = FLAC(final_path).tags.get("REPLAYGAIN_TRACK_GAIN", [])
             return values[0] if values else None
         if suffix == ".mp3":
             from mutagen.mp3 import MP3
@@ -504,7 +523,7 @@ def finalize_audio_download(
         f"{_final_stem(meta, filename_suffix)}{media_path.suffix}"
     )
     long_dir = _long_audio_target_dir(cfg, duration)
-    if long_dir is not None:
+    if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
         target_path = long_dir / target_path.name
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=".yt-dlp-tagging-", suffix=media_path.suffix, dir=media_path.parent
@@ -540,6 +559,163 @@ def _audio_output_template(meta, suffix=""):
     return f"{_final_stem(meta, suffix)}.%(ext)s"
 
 
+def _move_audio_sidecar(source_path, target_path):
+    """Move yt-dlp's info JSON when a post-download encode changes the suffix."""
+    source_path = Path(source_path)
+    target_path = Path(target_path)
+    source_info = _info_sidecar_path(source_path)
+    if not source_info.is_file():
+        return
+    target_info = target_path.with_suffix(".info.json")
+    if source_info.resolve() == target_info.resolve():
+        return
+    if target_info.exists():
+        raise _YtDlpError(
+            f"Unable to preserve yt-dlp metadata: sidecar already exists at '{target_info}'"
+        )
+    os.replace(source_info, target_info)
+
+
+def _ensure_audio_properties(
+    media_path,
+    config,
+    *,
+    requested_bitrate=None,
+    application="audio",
+    force_opus_cut=False,
+):
+    """Enforce final audio channels/codec after yt-dlp's possible stream-copy."""
+    media_path = Path(media_path).expanduser()
+    cfg = dict(config) if config is not None else load_config()
+    try:
+        probe_result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_streams", "-show_format",
+                "-of", "json", str(media_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        probe = json.loads(probe_result.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        detail = _yt_dlp_error_text(error)
+        raise _YtDlpError(f"Unable to inspect completed audio '{media_path}': {detail}") from None
+
+    container_info = probe.get("format", {})
+    container_name = container_info.get("format_name") or media_path.suffix.lstrip(".")
+    streams = probe.get("streams", [])
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    if not audio_streams:
+        raise _YtDlpError(
+            f"No audio stream found in completed media '{media_path}' ({container_name})"
+        )
+
+    audio_format = cfg.get("audio_format", "best")
+    channel_mode = cfg.get("channel_mode")
+    if channel_mode not in {"stereo", "ask", "mono"}:
+        channel_mode = "mono" if cfg.get("mono_audio") is True else "stereo"
+    mono = channel_mode == "mono"
+    if not mono and not force_opus_cut:
+        return media_path
+
+    if force_opus_cut or audio_format in {"best", "opus"}:
+        output_suffix = ".opus"
+        encoder = "libopus"
+        target_codec = "opus"
+    elif audio_format == "mp3":
+        output_suffix = ".mp3"
+        encoder = "libmp3lame"
+        target_codec = "mp3"
+    elif audio_format == "m4a":
+        output_suffix = ".m4a"
+        encoder = "aac"
+        target_codec = "aac"
+    elif audio_format == "ogg":
+        output_suffix = ".ogg"
+        encoder = "libvorbis"
+        target_codec = "vorbis"
+    elif audio_format == "flac":
+        output_suffix = ".flac"
+        encoder = "flac"
+        target_codec = "flac"
+    else:
+        return media_path
+
+    desired_channels = 1 if mono else 2
+    source_codec = audio_streams[0].get("codec_name")
+    needs_encode = force_opus_cut or any(
+        stream.get("channels") != desired_channels for stream in audio_streams
+    ) or source_codec != target_codec
+    target_path = media_path.with_suffix(output_suffix)
+    needs_remux = target_path.suffix.lower() != media_path.suffix.lower()
+    if not needs_encode and not needs_remux:
+        return media_path
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".yt-dlp-audio-", suffix=output_suffix, dir=media_path.parent
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    temporary_path.unlink(missing_ok=True)
+    command = [
+        "ffmpeg", "-y", "-v", "error", "-i", str(media_path),
+        "-map", "0", "-map_metadata", "0", "-c", "copy",
+    ]
+    if needs_encode:
+        command.extend(["-c:a", encoder])
+        if encoder == "libopus":
+            default_bitrate = 128 if force_opus_cut and desired_channels == 2 else (
+                75 if force_opus_cut else 96
+            )
+            bitrate = str(requested_bitrate or default_bitrate).strip().lower()
+            if bitrate.endswith("k"):
+                bitrate = bitrate[:-1]
+            if not bitrate.isdecimal() or int(bitrate) <= 0:
+                raise _YtDlpError("Opus bitrate must be a positive integer in kbps")
+            command.extend(["-b:a", f"{bitrate}k"])
+            if force_opus_cut:
+                command.extend([
+                    "-vbr", "on", "-ac", str(desired_channels),
+                    "-application", application if application in {"audio", "voip"} else "audio",
+                ])
+        elif encoder == "libmp3lame":
+            quality = cfg.get("mp3_quality", "V0")
+            if quality == "128k":
+                quality = "V5"
+            if quality == "320k":
+                command.extend(["-b:a", "192K" if mono else "320K"])
+            else:
+                command.extend(["-q:a", {"V0": "0", "V2": "2", "V5": "5"}.get(quality, "0")])
+        elif encoder == "libvorbis":
+            command.extend(["-q:a", "0"])
+        elif encoder == "aac":
+            # Match yt-dlp's default AAC quality (preferredquality=5).
+            command.extend(["-q:a", "2.05"])
+        if mono:
+            command.extend(["-ac", "1"])
+    command.append(str(temporary_path))
+
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
+            raise _YtDlpError(f"FFmpeg produced no output while converting '{media_path}'")
+        if target_path == media_path:
+            os.replace(temporary_path, media_path)
+            return media_path
+        final_path = _move_collision_safe(temporary_path, target_path)
+        media_path.unlink()
+        return final_path
+    except subprocess.CalledProcessError as error:
+        detail = _yt_dlp_error_text(error)
+        raise _YtDlpError(
+            "FFmpeg could not preserve all media streams, metadata, and artwork "
+            f"while converting '{media_path}' ({container_name}, {source_codec}): {detail}"
+        ) from None
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     cfg = dict(config) if config is not None else load_config()
     audio_format = cfg.get("audio_format", "best")
@@ -552,8 +728,8 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     mono = channel_mode == "mono"
     if audio_format == "opus":
         args = [
-            "-f", "bestaudio", "-x", "--audio-format", "opus",
-            "--audio-quality", "75K" if mono else "128K",
+            "-f", "bestaudio[acodec=opus]/bestaudio", "-x", "--audio-format", "opus",
+            "--audio-quality", "96K" if mono else "128K",
         ]
         if mono:
             args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
@@ -721,6 +897,10 @@ def download_audio(url, config=None):
         ]
         _run_with_auth_retry(command)
         filepath = _read_print_to_file(print_path)
+        original_filepath = filepath
+        filepath = _ensure_audio_properties(filepath, cfg)
+        if Path(filepath) != Path(original_filepath):
+            _move_audio_sidecar(original_filepath, filepath)
         duration = _read_duration_print_to_file(duration_path)
         return finalize_audio_download(filepath, "", cfg, duration)
     finally:
@@ -798,6 +978,7 @@ def interactive_cut(url, config=None):
     channels = "1" if cfg["channel_mode"] == "mono" else "2"
     cut_config = dict(cfg)
     audio_format = cfg.get("audio_format", "best")
+    force_opus_cut = audio_format in {"best", "opus"}
     if audio_format in {"best", "opus"}:
         default_bitrate = "75" if channels == "1" else "128"
         bitrate = input(
@@ -811,16 +992,17 @@ def interactive_cut(url, config=None):
         ]
         ffmpeg_options = " ".join(ffmpeg_args)
         format_args = [
-            "-f", "bestaudio", "-x", "--audio-format", "opus",
+            "-f",
+            "bestaudio[acodec=opus]/bestaudio" if audio_format == "opus" else "bestaudio",
         ]
-        postprocessor_args = f"ExtractAudio:{ffmpeg_options}"
+        postprocessor_args = None
         print(f"Applying FFmpeg overrides: {ffmpeg_options}")
     else:
         format_args = _audio_format_args(cut_config)
         postprocessor_args = None
         ffmpeg_options = "configured format settings"
     print(f"\nProceeding with cut: {format_time(start_sec)} to {format_time(end_sec)}")
-    if postprocessor_args is None:
+    if not force_opus_cut and postprocessor_args is None:
         print(f"Applying FFmpeg overrides: {ffmpeg_options}\n")
     else:
         print()
@@ -862,10 +1044,12 @@ def interactive_cut(url, config=None):
                     if thumbnail_jpg:
                         extras.extend(["--convert-thumbnails", "jpg"])
             output_template = _audio_output_template(meta, filename_suffix)
+            section_args = ["--download-sections", f"*{start_sec}-{end_sec}"]
+            if not force_opus_cut:
+                section_args.append("--force-keyframes-at-cuts")
             rest = [
                 *extras,
-                "--download-sections", f"*{start_sec}-{end_sec}",
-                "--force-keyframes-at-cuts",
+                *section_args,
                 *format_args,
                 "--quiet",
                 "--no-playlist",
@@ -886,6 +1070,19 @@ def interactive_cut(url, config=None):
                     raise _YtDlpError(_yt_dlp_error_text(error)) from None
                 _run_with_auth_retry(["yt-dlp", *rest, "--", url])
             filepath = _read_print_to_file(print_path)
+            original_filepath = filepath
+            if force_opus_cut:
+                filepath = _ensure_audio_properties(
+                    filepath,
+                    cfg,
+                    requested_bitrate=bitrate,
+                    application=app_type,
+                    force_opus_cut=True,
+                )
+            else:
+                filepath = _ensure_audio_properties(filepath, cfg)
+            if Path(filepath) != Path(original_filepath):
+                _move_audio_sidecar(original_filepath, filepath)
             return finalize_audio_download(
                 filepath, filename_suffix, cfg, end_sec - start_sec
             )

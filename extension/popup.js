@@ -85,6 +85,12 @@ function pushConfig() {
   const audioEl = $('audioFormat');
   const qualityEl = $('mp3Quality');
   const channelEl = $('channelMode');
+  const minutesEl = $('longAudioMinutes');
+  const minutesValue = minutesEl ? Number(minutesEl.value) : 30;
+  const longAudioMinutes = Number.isInteger(minutesValue) && minutesValue > 0
+    ? minutesValue
+    : 30;
+  if (minutesEl) minutesEl.value = String(longAudioMinutes);
   saveConfig({
     audio_format: audioEl && audioEl.value ? audioEl.value : 'best',
     mp3_quality: qualityEl && qualityEl.value ? qualityEl.value : 'V0',
@@ -92,7 +98,7 @@ function pushConfig() {
     embed_thumbnail: $('embedThumbnail') ? $('embedThumbnail').checked : true,
     thumbnail_jpg: $('thumbnailJpg') ? $('thumbnailJpg').checked : false,
     long_audio_enabled: $('longAudioEnabled') ? $('longAudioEnabled').checked : false,
-    long_audio_minutes: $('longAudioMinutes') && $('longAudioMinutes').value ? parseInt($('longAudioMinutes').value, 10) : 30,
+    long_audio_minutes: longAudioMinutes,
     long_audio_dir: $('longAudioDir') && $('longAudioDir').value.trim() ? $('longAudioDir').value.trim() : '~/Podcasts',
   });
 }
