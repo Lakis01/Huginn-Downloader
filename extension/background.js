@@ -12,10 +12,11 @@ const MENU_MODES = {
   'ytdl-cut': 'cut',
 };
 
-// Static parent-process patterns: the menu shows on YouTube pages
-// without a dynamic visibility gate. Inline hover-autoplay previews
-// have no stable link target, so a dynamic gate hid the menu there.
-const YT_DOC_PATTERNS = ['*://*.youtube.com/*', '*://youtube.com/*', '*://*.youtu.be/*', '*://youtu.be/*'];
+// No documentUrlPatterns or targetUrlPatterns: Firefox rejects menu items
+// blocked by URL patterns before display (bare page background has no
+// target URL; hover-autoplay mounts about:blank frames; thumbnails use
+// i.ytimg.com srcUrl and previews use blob: srcUrl). Like Play in MPV,
+// the menu is always present and the native host validates the URL.
 const MENU_CONTEXTS = ['page', 'frame', 'link', 'image', 'video', 'audio', 'selection'];
 
 // Guards so repeated setup runs never attach duplicate listeners.
@@ -125,15 +126,19 @@ function handlePillMessage(message) {
   return sendDownload(mode, message.url || null, message.fallbacks || []);
 }
 
-function setupMenus() {
+async function setupMenus() {
   const menus = menusApi();
   if (!menus) return;
+  try {
+    if (menus.removeAll) await menus.removeAll();
+  } catch (_error) {
+    // Fresh install has nothing to remove; continue to creation.
+  }
   const items = [
     {
       id: 'ytdl-root',
       title: 'YouTube Downloader',
       contexts: MENU_CONTEXTS.slice(),
-      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' },
     },
     {
@@ -141,7 +146,6 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Audio',
       contexts: MENU_CONTEXTS.slice(),
-      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/audio.svg', 32: 'icons/audio.svg' },
     },
     {
@@ -149,7 +153,6 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Video',
       contexts: MENU_CONTEXTS.slice(),
-      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/video.svg', 32: 'icons/video.svg' },
     },
     {
@@ -157,7 +160,6 @@ function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Cut Audio',
       contexts: MENU_CONTEXTS.slice(),
-      documentUrlPatterns: YT_DOC_PATTERNS.slice(),
       icons: { 16: 'icons/cut.svg', 32: 'icons/cut.svg' },
     },
   ];
@@ -165,12 +167,21 @@ function setupMenus() {
     try {
       const created = menus.create(item);
       if (created && typeof created.catch === 'function') {
-        created.catch(() => {
-          // Re-installs may race duplicate creation; the menu still stands.
+        await created.catch(async () => {
+          // A stale persisted menu can block creation; update instead.
+          try {
+            if (menus.update) await menus.update(item.id, item);
+          } catch (_updateError) {
+            // Menu still stands; nothing to repair.
+          }
         });
       }
     } catch (_error) {
-      // Re-installs may race duplicate creation; the menu still stands.
+      try {
+        if (menus.update) await menus.update(item.id, item);
+      } catch (_updateError) {
+        // Menu still stands; nothing to repair.
+      }
     }
   }
 }
@@ -206,5 +217,5 @@ attachHooks();
 setupMenus();
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { HOST_ID, MENU_MODES, YT_DOC_PATTERNS, MENU_CONTEXTS, isYouTubeUrl, dedupeUrls };
+  module.exports = { HOST_ID, MENU_MODES, MENU_CONTEXTS, isYouTubeUrl, dedupeUrls };
 }

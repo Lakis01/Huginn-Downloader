@@ -392,11 +392,40 @@ def _run_rsgain(final_path):
         print(f"ReplayGain normalization complete: {final_path}")
 
 
+def _long_audio_target_dir(cfg, duration_seconds) -> Path | None:
+    """Return the long-audio directory when routing applies, else None."""
+    try:
+        enabled = bool(cfg.get("long_audio_enabled", False))
+        minutes = cfg.get("long_audio_minutes", 30)
+        long_dir = cfg.get("long_audio_dir", "~/Podcasts")
+    except Exception:
+        return None
+    if not enabled:
+        return None
+    try:
+        threshold = float(minutes) * 60.0
+        duration = float(duration_seconds or 0)
+    except (TypeError, ValueError):
+        return None
+    if duration < threshold or threshold <= 0:
+        return None
+    if not isinstance(long_dir, str) or not long_dir.strip():
+        return None
+    path = Path(os.path.expanduser(long_dir)).expanduser()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return path
+
+
 def finalize_audio_download(media_path, filename_suffix="", config=None):
     """Tag an audio download transactionally, rename it, clean sidecars, gain."""
     cfg = dict(config) if config is not None else load_config()
     auto_tag = cfg.get("auto_tag", True)
     do_rsgain = cfg.get("rsgain", False)
+    embed_thumbnail = cfg.get("embed_thumbnail", True)
+    thumbnail_jpg = cfg.get("thumbnail_jpg", False)
     media_path = Path(media_path).expanduser().resolve()
     if not auto_tag:
         print("Skipping automatic tag extraction (auto_tag=false).")
@@ -404,6 +433,14 @@ def finalize_audio_download(media_path, filename_suffix="", config=None):
         if do_rsgain:
             print("ReplayGain normalization (rsgain: analyzing -> applying)...")
             _run_rsgain(str(media_path))
+        long_dir = _long_audio_target_dir(cfg, 0)
+        if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
+            try:
+                dest = long_dir / media_path.name
+                shutil.move(str(media_path), str(dest))
+                return str(dest)
+            except OSError:
+                pass
         return str(media_path)
     info_path = _info_sidecar_path(media_path)
     try:
@@ -423,11 +460,14 @@ def finalize_audio_download(media_path, filename_suffix="", config=None):
         )
     else:
         print("\n\033[1;34mStandard track detected.\033[0m\n")
-    thumbnail_path = _find_thumbnail(media_path, info)
+    thumbnail_path = _find_thumbnail(media_path, info) if embed_thumbnail else None
 
     target_path = media_path.with_name(
         f"{_final_stem(meta, filename_suffix)}{media_path.suffix}"
     )
+    long_dir = _long_audio_target_dir(cfg, meta.get("duration", 0))
+    if long_dir is not None:
+        target_path = long_dir / target_path.name
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=".yt-dlp-tagging-", suffix=media_path.suffix, dir=media_path.parent
     )
@@ -437,8 +477,12 @@ def finalize_audio_download(media_path, filename_suffix="", config=None):
     try:
         shutil.copy2(media_path, temp_path)
         print("[2/2] Automatic tag extraction & cover art...")
+        # thumbnail_jpg=True forces JPEG across all containers for legacy players;
+        # otherwise tag_audio_file picks WebP for Opus/Ogg/MP3/FLAC and JPEG for M4A.
+        prefer_webp = False if thumbnail_jpg else None
         tag_audio_file(
-            str(temp_path), meta, str(thumbnail_path) if thumbnail_path else None
+            str(temp_path), meta, str(thumbnail_path) if thumbnail_path else None,
+            prefer_webp=prefer_webp,
         )
         final_path = _commit_tagged_file(temp_path, media_path, target_path)
     except Exception:
@@ -461,29 +505,51 @@ def _audio_output_template(meta, suffix=""):
 def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     cfg = dict(config) if config is not None else load_config()
     audio_format = cfg.get("audio_format", "best")
+    mp3_quality = cfg.get("mp3_quality", "V0")
+    if mp3_quality == "128k":
+        mp3_quality = "V5"
+    mono = bool(cfg.get("mono_audio", False))
     if audio_format == "mp3":
         quality = {
             "V0": "0",
-            "320k": "320K",
+            "320k": "192K" if mono else "320K",
             "V2": "2",
-            "128k": "128K",
-        }.get(cfg.get("mp3_quality", "V0"), "0")
-        return [
+            "V5": "5",
+        }.get(mp3_quality, "0")
+        args = [
             "-f", "bestaudio", "-x", "--audio-format", "mp3",
             "--audio-quality", quality,
         ]
+        if mono:
+            args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
+        return args
     if audio_format == "m4a":
-        return [
+        args = [
             "-f", "bestaudio[ext=m4a]/bestaudio", "-x",
             "--audio-format", "m4a",
         ]
+        if mono:
+            args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
+        return args
     if audio_format == "ogg":
-        return [
+        args = [
             "-f", "bestaudio", "-x", "--audio-format", "vorbis",
             "--audio-quality", "0",
         ]
+        if mono:
+            args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
+        return args
     if audio_format == "flac":
-        return ["-f", "bestaudio", "-x", "--audio-format", "flac"]
+        args = ["-f", "bestaudio", "-x", "--audio-format", "flac"]
+        if mono:
+            args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
+        return args
+    if mono:
+        return [
+            "-f", "bestaudio", "-x", "--audio-format", "opus",
+            "--audio-quality", "96K",
+            "--postprocessor-args", "ExtractAudio:-ac 1",
+        ]
     return ["-f", "bestaudio", "-x", "--audio-format", "best"]
 
 
@@ -538,6 +604,8 @@ def _remove_temp_file(path):
 def download_audio(url, config=None):
     cfg = dict(config) if config is not None else load_config()
     auto_tag = cfg.get("auto_tag", True)
+    embed_thumbnail = cfg.get("embed_thumbnail", True)
+    thumbnail_jpg = cfg.get("thumbnail_jpg", False)
     effective_dir = effective_download_dir(cfg)
     print(f"[1/2] Downloading audio from {url}...")
     print_path = _new_print_to_file()
@@ -550,13 +618,19 @@ def download_audio(url, config=None):
         if auto_tag:
             extras.extend([
                 "--write-info-json",
-                "--write-thumbnail",
             ])
+            if embed_thumbnail:
+                extras.append("--write-thumbnail")
+                if thumbnail_jpg:
+                    extras.extend(["--convert-thumbnails", "jpg"])
         else:
             extras.extend([
                 "--embed-metadata",
-                "--embed-thumbnail",
             ])
+            if embed_thumbnail:
+                extras.append("--embed-thumbnail")
+                if thumbnail_jpg:
+                    extras.extend(["--convert-thumbnails", "jpg"])
         command = [
             "yt-dlp",
             *extras,
@@ -646,8 +720,11 @@ def interactive_cut(url, config=None):
         )
 
     print("\n--- Encoding Settings ---")
-    bitrate = input("Bitrate in kbps (VBR is forced on) [Default: 117]: ").strip() or "117"
-    channels_in = input("Number of channels (1 or 2) [Default: 2]: ").strip() or "2"
+    mono_default = bool(cfg.get("mono_audio", False))
+    default_bitrate = "75" if mono_default else "117"
+    default_channels = "1" if mono_default else "2"
+    bitrate = input(f"Bitrate in kbps (VBR is forced on) [Default: {default_bitrate}]: ").strip() or default_bitrate
+    channels_in = input(f"Number of channels (1 or 2) [Default: {default_channels}]: ").strip() or default_channels
     channels = "1" if channels_in == "1" else "2"
     app_in = input("Application flag (voip or audio) [Default: audio]: ").strip().lower() or "audio"
     app_type = "voip" if app_in in ["voip", "v"] else "audio"
@@ -681,17 +758,25 @@ def interactive_cut(url, config=None):
             effective_dir = effective_download_dir(cfg)
             if effective_dir is not None:
                 extras.extend(["-P", effective_dir])
+            embed_thumbnail = cfg.get("embed_thumbnail", True)
+            thumbnail_jpg = cfg.get("thumbnail_jpg", False)
             if auto_tag:
                 extras.extend([
                     "--write-info-json",
-                    "--write-thumbnail",
                 ])
+                if embed_thumbnail:
+                    extras.append("--write-thumbnail")
+                    if thumbnail_jpg:
+                        extras.extend(["--convert-thumbnails", "jpg"])
                 output_template = _audio_output_template(meta, filename_suffix)
             else:
                 extras.extend([
                     "--embed-metadata",
-                    "--embed-thumbnail",
                 ])
+                if embed_thumbnail:
+                    extras.append("--embed-thumbnail")
+                    if thumbnail_jpg:
+                        extras.extend(["--convert-thumbnails", "jpg"])
                 output_template = "%(title)s.%(ext)s"
             rest = [
                 *extras,

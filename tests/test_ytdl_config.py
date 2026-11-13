@@ -34,6 +34,12 @@ class ConfigTests(unittest.TestCase):
                 "rsgain": False,
                 "audio_format": "best",
                 "mp3_quality": "V0",
+                "embed_thumbnail": True,
+                "thumbnail_jpg": False,
+                "mono_audio": False,
+                "long_audio_enabled": False,
+                "long_audio_minutes": 30,
+                "long_audio_dir": "~/Podcasts",
             },
         )
         self.assertEqual(DEFAULT_FRESH_DOWNLOAD_DIR, "~/Music/Youtube Downloads")
@@ -62,6 +68,12 @@ class ConfigTests(unittest.TestCase):
                 "rsgain": True,
                 "audio_format": "best",
                 "mp3_quality": "V0",
+                "embed_thumbnail": True,
+                "thumbnail_jpg": False,
+                "mono_audio": False,
+                "long_audio_enabled": False,
+                "long_audio_minutes": 30,
+                "long_audio_dir": "~/Podcasts",
             }
 
             saved_path = save_config(expected, env)
@@ -78,7 +90,7 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             getattr(ytdl_config, "SUPPORTED_MP3_QUALITIES", None),
-            ("V0", "320k", "V2", "128k"),
+            ("V0", "320k", "V2", "V5"),
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = config_path({"HOME": tmp})
@@ -99,6 +111,12 @@ class ConfigTests(unittest.TestCase):
                 "rsgain": False,
                 "audio_format": "mp3",
                 "mp3_quality": "320k",
+                "embed_thumbnail": True,
+                "thumbnail_jpg": False,
+                "mono_audio": False,
+                "long_audio_enabled": False,
+                "long_audio_minutes": 30,
+                "long_audio_dir": "~/Podcasts",
             }
 
             save_config(expected, env)
@@ -168,6 +186,39 @@ class ConfigTests(unittest.TestCase):
             legacy_config.write_text("--no-playlist\n", encoding="utf-8")
 
             self.assertTrue(ytdlp_config_exists(env))
+
+
+
+    def test_new_pipeline_defaults_and_legacy_mp3_alias(self):
+        import ytdl_config
+        self.assertEqual(ytdl_config.SUPPORTED_MP3_QUALITIES, ("V0", "320k", "V2", "V5"))
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            config = load_config(env)
+            self.assertTrue(config["embed_thumbnail"])
+            self.assertFalse(config["thumbnail_jpg"])
+            self.assertFalse(config["mono_audio"])
+            self.assertFalse(config["long_audio_enabled"])
+            self.assertEqual(config["long_audio_minutes"], 30)
+            self.assertEqual(config["long_audio_dir"], "~/Podcasts")
+            path = config_path(env)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            path.write_text(json.dumps({"mp3_quality": "128k"}))
+            self.assertEqual(load_config(env)["mp3_quality"], "V5")
+            save_config({"audio_format": "mp3", "mp3_quality": "V5", "embed_thumbnail": False, "thumbnail_jpg": True, "mono_audio": True, "long_audio_enabled": True, "long_audio_minutes": 45, "long_audio_dir": "~/Audiobooks"}, env)
+            reloaded = load_config(env)
+            self.assertEqual(reloaded["mp3_quality"], "V5")
+            self.assertFalse(reloaded["embed_thumbnail"])
+            self.assertTrue(reloaded["thumbnail_jpg"])
+            self.assertTrue(reloaded["mono_audio"])
+            self.assertTrue(reloaded["long_audio_enabled"])
+            self.assertEqual(reloaded["long_audio_minutes"], 45)
+            self.assertEqual(reloaded["long_audio_dir"], "~/Audiobooks")
+            with self.assertRaises((TypeError, ValueError)):
+                save_config({"long_audio_minutes": 0}, env)
+            with self.assertRaises((TypeError, ValueError)):
+                save_config({"long_audio_dir": "   "}, env)
 
 
 if __name__ == "__main__":

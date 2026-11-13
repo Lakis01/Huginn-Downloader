@@ -41,10 +41,43 @@
         <option value="V0">V0 (~245 kbps VBR — Recommended)</option>
         <option value="320k">320 kbps CBR (maximum size)</option>
         <option value="V2">V2 (~190 kbps VBR — balanced)</option>
-        <option value="128k">128 kbps CBR (compact / speech)</option>
+        <option value="V5">V5 (~130 kbps VBR — compact / speech)</option>
       </select>
     </div>
     <p class="note" id="formatNote"></p>
+
+    <h2>Cover art</h2>
+    <label class="toggle">
+      <input type="checkbox" id="embedThumbnail">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">Embed thumbnail picture (on by default)</span>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="thumbnailJpg">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">Convert thumbnail to JPEG (legacy devices)</span>
+    </label>
+
+    <h2>Channels</h2>
+    <label class="toggle">
+      <input type="checkbox" id="monoAudio">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">Encode as mono audio (off by default)</span>
+    </label>
+
+    <h2>Long audio routing</h2>
+    <label class="toggle">
+      <input type="checkbox" id="longAudioEnabled">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">Send long audio to a separate folder</span>
+    </label>
+    <div id="longAudioRow" class="sub-row" hidden>
+      <label for="longAudioMinutes" class="sub-label">Longer than (minutes)</label>
+      <input type="number" id="longAudioMinutes" class="path" min="1" step="1" value="30" aria-label="Long audio threshold in minutes">
+      <label for="longAudioDir" class="sub-label">Long audio folder</label>
+      <input type="text" id="longAudioDir" class="path" placeholder="~/Podcasts" aria-label="Long audio folder">
+      <p class="note">Presets: ~/Podcasts or ~/Audiobooks, or type a custom path.</p>
+    </div>
 
     <h2>Download folder</h2>
     <div class="choices" role="radiogroup" aria-label="Download folder">

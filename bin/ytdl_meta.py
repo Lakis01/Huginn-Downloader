@@ -866,14 +866,15 @@ def strip_language_tags(filepath: str) -> None:
         audio.save()
 
 
-def tag_audio_file(filepath, meta, thumbnail_path=None) -> None:
+def tag_audio_file(filepath, meta, thumbnail_path=None, prefer_webp=None) -> None:
     """Write container-native music tags and front-cover art in place."""
     import os
 
     suffix = os.path.splitext(str(filepath))[1].lower()
     cover = None
     if thumbnail_path:
-        prefer_webp = suffix in {".opus", ".ogg", ".mp3", ".flac"}
+        if prefer_webp is None:
+            prefer_webp = suffix in {".opus", ".ogg", ".mp3", ".flac"}
         cover = _cover_image_bytes(
             thumbnail_path,
             bool((meta or {}).get("is_tagged")),

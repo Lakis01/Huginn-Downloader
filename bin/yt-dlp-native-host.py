@@ -65,6 +65,36 @@ if sys.platform == "darwin":
     _ensure_macos_gui_path()
 
 
+def _is_allowed_url(value):
+    """Accept any safe http(s) URL (no whitespace/control chars, no userinfo)."""
+    if not isinstance(value, str) or not value or value.startswith("-"):
+        return False
+    if any(ord(char) <= 0x20 or ord(char) == 0x7F for char in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        if parsed.username is not None or parsed.password is not None:
+            return False
+        hostname = (parsed.hostname or "").lower()
+        if hostname.endswith("."):
+            hostname = hostname[:-1]
+        if not hostname or len(hostname) > 253:
+            return False
+        for label in hostname.split("."):
+            ascii_label = label.encode("idna").decode("ascii")
+            if not ascii_label or len(ascii_label) > 63 or not re.fullmatch(
+                r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", ascii_label
+            ):
+                return False
+        if parsed.port not in {None, 80, 443}:
+            return False
+    except (ValueError, UnicodeError):
+        return False
+    return True
+
+
 def _is_youtube_url(value):
     if not isinstance(value, str) or not value or value.startswith("-"):
         return False
@@ -224,9 +254,9 @@ def _handle_download(message):
         return {"ok": False, "error": "fallbacks must be a list"}
 
     candidates = [message.get("url"), *fallbacks]
-    chosen_url = next((url for url in candidates if _is_youtube_url(url)), None)
+    chosen_url = next((url for url in candidates if _is_allowed_url(url)), None)
     if chosen_url is None:
-        return {"ok": False, "error": "no valid YouTube URL was provided"}
+        return {"ok": False, "error": "no valid URL was provided"}
 
     try:
         _launch_download(mode, chosen_url)
