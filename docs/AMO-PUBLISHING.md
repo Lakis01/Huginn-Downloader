@@ -67,6 +67,19 @@ file themselves and cannot discover it by searching AMO.
    `web-ext-artifacts/` (the filename includes the extension name/version).
    Keep the signed result, not the unsigned
    `dist/firefox-youtube-downloader.xpi`, as the user-facing download.
+   Maintainers can run the same flow as a one-command script instead:
+
+    ```sh
+    export AMO_JWT_ISSUER='user:...'
+    export AMO_JWT_SECRET='...'
+    ./scripts/sign-xpi.sh
+    ```
+
+    `scripts/sign-xpi.sh` submits `extension/` with
+    `npx web-ext sign --channel=unlisted`, validates the newest artifact in
+    `web-ext-artifacts/`, and copies it to the deterministic release path
+    `dist/firefox-youtube-downloader-signed.xpi`. It exits non-zero when the
+    two `AMO_JWT_*` variables are unset or when no signed `.xpi` appears.
 3. Verify it is a valid archive and contains the expected manifest/version:
 
    ```sh
@@ -163,6 +176,43 @@ privacy/permission questions. Wait for signing/review before describing the
 version as available. Keep the previous GitHub release and store listing
 clearly distinguished; a Listed version is installed through AMO, while an
 Unlisted release is installed from its signed XPI.
+
+## AMO store survival, copyright & trademark best practices
+
+- **Why Mozilla permits Native Messaging bridges.** This add-on follows the
+  same architecture as long-standing AMO-hosted extensions such as `ff2mpv`
+  and *Video DownloadHelper*'s companion mode: the XPI itself contains only a
+  Firefox interface (menus, watch-page controls, settings popup) and talks to
+  a user-installed local program over Native Messaging. It bundles no
+  downloader, ships no media-handling binary, sends nothing to a
+  project-owned server, and declares `data_collection_permissions.required:
+  ["none"]`. Reviewers evaluate the XPI on what it does — pass a
+  user-selected mode and URL to the user's own companion — which is why
+  bridges of this shape survive review.
+- **Why keeping `yt-dlp` external to the `.xpi` is essential.** Never bundle
+  `yt-dlp`, FFmpeg, `rsgain`, or Python libraries inside the signed package.
+  The XPI must remain a thin client: any downloading, transcoding, or tagging
+  capability that shipped inside the archive would be reviewed as the
+  add-on's own behavior and could trigger copyright-related rejection. With
+  `yt-dlp` installed separately by the user via their OS package manager, the
+  add-on never distributes or controls the fetching tool — the same boundary
+  that keeps the `ff2mpv` model viable.
+- **How to phrase public store titles (nominative fair use).** Do not prefix
+  the listing name with the brand (`"YouTube Downloader ..."` reads as an
+  official YouTube product). Use the `"... for YouTube"` form instead — e.g.
+  *"Downloader for YouTube (yt-dlp companion)"* — which nominatively names the
+  site the add-on interoperates with without claiming affiliation. The same
+  rule applies to icons, screenshots, and descriptions: describe compatibility
+  ("works on YouTube pages") rather than adopting YouTube branding.
+- **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases cannot be
+  broken by store delisting.** Unlisted signing produces a Mozilla signature
+  without a catalog page, and the signed artifact is attached to a GitHub
+  Release that this project controls. If a Listed catalog page were ever
+  removed or delisted, installs from the Release-attached
+  `dist/firefox-youtube-downloader-signed.xpi` keep working: the signature is
+  already issued and verified locally by Firefox, and distribution never
+  depended on the store page. Keep Listed and Unlisted versions clearly
+  distinguished so a store action can never silently break direct installs.
 
 ## Release checklist
 
