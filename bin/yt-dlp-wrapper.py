@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Download YouTube audio, video, or an interactively selected audio cut."""
 
+import errno
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -315,30 +317,56 @@ def _collision_candidate(target, number):
     return target.with_name(f"{target.stem} ({number}){target.suffix}")
 
 
+def _move_collision_safe(source_path, target_path):
+    """Move a file without replacing an existing destination, even across mounts."""
+    source_path = Path(source_path)
+    target_path = Path(target_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    number = 0
+    while True:
+        candidate = _collision_candidate(target_path, number)
+        try:
+            os.link(source_path, candidate)
+        except FileExistsError:
+            number += 1
+            continue
+        except OSError as error:
+            if error.errno not in {
+                errno.EXDEV, errno.EPERM, errno.EACCES, errno.ENOTSUP,
+            }:
+                raise
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".yt-dlp-routing-", dir=target_path.parent
+            )
+            os.close(descriptor)
+            temporary_path = Path(temporary_name)
+            try:
+                shutil.copy2(source_path, temporary_path)
+                try:
+                    os.link(temporary_path, candidate)
+                except FileExistsError:
+                    number += 1
+                    continue
+            finally:
+                temporary_path.unlink(missing_ok=True)
+        source_path.unlink()
+        return candidate
+
+
 def _commit_tagged_file(temp_path, original_path, target_path):
     """Install a tagged copy without clobbering an existing target."""
     if target_path == original_path:
         os.replace(temp_path, original_path)
         return original_path
 
-    number = 0
-    while True:
-        candidate = _collision_candidate(target_path, number)
-        try:
-            # The temp file is in the same directory, so linking is atomic and
-            # fails rather than replacing a file created by another process.
-            os.link(temp_path, candidate)
-        except FileExistsError:
-            number += 1
-            continue
-        os.unlink(temp_path)
-        try:
-            original_path.unlink()
-        except OSError:
-            # The tagged output is valid; don't remove it if source cleanup
-            # cannot complete. The caller still gets the final output path.
-            pass
-        return candidate
+    final_path = _move_collision_safe(temp_path, target_path)
+    try:
+        original_path.unlink()
+    except OSError:
+        # The tagged output is valid; don't remove it if source cleanup
+        # cannot complete. The caller still gets the final output path.
+        pass
+    return final_path
 
 
 def _read_track_gain(final_path):
@@ -407,7 +435,7 @@ def _long_audio_target_dir(cfg, duration_seconds) -> Path | None:
         duration = float(duration_seconds or 0)
     except (TypeError, ValueError):
         return None
-    if duration < threshold or threshold <= 0:
+    if duration < threshold or threshold <= 0 or not math.isfinite(duration):
         return None
     if not isinstance(long_dir, str) or not long_dir.strip():
         return None
@@ -419,8 +447,10 @@ def _long_audio_target_dir(cfg, duration_seconds) -> Path | None:
     return path
 
 
-def finalize_audio_download(media_path, filename_suffix="", config=None):
-    """Tag an audio download transactionally, rename it, clean sidecars, gain."""
+def finalize_audio_download(
+    media_path, filename_suffix="", config=None, duration_seconds=None
+) -> str:
+    """Tag, name, and route a downloaded audio file before optional ReplayGain."""
     cfg = dict(config) if config is not None else load_config()
     auto_tag = cfg.get("auto_tag", True)
     do_rsgain = cfg.get("rsgain", False)
@@ -430,18 +460,25 @@ def finalize_audio_download(media_path, filename_suffix="", config=None):
     if not auto_tag:
         print("Skipping automatic tag extraction (auto_tag=false).")
         strip_language_tags(str(media_path))
+        info_path = _info_sidecar_path(media_path) if cfg.get("long_audio_enabled") else None
+        sidecar_duration = None
+        if info_path is not None:
+            try:
+                with info_path.open("r", encoding="utf-8") as sidecar:
+                    sidecar_duration = json.load(sidecar).get("duration")
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
+        duration = duration_seconds if duration_seconds is not None else sidecar_duration
+        long_dir = _long_audio_target_dir(cfg, duration)
+        final_path = media_path
+        if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
+            final_path = _move_collision_safe(media_path, long_dir / media_path.name)
+        if info_path is not None:
+            info_path.unlink(missing_ok=True)
         if do_rsgain:
             print("ReplayGain normalization (rsgain: analyzing -> applying)...")
-            _run_rsgain(str(media_path))
-        long_dir = _long_audio_target_dir(cfg, 0)
-        if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
-            try:
-                dest = long_dir / media_path.name
-                shutil.move(str(media_path), str(dest))
-                return str(dest)
-            except OSError:
-                pass
-        return str(media_path)
+            _run_rsgain(str(final_path))
+        return str(final_path)
     info_path = _info_sidecar_path(media_path)
     try:
         with info_path.open("r", encoding="utf-8") as sidecar:
@@ -452,6 +489,7 @@ def finalize_audio_download(media_path, filename_suffix="", config=None):
             f"Unable to read yt-dlp info sidecar '{info_path}': {reason}"
         ) from None
     meta = parse_info(info)
+    duration = duration_seconds if duration_seconds is not None else meta.get("duration", 0)
     if meta["is_tagged"]:
         print("\n\033[1;32mDetected High-Quality Auto-Generated Audio track.\033[0m")
         print(
@@ -465,7 +503,7 @@ def finalize_audio_download(media_path, filename_suffix="", config=None):
     target_path = media_path.with_name(
         f"{_final_stem(meta, filename_suffix)}{media_path.suffix}"
     )
-    long_dir = _long_audio_target_dir(cfg, meta.get("duration", 0))
+    long_dir = _long_audio_target_dir(cfg, duration)
     if long_dir is not None:
         target_path = long_dir / target_path.name
     descriptor, temporary_name = tempfile.mkstemp(
@@ -508,7 +546,18 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     mp3_quality = cfg.get("mp3_quality", "V0")
     if mp3_quality == "128k":
         mp3_quality = "V5"
-    mono = bool(cfg.get("mono_audio", False))
+    channel_mode = cfg.get("channel_mode")
+    if channel_mode not in {"stereo", "ask", "mono"}:
+        channel_mode = "mono" if cfg.get("mono_audio") is True else "stereo"
+    mono = channel_mode == "mono"
+    if audio_format == "opus":
+        args = [
+            "-f", "bestaudio", "-x", "--audio-format", "opus",
+            "--audio-quality", "75K" if mono else "128K",
+        ]
+        if mono:
+            args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
+        return args
     if audio_format == "mp3":
         quality = {
             "V0": "0",
@@ -553,6 +602,20 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     return ["-f", "bestaudio", "-x", "--audio-format", "best"]
 
 
+def _choose_channel_mode(config: Mapping[str, Any] | None = None) -> str:
+    """Resolve ask once; non-interactive invocations remain non-blocking."""
+    cfg = dict(config) if config is not None else load_config()
+    mode = cfg.get("channel_mode")
+    if mode not in {"stereo", "ask", "mono"}:
+        mode = "mono" if cfg.get("mono_audio") is True else "stereo"
+    if mode != "ask":
+        return mode
+    if not sys.stdin.isatty():
+        return "stereo"
+    answer = input("Audio channels: (s)tereo or (m)ono [s]: ").strip().casefold()
+    return "mono" if answer in {"m", "mono", "1"} else "stereo"
+
+
 def _run_with_auth_retry(command):
     """Run yt-dlp with TTY progress, retrying once with Firefox cookies on auth errors."""
     try:
@@ -584,6 +647,17 @@ def _read_print_to_file(print_path):
     return lines[-1]
 
 
+def _read_duration_print_to_file(print_path):
+    """Return yt-dlp's post-move duration, or None when it was unavailable."""
+    try:
+        with open(print_path, encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle if line.strip()]
+        duration = float(lines[-1]) if lines else None
+    except (OSError, ValueError):
+        return None
+    return duration if duration is not None and 0 < duration < float("inf") else None
+
+
 def _new_print_to_file():
     """Create a temp file for yt-dlp --print-to-file reporting."""
     handle = tempfile.NamedTemporaryFile(
@@ -603,22 +677,24 @@ def _remove_temp_file(path):
 
 def download_audio(url, config=None):
     cfg = dict(config) if config is not None else load_config()
+    cfg["channel_mode"] = _choose_channel_mode(cfg)
+    cfg.pop("mono_audio", None)
     auto_tag = cfg.get("auto_tag", True)
     embed_thumbnail = cfg.get("embed_thumbnail", True)
     thumbnail_jpg = cfg.get("thumbnail_jpg", False)
     effective_dir = effective_download_dir(cfg)
     print(f"[1/2] Downloading audio from {url}...")
     print_path = _new_print_to_file()
+    duration_path = _new_print_to_file()
     try:
         extras = []
         if is_youtube_url(url):
             extras.extend(["--ies", "youtube,youtube:tab"])
         if effective_dir is not None:
             extras.extend(["-P", effective_dir])
+        if auto_tag or cfg.get("long_audio_enabled", False):
+            extras.append("--write-info-json")
         if auto_tag:
-            extras.extend([
-                "--write-info-json",
-            ])
             if embed_thumbnail:
                 extras.append("--write-thumbnail")
                 if thumbnail_jpg:
@@ -640,19 +716,16 @@ def download_audio(url, config=None):
             "--progress",
             "-o", "%(title)s.%(ext)s",
             "--print-to-file", "after_move:filepath", print_path,
+            "--print-to-file", "after_move:duration", duration_path,
             "--", url,
         ]
         _run_with_auth_retry(command)
         filepath = _read_print_to_file(print_path)
-        if auto_tag:
-            return finalize_audio_download(filepath, "", cfg)
-        strip_language_tags(filepath)
-        if cfg.get("rsgain", False):
-            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
-            _run_rsgain(filepath)
-        return filepath
+        duration = _read_duration_print_to_file(duration_path)
+        return finalize_audio_download(filepath, "", cfg, duration)
     finally:
         _remove_temp_file(print_path)
+        _remove_temp_file(duration_path)
 
 
 def download_video(url, config=None):
@@ -689,6 +762,8 @@ def interactive_cut(url, config=None):
     print(f"Fetching metadata for {url}...")
     info, use_browser_cookies = _fetch_info_with_access(url)
     meta = parse_info(info)
+    cfg["channel_mode"] = _choose_channel_mode(cfg)
+    cfg.pop("mono_audio", None)
     duration = meta.get("duration", 0)
 
     if duration == 0:
@@ -720,24 +795,35 @@ def interactive_cut(url, config=None):
         )
 
     print("\n--- Encoding Settings ---")
-    mono_default = bool(cfg.get("mono_audio", False))
-    default_bitrate = "75" if mono_default else "117"
-    default_channels = "1" if mono_default else "2"
-    bitrate = input(f"Bitrate in kbps (VBR is forced on) [Default: {default_bitrate}]: ").strip() or default_bitrate
-    channels_in = input(f"Number of channels (1 or 2) [Default: {default_channels}]: ").strip() or default_channels
-    channels = "1" if channels_in == "1" else "2"
-    app_in = input("Application flag (voip or audio) [Default: audio]: ").strip().lower() or "audio"
-    app_type = "voip" if app_in in ["voip", "v"] else "audio"
-
-    ffmpeg_args = [
-        "-b:a", f"{bitrate}k",
-        "-vbr", "on",
-        "-ac", channels,
-        "-application", app_type,
-    ]
-    ffmpeg_options = " ".join(ffmpeg_args)
+    channels = "1" if cfg["channel_mode"] == "mono" else "2"
+    cut_config = dict(cfg)
+    audio_format = cfg.get("audio_format", "best")
+    if audio_format in {"best", "opus"}:
+        default_bitrate = "75" if channels == "1" else "128"
+        bitrate = input(
+            f"Bitrate in kbps (VBR is forced on) [Default: {default_bitrate}]: "
+        ).strip() or default_bitrate
+        app_in = input("Application flag (voip or audio) [Default: audio]: ").strip().lower() or "audio"
+        app_type = "voip" if app_in in ["voip", "v"] else "audio"
+        ffmpeg_args = [
+            "-b:a", f"{bitrate}k", "-vbr", "on", "-ac", channels,
+            "-application", app_type,
+        ]
+        ffmpeg_options = " ".join(ffmpeg_args)
+        format_args = [
+            "-f", "bestaudio", "-x", "--audio-format", "opus",
+        ]
+        postprocessor_args = f"ExtractAudio:{ffmpeg_options}"
+        print(f"Applying FFmpeg overrides: {ffmpeg_options}")
+    else:
+        format_args = _audio_format_args(cut_config)
+        postprocessor_args = None
+        ffmpeg_options = "configured format settings"
     print(f"\nProceeding with cut: {format_time(start_sec)} to {format_time(end_sec)}")
-    print(f"Applying FFmpeg overrides: {ffmpeg_options}\n")
+    if postprocessor_args is None:
+        print(f"Applying FFmpeg overrides: {ffmpeg_options}\n")
+    else:
+        print()
 
     filename_suffix = f"_cut_{int(start_sec)}_{int(end_sec)}"
     info_handle = tempfile.NamedTemporaryFile(
@@ -760,15 +846,13 @@ def interactive_cut(url, config=None):
                 extras.extend(["-P", effective_dir])
             embed_thumbnail = cfg.get("embed_thumbnail", True)
             thumbnail_jpg = cfg.get("thumbnail_jpg", False)
+            if auto_tag or cfg.get("long_audio_enabled", False):
+                extras.append("--write-info-json")
             if auto_tag:
-                extras.extend([
-                    "--write-info-json",
-                ])
                 if embed_thumbnail:
                     extras.append("--write-thumbnail")
                     if thumbnail_jpg:
                         extras.extend(["--convert-thumbnails", "jpg"])
-                output_template = _audio_output_template(meta, filename_suffix)
             else:
                 extras.extend([
                     "--embed-metadata",
@@ -777,20 +861,20 @@ def interactive_cut(url, config=None):
                     extras.append("--embed-thumbnail")
                     if thumbnail_jpg:
                         extras.extend(["--convert-thumbnails", "jpg"])
-                output_template = "%(title)s.%(ext)s"
+            output_template = _audio_output_template(meta, filename_suffix)
             rest = [
                 *extras,
                 "--download-sections", f"*{start_sec}-{end_sec}",
                 "--force-keyframes-at-cuts",
-                "-f", "bestaudio",
-                "-x", "--audio-format", "opus",
+                *format_args,
                 "--quiet",
                 "--no-playlist",
                 "--progress",
-                "--postprocessor-args", f"ExtractAudio:{ffmpeg_options}",
                 "-o", output_template,
                 "--print-to-file", "after_move:filepath", print_path,
             ]
+            if postprocessor_args is not None:
+                rest.extend(["--postprocessor-args", postprocessor_args])
             print("[1/2] Downloading cut...")
             try:
                 subprocess.run(
@@ -802,13 +886,9 @@ def interactive_cut(url, config=None):
                     raise _YtDlpError(_yt_dlp_error_text(error)) from None
                 _run_with_auth_retry(["yt-dlp", *rest, "--", url])
             filepath = _read_print_to_file(print_path)
-            if auto_tag:
-                return finalize_audio_download(filepath, filename_suffix, cfg)
-            strip_language_tags(filepath)
-            if cfg.get("rsgain", False):
-                print("ReplayGain normalization (rsgain: analyzing -> applying)...")
-                _run_rsgain(filepath)
-            return filepath
+            return finalize_audio_download(
+                filepath, filename_suffix, cfg, end_sec - start_sec
+            )
         finally:
             _remove_temp_file(print_path)
     finally:

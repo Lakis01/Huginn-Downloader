@@ -80,7 +80,7 @@ class NativeHostTests(unittest.TestCase):
                     "mp3_quality": "V0",
                     "embed_thumbnail": True,
                     "thumbnail_jpg": False,
-                    "mono_audio": False,
+                    "channel_mode": "stereo",
                     "long_audio_enabled": False,
                     "long_audio_minutes": 30,
                     "long_audio_dir": "~/Podcasts",
@@ -116,7 +116,7 @@ class NativeHostTests(unittest.TestCase):
                 "mp3_quality": "V0",
                 "embed_thumbnail": True,
                 "thumbnail_jpg": False,
-                "mono_audio": False,
+                "channel_mode": "stereo",
                 "long_audio_enabled": False,
                 "long_audio_minutes": 30,
                 "long_audio_dir": "~/Podcasts",
@@ -158,7 +158,7 @@ class NativeHostTests(unittest.TestCase):
             stderr=HOST.subprocess.DEVNULL,
         )
 
-    def test_download_rejects_non_youtube_and_invalid_mode_cleanly(self):
+    def test_download_accepts_safe_arbitrary_http_sites_and_rejects_invalid_mode(self):
         with mock.patch.dict(os.environ, {"YTDL_SHORTCUT": "/tmp/fake-shortcut"}), mock.patch.object(
             HOST.subprocess, "Popen"
         ):
@@ -174,6 +174,25 @@ class NativeHostTests(unittest.TestCase):
         self.assertTrue(responses[0]["ok"] is True and responses[0]["url"] == "https://vimeo.com/123")
         self.assertTrue(all(response["ok"] is False for response in responses[1:]))
         self.assertTrue(all(isinstance(response["error"], str) for response in responses[1:]))
+
+    def test_download_rejects_unsafe_generic_http_urls(self):
+        unsafe_urls = (
+            "file:///etc/passwd",
+            "https://user:pass@example.com/video",
+            "https://example.com:444/video",
+            "https://example.com../video",
+            "https://example.com/a\tb",
+            "https://-bad.example/video",
+        )
+        with mock.patch.object(HOST.subprocess, "Popen") as popen:
+            responses = run_host([
+                {"action": "download", "mode": "audio", "url": url}
+                for url in unsafe_urls
+            ])
+
+        self.assertEqual(len(responses), len(unsafe_urls))
+        self.assertTrue(all(response["ok"] is False for response in responses))
+        popen.assert_not_called()
 
     def test_download_rejects_userinfo_and_nonstandard_ports(self):
         with mock.patch.object(HOST.subprocess, "Popen") as popen:

@@ -880,6 +880,10 @@ class WrapperTests(unittest.TestCase):
                 ["-f", "bestaudio", "-x", "--audio-format", "best"],
             ),
             (
+                {"audio_format": "opus"},
+                ["-f", "bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "128K"],
+            ),
+            (
                 {"audio_format": "mp3", "mp3_quality": "V0"},
                 ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
             ),
@@ -976,7 +980,7 @@ class WrapperTests(unittest.TestCase):
                     result = wrapper.finalize_audio_download(
                         str(moved_media),
                         "",
-                        {"download_dir": None, "auto_tag": True, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"},
+                        {"download_dir": None, "auto_tag": True, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"},
                     )
 
             expected_target = Path(tmp) / "Artist - Track (1).opus"
@@ -1005,7 +1009,7 @@ class WrapperTests(unittest.TestCase):
                 with open(path, "ab") as tagged_file:
                     tagged_file.write(b"+tagged")
 
-            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(wrapper, "tag_audio_file", side_effect=tag_copy):
                 with mock.patch.object(wrapper.subprocess, "run") as run:
                     result = wrapper.finalize_audio_download(
@@ -1023,7 +1027,7 @@ class WrapperTests(unittest.TestCase):
             self._write_download_sidecars(
                 moved_media, {"title": "Track", "channel": "Artist", "duration": 100}
             )
-            defaults = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            defaults = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "load_config", return_value=dict(defaults)
             ) as load_config:
@@ -1176,7 +1180,7 @@ class WrapperTests(unittest.TestCase):
                 with open(path, "ab") as tagged_file:
                     tagged_file.write(b"+tagged")
 
-            config = {"download_dir": None, "auto_tag": True, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
@@ -1329,7 +1333,7 @@ class WrapperTests(unittest.TestCase):
                 )
                 return SimpleNamespace(stdout="")
 
-            config = {"download_dir": None, "auto_tag": False, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": False, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
@@ -1434,14 +1438,14 @@ class WrapperTests(unittest.TestCase):
                 )
                 return SimpleNamespace(stdout="")
 
-            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
                 with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
                     with mock.patch(
                         "builtins.input",
-                        side_effect=["0:10", "0:50", "160", "1", "voip"],
+                        side_effect=["0:10", "0:50", "160", "voip"],
                     ):
                         with mock.patch.object(wrapper, "finalize_audio_download") as finalize:
                             wrapper.interactive_cut("https://example.invalid/watch?v=cut", config)
@@ -1485,14 +1489,14 @@ class WrapperTests(unittest.TestCase):
                 )
                 return SimpleNamespace(stdout="")
 
-            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
                 with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
                     with mock.patch(
                         "builtins.input",
-                        side_effect=["0:10", "0:50", "117", "2", "audio"],
+                         side_effect=["0:10", "0:50", "117", "audio"],
                     ):
                         with mock.patch.object(
                             wrapper, "finalize_audio_download", return_value=str(moved_media)
@@ -1532,12 +1536,12 @@ class WrapperTests(unittest.TestCase):
                 )
             self.fail("FFmpeg failure must not retry the live URL")
 
-        config = {"download_dir": None, "auto_tag": False, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+        config = {"download_dir": None, "auto_tag": False, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
         with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
             with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
                 with mock.patch(
                     "builtins.input",
-                    side_effect=["0:10", "0:50", "117", "2", "audio"],
+                     side_effect=["0:10", "0:50", "117", "audio"],
                 ):
                     with self.assertRaisesRegex(wrapper._YtDlpError, "Postprocessing"):
                         wrapper.interactive_cut(url, config)
@@ -1580,14 +1584,14 @@ class WrapperTests(unittest.TestCase):
                 )
                 return SimpleNamespace(stdout="")
 
-            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
                 with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
                     with mock.patch(
                         "builtins.input",
-                        side_effect=["0:10", "0:50", "117", "2", "audio"],
+                         side_effect=["0:10", "0:50", "117", "audio"],
                     ):
                         with mock.patch.object(
                             wrapper, "finalize_audio_download", return_value=str(moved_media)
@@ -1755,7 +1759,7 @@ class WrapperTests(unittest.TestCase):
                 return SimpleNamespace(stdout="", returncode=0)
 
             raw_info = {"title": "Track", "channel": "Artist", "duration": 100}
-            config = {"download_dir": None, "auto_tag": True, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": True, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "mono", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
@@ -1763,7 +1767,7 @@ class WrapperTests(unittest.TestCase):
                     wrapper, "_fetch_info_with_access", return_value=(raw_info, False)
                 ):
                     with mock.patch(
-                        "builtins.input", side_effect=["0:10", "0:50", "160", "1", "voip"]
+                        "builtins.input", side_effect=["0:10", "0:50", "160", "voip"]
                     ):
                         with mock.patch.object(wrapper, "tag_audio_file"):
                             with mock.patch.object(
@@ -1802,7 +1806,9 @@ class WrapperTests(unittest.TestCase):
     def test_video_mode_preserves_stream_and_thumbnail_behavior_without_rsgain(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:
-            config = {"download_dir": tmp, "auto_tag": True, "rsgain": False}
+            config = {"download_dir": tmp, "auto_tag": True, "rsgain": False,
+                      "long_audio_enabled": True, "long_audio_minutes": 1,
+                      "long_audio_dir": os.path.join(tmp, "Podcasts")}
             with mock.patch.object(wrapper.subprocess, "run") as run:
                 with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
                     wrapper.download_video("https://www.youtube.com/watch?v=video", config)
@@ -1816,6 +1822,7 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("--convert-thumbnails", command)
         self.assertIn("webp", command)
         self.assertIn("--embed-metadata", command)
+        self.assertNotIn("--print-to-file", command)
         self.assertIn("--quiet", command)
         self.assertIn("--progress", command)
         self.assertNotIn("--no-warnings", command)
@@ -1843,7 +1850,7 @@ class WrapperTests(unittest.TestCase):
             with mock.patch.object(wrapper.subprocess, "run") as run:
                 wrapper.download_video(
                     "https://vimeo.com/12345",
-                    {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "mono_audio": False, "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"},
+                    {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"},
                 )
 
         command = run.call_args.args[0]
@@ -2183,17 +2190,17 @@ class PipelineOptionsTests(unittest.TestCase):
     def test_audio_format_mono_scales_bitrate_and_adds_downmix(self):
         wrapper = _load_wrapper(self)
         self.assertEqual(
-            wrapper._audio_format_args({"audio_format": "mp3", "mp3_quality": "V0", "mono_audio": True}),
+            wrapper._audio_format_args({"audio_format": "mp3", "mp3_quality": "V0", "channel_mode": "mono"}),
             ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
         self.assertEqual(
-            wrapper._audio_format_args({"audio_format": "mp3", "mp3_quality": "320k", "mono_audio": True}),
+            wrapper._audio_format_args({"audio_format": "mp3", "mp3_quality": "320k", "channel_mode": "mono"}),
             ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "192K",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
         self.assertEqual(
-            wrapper._audio_format_args({"audio_format": "best", "mono_audio": True}),
+            wrapper._audio_format_args({"audio_format": "best", "channel_mode": "mono"}),
             ["-f", "bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "96K",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
@@ -2207,6 +2214,9 @@ class PipelineOptionsTests(unittest.TestCase):
             media_path.write_bytes(b"audio-bytes")
             info = {"title": "Long Talk", "channel": "Podcaster", "duration": 3600}
             (Path(str(media_path) + ".info.json")).write_text(_json.dumps(info))
+            existing = long_dir / "Podcaster - Long Talk.opus"
+            existing.parent.mkdir()
+            existing.write_bytes(b"keep")
             import mutagen.oggopus as _opus
             with mock.patch.object(wrapper, "subprocess", wraps=wrapper.subprocess):
                 with mock.patch.object(_opus.OggOpus, "save", return_value=None):
@@ -2224,8 +2234,336 @@ class PipelineOptionsTests(unittest.TestCase):
                         {"download_dir": None, "auto_tag": True, "rsgain": False,
                          "audio_format": "best", "mp3_quality": "V0",
                          "embed_thumbnail": True, "thumbnail_jpg": False,
-                         "mono_audio": False, "long_audio_enabled": True,
+                          "channel_mode": "stereo", "long_audio_enabled": True,
                          "long_audio_minutes": 30, "long_audio_dir": str(long_dir)},
                     )
-            self.assertTrue(str(out).startswith(str(long_dir)))
+            self.assertEqual(Path(out), long_dir / "Podcaster - Long Talk (1).opus")
             self.assertTrue(Path(out).is_file())
+            self.assertEqual(existing.read_bytes(), b"keep")
+
+
+class V24AudioPipelineTests(unittest.TestCase):
+    def test_audio_formats_include_native_opus_and_mono_bitrate(self):
+        wrapper = _load_wrapper(self)
+        self.assertEqual(
+            wrapper._audio_format_args({"audio_format": "opus", "channel_mode": "stereo"}),
+            ["-f", "bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "128K"],
+        )
+        self.assertEqual(
+            wrapper._audio_format_args({"audio_format": "opus", "channel_mode": "mono"}),
+            ["-f", "bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "75K",
+             "--postprocessor-args", "ExtractAudio:-ac 1"],
+        )
+        self.assertEqual(
+            wrapper._audio_format_args({"audio_format": "m4a"}),
+            ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"],
+        )
+        for audio_format, prefix in (
+            ("m4a", ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"]),
+            ("ogg", ["-f", "bestaudio", "-x", "--audio-format", "vorbis", "--audio-quality", "0"]),
+            ("flac", ["-f", "bestaudio", "-x", "--audio-format", "flac"]),
+        ):
+            with self.subTest(audio_format=audio_format):
+                args = wrapper._audio_format_args({"audio_format": audio_format, "channel_mode": "mono"})
+                self.assertEqual(args[:len(prefix)], prefix)
+                self.assertEqual(args[-2:], ["--postprocessor-args", "ExtractAudio:-ac 1"])
+
+    def test_ask_channel_mode_prompts_once_and_non_tty_defaults_to_stereo(self):
+        wrapper = _load_wrapper(self)
+        chooser = getattr(wrapper, "_choose_channel_mode", None)
+        self.assertTrue(callable(chooser), "channel-mode resolver is not implemented")
+        with mock.patch.object(wrapper.sys.stdin, "isatty", return_value=True):
+            with mock.patch("builtins.input", return_value="m") as prompt:
+                self.assertEqual(chooser({"channel_mode": "ask"}), "mono")
+        prompt.assert_called_once()
+        with mock.patch.object(wrapper.sys.stdin, "isatty", return_value=False):
+            with mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
+                self.assertEqual(chooser({"channel_mode": "ask"}), "stereo")
+
+    def test_audio_download_channel_ask_is_resolved_before_yt_dlp(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "download.opus"
+            events = []
+
+            def fake_run(command, **_kwargs):
+                if command[0] == "yt-dlp":
+                    events.append("download")
+                    for index, field in enumerate(command):
+                        if field == "--print-to-file" and command[index + 1] == "after_move:filepath":
+                            Path(command[index + 2]).write_text(f"{media}\n")
+                    media.write_bytes(b"audio")
+                return SimpleNamespace(stdout="")
+
+            config = {"auto_tag": False, "rsgain": False, "audio_format": "opus", "channel_mode": "ask", "embed_thumbnail": False}
+            with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                with mock.patch.object(wrapper.sys.stdin, "isatty", return_value=True):
+                    with mock.patch("builtins.input", side_effect=lambda _prompt: events.append("prompt") or "m"):
+                        with mock.patch.object(wrapper, "strip_language_tags"):
+                            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                                wrapper.download_audio("https://example.invalid/audio", config)
+
+            self.assertEqual(events, ["prompt", "download"])
+
+    def test_cut_ask_channel_prompt_sets_mono_before_bitrate_settings(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "cut.opus"
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                if "--download-sections" in command:
+                    for index, value in enumerate(command[:-2]):
+                        if value == "--print-to-file":
+                            Path(command[index + 2]).write_text(f"{media}\n")
+                    media.write_bytes(b"cut")
+                return SimpleNamespace(stdout="")
+
+            with mock.patch.object(wrapper, "_fetch_info_with_access", return_value=({"title": "Track", "duration": 120}, False)):
+                with mock.patch.object(wrapper.sys.stdin, "isatty", return_value=True):
+                    with mock.patch("builtins.input", side_effect=["m", "0:00", "1:00", "", "audio"]) as prompt:
+                        with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                            with mock.patch.object(wrapper, "strip_language_tags"):
+                                with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                                    wrapper.interactive_cut(
+                                        "https://example.invalid/cut",
+                                        {"auto_tag": False, "rsgain": False, "audio_format": "best",
+                                         "channel_mode": "ask", "embed_thumbnail": False},
+                                    )
+
+        cut_command = next(command for command in commands if "--download-sections" in command)
+        self.assertIn("ExtractAudio:-b:a 75k -vbr on -ac 1 -application audio",
+                      cut_command[cut_command.index("--postprocessor-args") + 1])
+        self.assertEqual(prompt.call_count, 5)
+
+    def test_audio_thumbnail_flags_respect_embed_and_jpeg_options(self):
+        wrapper = _load_wrapper(self)
+        for config, expected in (
+            ({"auto_tag": True, "embed_thumbnail": False, "thumbnail_jpg": True},
+             (True, False, False, False)),
+            ({"auto_tag": True, "embed_thumbnail": True, "thumbnail_jpg": False},
+             (True, False, True, False)),
+            ({"auto_tag": False, "embed_thumbnail": True, "thumbnail_jpg": True},
+             (False, True, False, True)),
+        ):
+            with self.subTest(config=config), tempfile.TemporaryDirectory() as tmp:
+                media = Path(tmp) / "download.opus"
+
+                def fake_run(command, **_kwargs):
+                    if command[0] == "yt-dlp":
+                        for index, field in enumerate(command):
+                            if field == "--print-to-file" and command[index + 1] == "after_move:filepath":
+                                Path(command[index + 2]).write_text(f"{media}\n")
+                        media.write_bytes(b"audio")
+                    return SimpleNamespace(stdout="")
+
+                with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                    with mock.patch.object(wrapper, "strip_language_tags"):
+                        with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run) as run:
+                            with mock.patch.object(wrapper, "finalize_audio_download", return_value=str(media)):
+                                wrapper.download_audio("https://example.invalid/audio", {"rsgain": False, **config})
+
+                command = run.call_args.args[0]
+                want_write_info, want_embed, want_write_thumb, want_jpg = expected
+                self.assertEqual("--write-info-json" in command, want_write_info)
+                self.assertEqual("--embed-thumbnail" in command, want_embed)
+                self.assertEqual("--write-thumbnail" in command, want_write_thumb)
+                self.assertEqual("--convert-thumbnails" in command, want_jpg)
+                if want_jpg:
+                    self.assertEqual(command[command.index("--convert-thumbnails") + 1], "jpg")
+
+    def test_finalize_forces_jpeg_cover_when_legacy_option_is_enabled(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "track.opus"
+            self._write_sidecars(media, {"title": "Track", "duration": 60})
+            thumbnail = media.with_suffix(".jpg")
+            thumbnail.write_bytes(b"thumbnail")
+            with mock.patch.object(wrapper, "tag_audio_file") as tag:
+                result = wrapper.finalize_audio_download(
+                    str(media), config={"auto_tag": True, "rsgain": False,
+                                        "embed_thumbnail": True, "thumbnail_jpg": True,
+                                        "channel_mode": "stereo"},
+                )
+            self.assertTrue(Path(result).exists())
+            tag.assert_called_once()
+            self.assertFalse(tag.call_args.kwargs["prefer_webp"])
+            self.assertEqual(tag.call_args.args[2], str(thumbnail))
+
+    def test_finalize_does_not_embed_or_remove_thumbnail_when_embedding_is_disabled(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "track.opus"
+            self._write_sidecars(media, {"title": "Track", "duration": 60})
+            thumbnail = media.with_suffix(".jpg")
+            thumbnail.write_bytes(b"thumbnail")
+            with mock.patch.object(wrapper, "tag_audio_file") as tag:
+                wrapper.finalize_audio_download(
+                    str(media), config={"auto_tag": True, "rsgain": False,
+                                        "embed_thumbnail": False, "thumbnail_jpg": True,
+                                        "channel_mode": "stereo"},
+                )
+
+            self.assertIsNone(tag.call_args.args[2])
+            self.assertTrue(thumbnail.exists())
+
+    @staticmethod
+    def _write_sidecars(media, info):
+        media.parent.mkdir(parents=True, exist_ok=True)
+        media.write_bytes(b"audio")
+        Path(f"{media}.info.json").write_text(json.dumps(info), encoding="utf-8")
+
+    def test_long_audio_routes_when_auto_tag_is_disabled_and_preserves_collisions(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            download_dir = Path(tmp) / "downloads"
+            long_dir = Path(tmp) / "Podcasts"
+            download_dir.mkdir()
+            media = download_dir / "long-recording.opus"
+            media.write_bytes(b"audio")
+            existing = long_dir / media.name
+            existing.parent.mkdir()
+            existing.write_bytes(b"keep")
+
+            with mock.patch.object(wrapper, "strip_language_tags"):
+                with mock.patch.object(wrapper, "_run_rsgain") as rsgain:
+                    result = wrapper.finalize_audio_download(
+                        str(media), config={"auto_tag": False, "rsgain": True,
+                                            "channel_mode": "stereo", "long_audio_enabled": True,
+                                            "long_audio_minutes": 30, "long_audio_dir": str(long_dir)},
+                        duration_seconds=3600,
+                    )
+            routed = long_dir / "long-recording (1).opus"
+            self.assertEqual(Path(result), routed)
+            self.assertEqual(existing.read_bytes(), b"keep")
+            self.assertEqual(routed.read_bytes(), b"audio")
+            self.assertFalse(media.exists())
+            rsgain.assert_called_once_with(str(routed))
+
+    def test_long_audio_uses_download_info_sidecar_when_duration_print_is_missing(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "long-recording.opus"
+            self._write_sidecars(media, {"title": "Long recording", "duration": 3600})
+            sidecar = Path(f"{media}.info.json")
+            long_dir = Path(tmp) / "Podcasts"
+
+            with mock.patch.object(wrapper, "strip_language_tags"):
+                result = wrapper.finalize_audio_download(
+                    str(media), config={"auto_tag": False, "rsgain": False,
+                                        "channel_mode": "stereo", "long_audio_enabled": True,
+                                        "long_audio_minutes": 30, "long_audio_dir": str(long_dir)},
+                )
+
+            self.assertEqual(Path(result), long_dir / media.name)
+            self.assertTrue(Path(result).is_file())
+            self.assertFalse(sidecar.exists())
+
+    def test_tagged_long_audio_routes_after_tagging_without_overwriting_target(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "download.opus"
+            long_dir = Path(tmp) / "Podcasts"
+            self._write_sidecars(media, {"title": "Long Talk", "channel": "Podcaster", "duration": 3600})
+            existing = long_dir / "Podcaster - Long Talk.opus"
+            existing.parent.mkdir()
+            existing.write_bytes(b"keep")
+
+            def tag_copy(path, _meta, thumbnail_path=None, prefer_webp=None):
+                Path(path).write_bytes(b"tagged")
+
+            with mock.patch.object(wrapper, "tag_audio_file", side_effect=tag_copy):
+                with mock.patch.object(wrapper, "_run_rsgain") as rsgain:
+                    result = wrapper.finalize_audio_download(
+                        str(media), config={"auto_tag": True, "rsgain": True,
+                                            "channel_mode": "stereo", "embed_thumbnail": False,
+                                            "long_audio_enabled": True, "long_audio_minutes": 30,
+                                            "long_audio_dir": str(long_dir)},
+                    )
+            routed = long_dir / "Podcaster - Long Talk (1).opus"
+            self.assertEqual(Path(result), routed)
+            self.assertEqual(existing.read_bytes(), b"keep")
+            self.assertEqual(routed.read_bytes(), b"tagged")
+            rsgain.assert_called_once_with(str(routed))
+
+    def test_download_audio_prints_duration_in_same_pass_and_routes_without_auto_tag(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "download.opus"
+            long_dir = Path(tmp) / "Podcasts"
+            calls = []
+
+            def fake_run(command, **_kwargs):
+                calls.append(command)
+                if command[0] == "yt-dlp":
+                    reports = {}
+                    for index, value in enumerate(command[:-2]):
+                        if value == "--print-to-file":
+                            reports[command[index + 1]] = command[index + 2]
+                    Path(reports["after_move:filepath"]).write_text(f"{media}\n")
+                    if "after_move:duration" in reports:
+                        Path(reports["after_move:duration"]).write_text("3600\n")
+                    media.write_bytes(b"audio")
+                return SimpleNamespace(stdout="")
+
+            with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                with mock.patch.object(wrapper, "strip_language_tags"):
+                    with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                        result = wrapper.download_audio(
+                            "https://example.invalid/audio",
+                            {"auto_tag": False, "rsgain": False, "embed_thumbnail": False,
+                             "long_audio_enabled": True, "long_audio_minutes": 30,
+                             "long_audio_dir": str(long_dir), "channel_mode": "stereo"},
+                        )
+
+            command = calls[0]
+            self.assertIn("after_move:filepath", command)
+            self.assertIn("after_move:duration", command)
+            self.assertIn("--write-info-json", command)
+            self.assertNotIn("--write-thumbnail", command)
+            self.assertNotIn("--embed-thumbnail", command)
+            self.assertNotIn("--dump-json", command)
+            self.assertEqual(Path(result), long_dir / media.name)
+            self.assertTrue(Path(result).is_file())
+
+    def test_cut_uses_configured_output_format_and_segment_duration_for_routing(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "cut.mp3"
+            long_dir = Path(tmp) / "Podcasts"
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                if "--download-sections" in command:
+                    for index, value in enumerate(command[:-2]):
+                        if value == "--print-to-file" and command[index + 1] == "after_move:filepath":
+                            Path(command[index + 2]).write_text(f"{media}\n")
+                    media.write_bytes(b"cut")
+                    Path(f"{media}.info.json").write_text(
+                        json.dumps({"title": "Track", "duration": 9999}),
+                        encoding="utf-8",
+                    )
+                return SimpleNamespace(stdout=json.dumps({"title": "Track", "duration": 9999}))
+
+            config = {"auto_tag": True, "rsgain": False, "audio_format": "mp3",
+                      "mp3_quality": "V5", "channel_mode": "mono", "embed_thumbnail": False,
+                      "long_audio_enabled": True, "long_audio_minutes": 30,
+                      "long_audio_dir": str(long_dir)}
+            with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                with mock.patch.object(wrapper, "_fetch_info_with_access", return_value=({"title": "Track", "duration": 9999}, False)):
+                    with mock.patch("builtins.input", side_effect=["0:10", "0:50"]):
+                        with mock.patch.object(wrapper, "tag_audio_file"):
+                            with mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run):
+                                result = wrapper.interactive_cut("https://example.invalid/cut", config)
+
+            command = next(command for command in commands if "--download-sections" in command)
+            self.assertEqual(command[command.index("--audio-format") + 1], "mp3")
+            self.assertEqual(command[command.index("--audio-quality") + 1], "5")
+            self.assertIn("ExtractAudio:-ac 1", command[command.index("--postprocessor-args") + 1])
+            self.assertIn("--write-info-json", command)
+            self.assertNotIn("--write-thumbnail", command)
+            self.assertEqual(Path(result), Path(tmp) / "Track_cut_10_50.mp3")
+            self.assertTrue(Path(result).is_file())
+            self.assertFalse(long_dir.exists())  # 40-second segment, not 9999-second source.

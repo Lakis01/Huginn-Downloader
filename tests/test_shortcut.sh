@@ -540,7 +540,7 @@ assert config == {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
@@ -641,7 +641,7 @@ assert config == {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
@@ -669,7 +669,7 @@ assert config["audio_format"] == "best", config
 assert config["mp3_quality"] == "V0", config
 assert config["embed_thumbnail"] is True, config
 assert config["thumbnail_jpg"] is False, config
-assert config["mono_audio"] is False, config
+assert config["channel_mode"] == "stereo", config
 PY
 HOME="$existing_ytdlp_home" "$INSTALLER" --install --yes \
     --download-dir=ytdlp-default --auto-tag=true --rsgain=true > "$TMP/existing-ytdlp-overrides.out"
@@ -687,7 +687,7 @@ assert config == {
     "mp3_quality": "V0",
     "embed_thumbnail": True,
     "thumbnail_jpg": False,
-    "mono_audio": False,
+    "channel_mode": "stereo",
     "long_audio_enabled": False,
     "long_audio_minutes": 30,
     "long_audio_dir": "~/Podcasts",
