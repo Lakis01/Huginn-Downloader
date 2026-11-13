@@ -37,7 +37,12 @@ def build_xpi(source: Path, output: Path) -> list[str]:
             raise ValueError(f"manifest.json is missing required key: {key}")
 
     files = sorted(
-        (path for path in source.rglob("*") if path.is_file()),
+        (
+            path
+            for path in source.rglob("*")
+            if path.is_file()
+            and not any(part.startswith(".") for part in path.relative_to(source).parts)
+        ),
         key=lambda path: path.relative_to(source).as_posix(),
     )
     names = [path.relative_to(source).as_posix() for path in files]

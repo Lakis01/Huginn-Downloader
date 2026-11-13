@@ -14,7 +14,13 @@ else
   exit 1
 fi
 
-npx --yes web-ext sign --source-dir "$ROOT/extension" --artifacts-dir "$ROOT/web-ext-artifacts" --channel=unlisted --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET"
+WEB_EXT_API_KEY="$AMO_JWT_ISSUER" \
+WEB_EXT_API_SECRET="$AMO_JWT_SECRET" \
+npm_config_loglevel=error \
+npx --yes web-ext sign \
+  --source-dir "$ROOT/extension" \
+  --artifacts-dir "$ROOT/web-ext-artifacts" \
+  --channel=unlisted
 
 newest="$(ls -t "$ROOT/web-ext-artifacts"/*.xpi 2>/dev/null | head -n 1 || true)"
 if [[ -z "${newest:-}" ]]; then

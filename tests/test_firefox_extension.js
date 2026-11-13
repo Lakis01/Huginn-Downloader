@@ -36,7 +36,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.2.0', 'manifest version is 2.2.0');
+  assert.equal(manifest.version, '2.2.1', 'manifest version is 2.2.1');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -1030,7 +1030,7 @@ function testSignScript() {
   assert.ok(sh.includes('--source-dir') && sh.includes('extension'), 'sign script points at the extension source dir');
   assert.ok(sh.includes('--artifacts-dir') && sh.includes('web-ext-artifacts'), 'sign script stages signed builds under web-ext-artifacts');
   assert.ok(sh.includes('--channel=unlisted'), 'sign script uses the unlisted channel');
-  assert.ok(sh.includes('--api-key') && sh.includes('--api-secret'), 'sign script passes AMO credentials to web-ext');
+  assert.ok(sh.includes('WEB_EXT_API_KEY') && sh.includes('WEB_EXT_API_SECRET'), 'sign script passes AMO credentials via env vars so npx never logs them');
   assert.ok(sh.includes('python3 -m zipfile -t'), 'sign script validates the signed xpi');
   assert.ok(sh.includes('trap') && sh.includes('.amo-upload-uuid'), 'sign script traps EXIT to remove the uuid artifact');
   assert.ok(sh.includes('firefox-youtube-downloader-signed.xpi'), 'sign script copies the signed artifact to dist');
