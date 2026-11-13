@@ -25,6 +25,26 @@
       <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       <span class="label">ReplayGain normalization (rsgain)</span>
     </label>
+    <p class="warn-note" id="rsgainMissingNote" hidden></p>
+
+    <h2>Audio format</h2>
+    <select id="audioFormat" class="select" aria-label="Audio format">
+      <option value="best">Native Opus / M4A (no conversion — best quality)</option>
+      <option value="mp3">MP3 (FFmpeg conversion for legacy devices)</option>
+      <option value="m4a">M4A / AAC (native when available)</option>
+      <option value="ogg">Ogg Vorbis</option>
+      <option value="flac">FLAC</option>
+    </select>
+    <div id="mp3QualityRow" class="sub-row" hidden>
+      <label for="mp3Quality" class="sub-label">MP3 quality</label>
+      <select id="mp3Quality" class="select" aria-label="MP3 quality">
+        <option value="V0">V0 (~245 kbps VBR — Recommended)</option>
+        <option value="320k">320 kbps CBR (maximum size)</option>
+        <option value="V2">V2 (~190 kbps VBR — balanced)</option>
+        <option value="128k">128 kbps CBR (compact / speech)</option>
+      </select>
+    </div>
+    <p class="note" id="formatNote"></p>
 
     <h2>Download folder</h2>
     <div class="choices" role="radiogroup" aria-label="Download folder">

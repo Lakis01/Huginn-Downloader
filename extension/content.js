@@ -111,6 +111,7 @@
   function makeGroup() {
     const group = document.createElement('div');
     group.setAttribute('data-ytdl-controls', 'true');
+    group.setAttribute('data-ytdl-ext', 'true');
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', 'yt-dlp actions');
     for (const action of MODES) {
@@ -140,6 +141,14 @@
   }
 
   function syncControls() {
+    const legacyStyle = document.getElementById('ytdl-controls-style');
+    if (legacyStyle) legacyStyle.remove();
+    for (const stale of Array.from(document.querySelectorAll(GROUP_SELECTOR))) {
+      const isExt = stale.getAttribute && stale.getAttribute('data-ytdl-ext') === 'true';
+      const hasLinks = stale.querySelector && stale.querySelector('a');
+      const hasButtons = stale.querySelector && stale.querySelector('button');
+      if (!isExt || (hasLinks && !hasButtons)) stale.remove();
+    }
     if (!isWatchRoute()) {
       removeGroups();
       return;

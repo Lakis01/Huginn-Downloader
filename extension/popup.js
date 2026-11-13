@@ -12,6 +12,8 @@ const PRESETS = {
   downloads: '~/Downloads/Youtube',
 };
 
+let lastDeps = null;
+
 function ext() {
   if (typeof browser !== 'undefined' && browser) return browser;
   if (typeof chrome !== 'undefined' && chrome) return chrome;
@@ -52,6 +54,40 @@ function presetKeyFor(downloadDir) {
   return 'custom';
 }
 
+function updateFormatNote() {
+  const note = $('formatNote');
+  if (!note) return;
+  const select = $('audioFormat');
+  const value = select && select.value ? select.value : 'best';
+  if (value === 'mp3') {
+    note.textContent = 'Converts YouTube\u0027s audio stream to MP3 via FFmpeg (V0 VBR recommended).';
+  } else if (value === 'm4a') {
+    note.textContent = 'Downloads the native M4A / AAC stream when available, otherwise converts via FFmpeg.';
+  } else if (value === 'ogg') {
+    note.textContent = 'Converts YouTube\u0027s audio stream to Ogg Vorbis via FFmpeg.';
+  } else if (value === 'flac') {
+    note.textContent = 'Converts YouTube\u0027s audio stream to FLAC via FFmpeg (lossless container, larger files).';
+  } else {
+    note.textContent = 'Downloads YouTube\u0027s native Opus or M4A stream directly without lossy re-encoding.';
+  }
+}
+
+function updateMp3Row() {
+  const row = $('mp3QualityRow');
+  if (!row) return;
+  const select = $('audioFormat');
+  row.hidden = !select || select.value !== 'mp3';
+}
+
+function pushConfig() {
+  const audioEl = $('audioFormat');
+  const qualityEl = $('mp3Quality');
+  saveConfig({
+    audio_format: audioEl && audioEl.value ? audioEl.value : 'best',
+    mp3_quality: qualityEl && qualityEl.value ? qualityEl.value : 'V0',
+  });
+}
+
 function renderUpdateNote(status) {
   const note = $('ytdlpUpdateNote');
   if (!note) return;
@@ -81,10 +117,20 @@ function renderUpdateNote(status) {
 
 function renderConnected(response) {
   setVisible(true);
+  lastDeps = response.deps || null;
   $('statusText').textContent = `Connected (companion ${response.version || 'unknown'})`;
   const config = response.config || {};
   $('autoTag').checked = config.auto_tag !== false;
   $('rsgain').checked = config.rsgain === true;
+  if ($('audioFormat')) $('audioFormat').value = config.audio_format || 'best';
+  if ($('mp3Quality')) $('mp3Quality').value = config.mp3_quality || 'V0';
+  updateMp3Row();
+  updateFormatNote();
+  const missingNote = $('rsgainMissingNote');
+  if (missingNote) {
+    if (lastDeps && lastDeps.rsgain === true) missingNote.hidden = true;
+    else if (lastDeps && lastDeps.rsgain === false && config.rsgain !== true) missingNote.hidden = true;
+  }
 
   const key = presetKeyFor(config.download_dir);
   for (const radio of document.querySelectorAll('input[name="folder"]')) {
@@ -184,8 +230,33 @@ function main() {
     saveConfig({ auto_tag: event.target.checked });
   });
   $('rsgain').addEventListener('change', (event) => {
-    saveConfig({ rsgain: event.target.checked });
+    const rsgainEl = event.target;
+    const rsgainMissingNoteEl = $('rsgainMissingNote');
+    if (rsgainEl.checked && lastDeps && lastDeps.rsgain === false) {
+      rsgainEl.checked = false;
+      if (rsgainMissingNoteEl) {
+        rsgainMissingNoteEl.textContent = 'rsgain is not installed on this system. Install rsgain first (e.g. sudo apt install rsgain, brew install rsgain, or winget install complexlogic.rsgain), then enable ReplayGain.';
+        rsgainMissingNoteEl.hidden = false;
+      }
+      return;
+    }
+    if (rsgainMissingNoteEl && lastDeps && lastDeps.rsgain === true) rsgainMissingNoteEl.hidden = true;
+    saveConfig({ rsgain: rsgainEl.checked });
   });
+  const audioFormatEl = $('audioFormat');
+  if (audioFormatEl) {
+    audioFormatEl.addEventListener('change', () => {
+      updateMp3Row();
+      updateFormatNote();
+      pushConfig();
+    });
+  }
+  const mp3QualityEl = $('mp3Quality');
+  if (mp3QualityEl) {
+    mp3QualityEl.addEventListener('change', () => {
+      pushConfig();
+    });
+  }
   for (const radio of document.querySelectorAll('input[name="folder"]')) {
     radio.addEventListener('change', () => {
       const checked = document.querySelector('input[name="folder"]:checked');
