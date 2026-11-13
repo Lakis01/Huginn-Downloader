@@ -85,7 +85,6 @@ DESKTOP_FILES=(
     net.local.yt-dlp-shortcut.sh.desktop
     net.local.yt-dlp-shortcut.sh-2.desktop
     net.local.yt-dlp-shortcut.sh-3.desktop
-    net.local.yt-dlp-uri.desktop
 )
 
 for file in "${BIN_FILES[@]}"; do
@@ -175,9 +174,6 @@ if ! $INSTALL; then
         printf '  Write native-messaging manifest: %s\n' "$XDG_NATIVE_MANIFEST"
     fi
     printf '  Build %s\n' "$XPI_TARGET"
-    if ! $IS_MACOS; then
-        printf '  Register x-scheme-handler/yt-dlp -> net.local.yt-dlp-uri.desktop\n'
-    fi
     printf '  Config: %s\n' "$CONFIG_DEST"
     if $PLUGIN_CONFIG_EXISTS; then
         printf '    Preserve existing plugin config unless an explicit option is supplied.\n'
@@ -420,10 +416,4 @@ PY
 install_source "$manifest_template" "$HOME_NATIVE_MANIFEST" 644
 if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     install_source "$manifest_template" "$XDG_NATIVE_MANIFEST" 644
-fi
-
-if ! $IS_MACOS; then
-    HOME="$TARGET_HOME" XDG_CONFIG_HOME="$XDG_CONFIG_HOME_RESOLVED" \
-        xdg-mime default net.local.yt-dlp-uri.desktop x-scheme-handler/yt-dlp
-    printf 'Registered x-scheme-handler/yt-dlp with net.local.yt-dlp-uri.desktop.\n'
 fi

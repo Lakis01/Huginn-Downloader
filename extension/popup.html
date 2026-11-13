@@ -14,22 +14,10 @@
   </p>
 
   <section id="connectedView" hidden>
-    <h2>Download settings</h2>
-    <label class="toggle">
-      <input type="checkbox" id="autoTag">
-      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
-      <span class="label">Automatic tag extraction</span>
-    </label>
-    <label class="toggle">
-      <input type="checkbox" id="rsgain">
-      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
-      <span class="label">ReplayGain normalization (rsgain)</span>
-    </label>
-    <p class="warn-note" id="rsgainMissingNote" hidden></p>
-
     <h2>Audio format</h2>
     <select id="audioFormat" class="select" aria-label="Audio format">
       <option value="best">Native Opus / M4A (no conversion — best quality)</option>
+      <option value="opus">Opus (forced container, transcodes only if needed)</option>
       <option value="mp3">MP3 (FFmpeg conversion for legacy devices)</option>
       <option value="m4a">M4A / AAC (native when available)</option>
       <option value="ogg">Ogg Vorbis</option>
@@ -46,30 +34,53 @@
     </div>
     <p class="note" id="formatNote"></p>
 
-    <h2>Cover art</h2>
+    <h2>Channels</h2>
+    <select id="channelMode" class="select" aria-label="Channels">
+      <option value="stereo">Stereo</option>
+      <option value="ask">Ask each time</option>
+      <option value="mono">Mono</option>
+    </select>
+
+    <h2>Tags and artwork</h2>
+    <label class="toggle">
+      <input type="checkbox" id="autoTag">
+      <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      <span class="label">Automatic tags</span>
+    </label>
     <label class="toggle">
       <input type="checkbox" id="embedThumbnail">
       <span class="track" aria-hidden="true"><span class="thumb"></span></span>
-      <span class="label">Embed thumbnail picture (on by default)</span>
+      <span class="label">Embed cover art</span>
     </label>
     <label class="toggle">
       <input type="checkbox" id="thumbnailJpg">
       <span class="track" aria-hidden="true"><span class="thumb"></span></span>
-      <span class="label">Convert thumbnail to JPEG (legacy devices)</span>
+      <span class="label">Convert cover to JPEG</span>
     </label>
 
-    <h2>Channels</h2>
+    <h2>ReplayGain</h2>
     <label class="toggle">
-      <input type="checkbox" id="monoAudio">
+      <input type="checkbox" id="rsgain">
       <span class="track" aria-hidden="true"><span class="thumb"></span></span>
-      <span class="label">Encode as mono audio (off by default)</span>
+      <span class="label">ReplayGain normalization</span>
     </label>
+    <p class="warn-note" id="rsgainMissingNote" hidden></p>
+
+    <h2>Download folder</h2>
+    <select id="downloadFolder" class="select" aria-label="Download folder">
+      <option value="keep">Keep yt-dlp config</option>
+      <option value="music">~/Music/Youtube Downloads</option>
+      <option value="downloads">~/Downloads/Youtube</option>
+      <option value="custom">Custom folder</option>
+    </select>
+    <input type="text" id="customDir" class="path" placeholder="/home/user/Music/Youtube" aria-label="Custom download folder" hidden>
+    <p class="note" id="effectiveDir"></p>
 
     <h2>Long audio routing</h2>
     <label class="toggle">
       <input type="checkbox" id="longAudioEnabled">
       <span class="track" aria-hidden="true"><span class="thumb"></span></span>
-      <span class="label">Send long audio to a separate folder</span>
+      <span class="label">Route long audio to a separate folder</span>
     </label>
     <div id="longAudioRow" class="sub-row" hidden>
       <label for="longAudioMinutes" class="sub-label">Longer than (minutes)</label>
@@ -79,27 +90,6 @@
       <p class="note">Presets: ~/Podcasts or ~/Audiobooks, or type a custom path.</p>
     </div>
 
-    <h2>Download folder</h2>
-    <div class="choices" role="radiogroup" aria-label="Download folder">
-      <label class="choice">
-        <input type="radio" name="folder" value="keep">
-        <span>Keep yt-dlp config</span>
-      </label>
-      <label class="choice">
-        <input type="radio" name="folder" value="music">
-        <span class="mono">~/Music/Youtube Downloads</span>
-      </label>
-      <label class="choice">
-        <input type="radio" name="folder" value="downloads">
-        <span class="mono">~/Downloads/Youtube</span>
-      </label>
-      <label class="choice">
-        <input type="radio" name="folder" value="custom">
-        <span>Custom folder</span>
-      </label>
-    </div>
-    <input type="text" id="customDir" class="path" placeholder="/home/user/Music/Youtube" aria-label="Custom download folder" hidden>
-    <p class="note" id="effectiveDir"></p>
     <p class="note" id="depsLine"></p>
     <div class="update-note" id="ytdlpUpdateNote" hidden>
       <h2>yt-dlp update available</h2>

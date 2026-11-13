@@ -65,6 +65,18 @@ function dedupeUrls(values) {
   return out;
 }
 
+// Plain HTTP(S) check for menu srcUrl targets: blob: and data: preview
+// sources are never dispatchable to yt-dlp.
+function isHttpUrl(value) {
+  if (typeof value !== 'string' || !value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (_error) {
+    return false;
+  }
+}
+
 async function queryContextUrl(tabId) {
   const api = ext();
   if (!api || !tabId) return null;
@@ -112,8 +124,14 @@ async function handleMenuClick(info, tab) {
   if (!mode) return;
   const tabId = tab && tab.id;
   const contextUrl = await queryContextUrl(tabId);
-  const primaryUrl = contextUrl || info.linkUrl || info.pageUrl || (tab && tab.url) || null;
-  const fallbacks = dedupeUrls([info.linkUrl, info.pageUrl, tab && tab.url].filter(Boolean)).filter(
+  // Menu target fallback order: hovered YouTube card, link, usable
+  // image/audio/video source, frame, page, then the active tab. A srcUrl
+  // is only usable over plain HTTP(S): hover-autoplay previews expose
+  // blob: or data: sources that yt-dlp cannot fetch.
+  const srcUrl = isHttpUrl(info.srcUrl) ? info.srcUrl : null;
+  const primaryUrl =
+    contextUrl || info.linkUrl || srcUrl || info.frameUrl || info.pageUrl || (tab && tab.url) || null;
+  const fallbacks = dedupeUrls([info.linkUrl, srcUrl, info.frameUrl, info.pageUrl, tab && tab.url].filter(Boolean)).filter(
     (candidate) => candidate !== primaryUrl,
   );
   await sendDownload(mode, primaryUrl, fallbacks);
@@ -217,5 +235,5 @@ attachHooks();
 setupMenus();
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { HOST_ID, MENU_MODES, MENU_CONTEXTS, isYouTubeUrl, dedupeUrls };
+  module.exports = { HOST_ID, MENU_MODES, MENU_CONTEXTS, isYouTubeUrl, isHttpUrl, dedupeUrls };
 }

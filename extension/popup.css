@@ -145,30 +145,6 @@ body {
   outline-offset: 2px;
 }
 
-.choices {
-  display: grid;
-  gap: 6px;
-}
-
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.choice:has(input:checked) {
-  border-color: var(--accent);
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12.5px;
-}
-
 .path {
   width: 100%;
   margin-top: 8px;
