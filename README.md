@@ -158,8 +158,8 @@ a scope choice, not a claim that video cutting is impossible.
 ## Possible future backends
 
 [ytgrab-rs](https://github.com/fitzypopper/ytgrab-rs) is a separate,
-YouTube-only Rust downloader that could be evaluated as an optional backend if
-this project develops that capability. It is not integrated here and is still
+YouTube-only Rust downloader that may be a candidate if this project later
+develops an optional YouTube backend. It is not integrated here and is still
 early-stage; its own README lists gaps including browser-cookie extraction,
 DASH, and DRM. It does not replace `yt-dlp` for Dailymotion or other supported
 sites, so `yt-dlp` remains the supported general backend.
