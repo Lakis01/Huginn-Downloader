@@ -1,18 +1,19 @@
 # Firefox YouTube Downloader
 
-A Firefox add-on and local companion for sending YouTube pages, links, and
-watch-page controls to `yt-dlp` for audio, video, or a selected audio cut. The
-add-on supplies the interface; a small Native Messaging host and `yt-dlp` run
-on your own computer. The companion is not bundled with the add-on, and the
-extension sends nothing to a project-owned server.
+A Firefox add-on and local companion that sends safe web-page/link URLs to
+`yt-dlp` from the right-click menu and shortcuts, plus YouTube-specific
+watch-page controls, for audio, video, or a selected audio cut. The add-on
+supplies the interface; a small Native Messaging host and `yt-dlp` run on your
+own computer. The companion is not bundled with the add-on, and the extension
+sends nothing to a project-owned server.
 
-This runs **the exact same `yt-dlp` + `ffmpeg` pipeline already running on
-countless YouTube downloader websites** — but locally on your own machine, so it
-is **more accessible** (integrated into the YouTube UI, right-click context
-menu, and set-up-able global keyboard shortcuts), gives you **full control over
-codecs and bitrates** (native Opus/M4A, forced Opus, MP3 `V0`/`V2`/`V5`/`320k`,
-M4A, Ogg, FLAC, mono, cover art), and is **WAAAAY faster** (no upload queue, no ads, no
-re-encoding traps, direct native stream download).
+This runs `yt-dlp` and FFmpeg locally on your computer: downloads go directly
+from the source to your machine, without an upload queue or ads. The extension
+adds YouTube watch-page controls, a right-click menu, and system keyboard
+shortcuts, with choices for native Opus/M4A, forced Opus, MP3
+(`V0`/`V2`/`V5`/`320k`), Ogg, FLAC, channels, and cover art. Speed depends on
+the site, available formats, and your connection; native streams avoid an
+extra conversion when they match your chosen settings.
 
 ## Screenshots & interface overview
 
@@ -33,10 +34,10 @@ Four touchpoints (three to start a download, plus popup settings):
    menu may show the browser defaults. Any safe HTTP(S) URL is accepted and
    handed to the local companion, so the menu works on any media site
    `yt-dlp` supports.
-3. **Extension popup** — click the toolbar icon to check the companion
-   connection, toggle automatic tagging, ReplayGain, cover art, channels, and
-   long-audio routing, pick the audio format and MP3 quality, and choose the
-   download folder.
+ 3. **Extension popup** — click the toolbar icon to check the companion
+    connection, toggle automatic tagging, ReplayGain, cover art, channels, and
+    long-audio routing, pick the audio format and MP3 quality, and choose
+    separate audio and video folders.
 4. **Global keyboard shortcuts & CLI** — assign system-wide hotkeys (for
    example `Meta+Alt+A` for audio, `Meta+Alt+V` for video, `Meta+Alt+C` for
    cut) to `~/.local/bin/yt-dlp-shortcut.sh audio|video|cut` under
@@ -107,16 +108,31 @@ The remaining **Audio Format** options, selectable in the Firefox popup or via
 `audio_format` in `config.json` (`best`, `opus`, `mp3`, `m4a`, `ogg`, `flac`;
 `mp3_quality` defaults to `V0`):
 
-- **`opus`**: forces Opus output — prefers `bestaudio[acodec=opus]/bestaudio`,
+- **`opus`**: forces Opus output — prefers `bestaudio[acodec=opus]/bestaudio/best`,
   copies the native Opus stream when stereo and available, and otherwise
   transcodes to Opus via FFmpeg (`--audio-quality 128K` stereo, `96K` mono).
   Cuts default to Opus at `128 kbps` VBR stereo / `75 kbps` mono.
 - **`m4a`**: downloads YouTube's native AAC `.m4a` stream without re-encoding
-  whenever available (`bestaudio[ext=m4a]/bestaudio`), converting via FFmpeg
+  whenever available (`bestaudio[ext=m4a]/bestaudio/best`), converting via FFmpeg
   if no native `.m4a` stream exists or a mono downmix is requested.
 - **`ogg`** (Vorbis, quality `0`) and **`flac`**: convert via FFmpeg. Note that
   FLAC cannot restore quality lost in the source stream — it only preserves
   the decoded source losslessly in a larger file.
+
+### Audio extraction from other yt-dlp sites
+
+Audio downloads prefer an audio-only stream (`bestaudio`). If an extractor has
+only combined audio/video formats, the selector falls back to `best` and
+FFmpeg extracts the audio track. This handles sources such as Dailymotion HLS
+pages that offer MP4 A/V variants but no separate audio-only format. The
+fallback may transfer a larger video-containing stream before extracting its
+audio. Audio cuts use the same fallback; the final audio encoder maps only the
+audio stream and any attached cover art, not the ordinary video stream.
+
+This does not bypass a site's login, geography, DRM, or availability
+restrictions. If a source still reports “Requested format is not available,”
+update `yt-dlp` and inspect that URL with `yt-dlp --list-formats URL`; formats
+vary by page and extractor version.
 
 **`Cut Audio`** resolves channels once from the **Channels** setting below
 (`Ask each time` prompts `(s)tereo or (m)ono` per download; non-interactive
@@ -126,6 +142,33 @@ for bitrate (default **`128 kbps` VBR stereo**, **`75 kbps` mono**) and
 application mode (**`audio`**, or **`voip`** for speech/podcasts, which favors
 intelligibility at low bitrates). Cuts in MP3/M4A/Ogg/FLAC modes reuse the
 configured format settings instead of prompting.
+
+### Why there is an Audio Cut, but no Video Cut
+
+Audio Cut works on the selected audio segment and produces the requested audio
+format. It may encode the result again—for example, the Opus cut path makes one
+final encode at the chosen bitrate. Video commonly uses groups of pictures:
+many frames depend on nearby keyframes. A fast stream-copy cut can therefore
+start or end at a nearby keyframe rather than the exact requested frame. A
+frame-accurate video cut is possible, but generally requires decoding and
+re-encoding video, which costs more time and CPU and can reduce quality. This
+project does not currently offer that more expensive video-cut workflow; it is
+a scope choice, not a claim that video cutting is impossible.
+
+## Possible future backends
+
+[ytgrab-rs](https://github.com/fitzypopper/ytgrab-rs) is a separate,
+YouTube-only Rust downloader that could be evaluated as an optional backend if
+this project develops that capability. It is not integrated here and is still
+early-stage; its own README lists gaps including browser-cookie extraction,
+DASH, and DRM. It does not replace `yt-dlp` for Dailymotion or other supported
+sites, so `yt-dlp` remains the supported general backend.
+
+A full Rust rewrite of this companion is not planned just for speed: most
+download time is spent in network requests, `yt-dlp`, and FFmpeg rather than
+the small wrapper. Evaluating a Rust download backend would be a separate,
+incremental project; matching the companion's metadata and cross-platform
+behavior is a substantial parity effort.
 
 **Channels (`channel_mode`, Stereo by default):** `Stereo` keeps 2-channel
 output; `Mono` downmixes to 1-channel mono (`-ac 1`) with psychoacoustic
@@ -142,8 +185,8 @@ defaulting to stereo); non-interactive runs fall back to stereo.
 
 - Firefox 115 or newer.
 - The signed XPI from a GitHub Release or the [Firefox Add-ons listing](https://addons.mozilla.org/).
-- The matching local companion installed with `install.sh` (Linux/macOS) or
-  `install.ps1` (Windows).
+- The matching local companion installed with a Linux release package or
+  `install.sh`/`install.ps1` on Linux/macOS/Windows.
 - `yt-dlp` and FFmpeg installed locally. Python 3, Mutagen, and Pillow enable
   audio tagging and cover art; `rsgain` is optional and only used when
   ReplayGain is enabled.
@@ -151,7 +194,8 @@ defaulting to stereo); non-interactive runs fall back to stereo.
 The extension provides a YouTube watch-page Audio/Video/Cut pill, a broadly
 available right-click submenu, and a settings popup. It uses Firefox Native
 Messaging to pass a user-selected mode and URL to the local companion. The
-pill is YouTube-specific; the menu accepts any safe HTTP(S) URL. The
+pill is YouTube-specific; the menu accepts safe HTTP(S) URLs from sites
+supported by `yt-dlp`. The
 extension does not download media itself.
 
 ### Beginner-friendly dependency guide
@@ -169,10 +213,10 @@ In plain language, the three programs the companion needs are:
   install instructions if it is missing.
 
 Where to get them is covered per-OS in
-[Install the local companion](#install-the-local-companion): Debian 13.7
-(GNOME) and LMDE 7 (Cinnamon) install everything with one `apt` line;
-Arch/Fedora/openSUSE users substitute their package manager (`pacman`, `dnf`,
-`zypper`); macOS users install via Homebrew (`brew install yt-dlp ffmpeg`,
+[Install the local companion](#install-the-local-companion): Debian/Ubuntu can
+use the `.deb` or the explicit apt helper; Arch/Fedora use a release recipe or
+package (`pacman`, `dnf`); openSUSE users use `zypper` or `install.sh`; macOS
+users install via Homebrew (`brew install yt-dlp ffmpeg`,
 plus `python`/`pillow` and `pip install mutagen`); Windows users install via
 WinGet (`yt-dlp.yt-dlp`, `Gyan.FFmpeg.Shared`, `Python.Python.3.12`) and Scoop
 for the optional `rsgain`.
@@ -201,51 +245,109 @@ Listed AMO add-on by following [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md).
 
 ## Install the local companion
 
-Clone this repository, install the platform dependencies below, then run the
-OS-specific companion installer from the repository directory. Each installer
-has a dry-run default or a `--check-deps` command; neither installs operating
-system packages automatically.
+Install the signed XPI separately in Firefox. For the local companion, Linux
+users can use a distro package from the same GitHub Release or the per-user
+`install.sh` fallback. The Windows/macOS instructions below remain separate.
+The distro packages install the Native Messaging host system-wide; `install.sh`
+installs it for the current user. Do not keep both installations active at once.
 
 ### Debian 13.7 (GNOME, Wayland)
 
 ```sh
-sudo apt update
-sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
-  nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools \
-  desktop-file-utils
+# From the matching GitHub Release; apt resolves the companion's required dependencies.
+sudo apt install ./firefox-youtube-downloader-companion_2.5.0_all.deb
+```
+
+The `.deb` installs `yt-dlp`, FFmpeg, Python 3, Mutagen, and Pillow as required
+dependencies, so automatic tagging works by default. `rsgain` is only a
+`Suggests` package and is not installed automatically. Enable it separately if
+you want ReplayGain:
+
+```sh
+sudo apt install rsgain
+```
+
+To install the per-user companion from a source checkout instead:
+
+```sh
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
 cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
-./install.sh --install --yes
+./install.sh --install --yes --install-deps
+# Optional ReplayGain package:
+./install.sh --install --yes --install-deps --with-rsgain
 ```
 
 GNOME normally includes `kgx` or `ptyxis`; `gnome-terminal` is only needed if
 you want it as an additional terminal option. `wl-clipboard` supplies
-Wayland clipboard/primary-selection support.
+Wayland clipboard/primary-selection support. `--install-deps` is an explicit
+Debian-family opt-in: it runs `apt-get update` and installs the required
+download and tagging dependencies. It does not install desktop/clipboard
+extras or `rsgain` unless `--with-rsgain` is supplied.
 
 ### LMDE 7 (Cinnamon, X11)
 
 ```sh
-sudo apt update
-sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil \
-  nodejs gnome-terminal libnotify-bin xclip xsel playerctl \
-  qt6-tools-dev-tools desktop-file-utils
+# From the matching GitHub Release:
+sudo apt install ./firefox-youtube-downloader-companion_2.5.0_all.deb
+```
+
+Or use the per-user installer:
+
+```sh
 git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
 cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --check-deps
-./install.sh --install --yes
+./install.sh --install --yes --install-deps
 ```
 
 `xclip` or `xsel` supports clipboard access, and `gnome-terminal` is the
-suggested terminal. ReplayGain is optional; omit `rsgain` if you do not use it.
+suggested terminal. Install `rsgain` separately only if you use ReplayGain.
+
+### Fedora
+
+Download `firefox-youtube-downloader-companion-2.5.0-1.noarch.rpm` from the
+matching release and install it with DNF:
+
+```sh
+sudo dnf install ./firefox-youtube-downloader-companion-2.5.0-1.noarch.rpm
+```
+
+The RPM depends on Fedora's `ffmpeg-free` package, which has a limited codec
+set. If a conversion needs a codec it lacks, install a compatible FFmpeg build
+from a repository you trust. ReplayGain remains optional; install `rsgain`
+separately if desired.
+
+### Arch Linux
+
+The release includes a version-matched Arch recipe archive containing
+`PKGBUILD` and `.SRCINFO`; it is a build recipe, not a prebuilt Arch binary and
+is not automatically submitted to the AUR.
+
+```sh
+mkdir arch-recipe
+tar -xzf firefox-youtube-downloader-2.5.0-arch-pkgbuild.tar.gz -C arch-recipe
+cd arch-recipe
+makepkg -si
+```
+
+The recipe downloads the matching release source tarball and verifies its
+SHA-256. `rsgain` is an optional dependency.
 
 ### General Linux
 
-Install `yt-dlp`, FFmpeg, Python 3 with Mutagen and Pillow, and a terminal
-emulator. For the full shortcut integration, also install the clipboard and
-MPRIS tools for your session: `wl-clipboard` on Wayland; `xclip` or `xsel` on
-X11; and `playerctl` (or KDE's `qdbus6`). `rsgain` is optional. On Debian-based
-systems, for example:
+Linux releases provide a Debian/Ubuntu `.deb`, a Fedora `.rpm`, and an Arch
+build-recipe archive. The packages install the companion's Native Messaging
+host system-wide; `install.sh` remains the per-user fallback for other
+distributions. AppImage, Flatpak, Snap, Nix, and Alpine packages are not shipped
+yet; maintaining their separate host-registration/integration paths is not
+worth the extra complexity for this companion at present.
+
+For a manual Linux setup, install `yt-dlp`, FFmpeg, Python 3 with Mutagen and
+Pillow, and a terminal emulator. For the full shortcut integration, also
+install the clipboard and MPRIS tools for your session: `wl-clipboard` on
+Wayland; `xclip` or `xsel` on X11; and `playerctl` (or KDE's `qdbus6`). `rsgain`
+is optional. On Debian-based systems, for example:
 
 ```sh
 sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil \
@@ -258,11 +360,12 @@ cd Firefox-Youtube-Downloader-Plugin
 ./install.sh --install --yes
 ```
 
-On Fedora, Arch, openSUSE, or another distribution, use its package manager and
-package names instead. `./install.sh --check-deps` prints the detected desktop
-session and Debian/LMDE package suggestions; it never runs the package manager.
-The installer stages user-level binaries under `~/.local/bin`, the Firefox
-Native Messaging manifest, and desktop shortcuts.
+openSUSE and other distributions can use their package manager with the
+required tools, or use `install.sh` as a per-user fallback. `./install.sh
+--check-deps` only prints suggestions; `--install-deps` is supported on
+Debian-family Linux when explicitly requested. The fallback stages binaries
+under `~/.local/bin`, a per-user Firefox Native Messaging manifest, and desktop
+shortcuts. The `.deb`/`.rpm`/Arch packages instead register a system-wide host.
 
 ### macOS
 
@@ -318,7 +421,8 @@ The popup stores these options in the user's config file:
 
 | Option | Fresh-install default | Meaning |
 | --- | --- | --- |
-| Download directory | `~/Music/Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another directory or select `ytdlp-default`. |
+| Audio download folder | `~/Music/Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another audio directory or select `Keep yt-dlp config`; this is `download_dir`. |
+| Video download folder | `~/Videos/Youtube Downloads` | Independent from audio; choose `~/Downloads/Youtube`, a custom path, or `Keep yt-dlp config` (`video_download_dir`). If no yt-dlp config exists, `Keep` falls back to the Videos default. Older configs missing this key migrate to the Videos default. |
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
 | Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `opus`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `opus` forces Opus output (native stream copied when stereo and available, otherwise FFmpeg transcode); `m4a` downloads the native AAC stream when available. |
@@ -336,12 +440,18 @@ existing yt-dlp config such as `~/.config/yt-dlp/config` or
 `%APPDATA%\yt-dlp\config`.
 
 On Linux and macOS, a plain `./install.sh` invocation is a no-write dry run;
-`./install.sh --install` applies the install. On Windows,
+`./install.sh --install` applies the per-user install. On Debian-family Linux,
+`./install.sh --install --install-deps` explicitly runs `apt-get update` and
+installs `yt-dlp`, FFmpeg, Python 3, Mutagen, and Pillow, so automatic tagging
+works immediately. Add `--with-rsgain` only if you want ReplayGain; it is never
+installed by default. The apt helper does not install optional terminal,
+clipboard, or notification integrations. On Windows,
 `py -3 install.py` is the no-write dry run and
 `py -3 install.py --install --yes` applies it (or use the PowerShell wrapper).
 `--download-dir=ytdlp-default`, `--auto-tag=true|false`, and
 `--rsgain=true|false` set values explicitly. Existing plugin configuration is
-preserved unless an option is provided.
+preserved unless an option is provided. Existing yt-dlp configuration files
+remain untouched.
 
 ## Shortcuts and desktop integration
 
@@ -417,6 +527,16 @@ registration path differ.
 
 ## Uninstall & rollback
 
+Remove the distro package with its package manager:
+
+- Debian/Ubuntu: `sudo apt remove firefox-youtube-downloader-companion`
+- Fedora: `sudo dnf remove firefox-youtube-downloader-companion`
+- Arch: `sudo pacman -R firefox-youtube-downloader-companion`
+
+Package removal does not delete your per-user config or Firefox profile. If you
+previously used `install.sh`, remove that per-user host separately so it does
+not shadow the system package.
+
 The Linux installer keeps timestamped `.bak.*` copies beside replaced files.
 To roll back, restore those files and remove only the Native Messaging manifests
 that did not exist before the install. It does not modify Firefox profiles or
@@ -440,17 +560,29 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 149 Python tests
-bash tests/test_shortcut.sh               # 41 launcher/installer checks
+python3 -m unittest discover -s tests -v  # 163 Python tests (includes package layout/release tests)
+bash tests/test_shortcut.sh               # 47 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh
 bash scripts/sign-xpi.sh                  # requires AMO_JWT_ISSUER/AMO_JWT_SECRET
-bash -n install.sh bin/yt-dlp-shortcut.sh scripts/build-xpi.sh scripts/sign-xpi.sh tests/test_shortcut.sh
+bash -n install.sh scripts/install-apt-deps.sh bin/yt-dlp-shortcut.sh \
+  scripts/build-xpi.sh scripts/sign-xpi.sh scripts/build-deb.sh \
+  scripts/build-rpm.sh scripts/build-source-tarball.sh \
+  scripts/build-arch-recipe.sh scripts/upload-release-packages.sh \
+  packaging/linux/stage-root.sh \
+  tests/test_shortcut.sh
 desktop-file-validate desktop/*.desktop
 ./install.sh
 python3 install.py
 git diff --check
 ```
+
+Linux release packages are built by `.github/workflows/release-linux-packages.yml`.
+Use its manual run on `main` to verify the `.deb`, Fedora `.rpm`, and Arch
+recipe before creating a signed-XPI draft release; the tag run then uploads the
+packages to that draft. Maintainers should publish the draft only after the
+workflow succeeds and the package assets are present. The workflow does not
+submit to AUR or other distro repositories.
 
 The Node fixture does not replace a final manual check in Firefox on each target
 OS. Test a signed XPI, companion install, menu action, watch-page controls, and
