@@ -308,6 +308,16 @@ def _make_stereo_webm_opus(path, duration=4):
     )
 
 
+def _make_muxed_mp4(path, duration=2):
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+         f"color=c=blue:s=64x64:r=25:d={duration}", "-f", "lavfi", "-i",
+         f"sine=frequency=440:duration={duration}", "-map", "0:v:0", "-map", "1:a:0",
+         "-c:v", "mpeg4", "-c:a", "aac", "-shortest", str(path)],
+        check=True,
+    )
+
+
 def _probe_media(path):
     result = subprocess.run(
         ["ffprobe", "-v", "error", "-show_streams", "-show_format",
@@ -896,39 +906,39 @@ class WrapperTests(unittest.TestCase):
         cases = (
             (
                 {"audio_format": "best"},
-                ["-f", "bestaudio", "-x", "--audio-format", "best"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "best"],
             ),
             (
                 {"audio_format": "opus"},
-                ["-f", "bestaudio[acodec=opus]/bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "128K"],
+                ["-f", "bestaudio[acodec=opus]/bestaudio/best", "-x", "--audio-format", "opus", "--audio-quality", "128K"],
             ),
             (
                 {"audio_format": "mp3", "mp3_quality": "V0"},
-                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
             ),
             (
                 {"audio_format": "mp3", "mp3_quality": "320k"},
-                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "320K"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "320K"],
             ),
             (
                 {"audio_format": "mp3", "mp3_quality": "V2"},
-                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "2"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "2"],
             ),
             (
                 {"audio_format": "mp3", "mp3_quality": "V5"},
-                ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "5"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "5"],
             ),
             (
                 {"audio_format": "m4a"},
-                ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"],
+                ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"],
             ),
             (
                 {"audio_format": "ogg"},
-                ["-f", "bestaudio", "-x", "--audio-format", "vorbis", "--audio-quality", "0"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "vorbis", "--audio-quality", "0"],
             ),
             (
                 {"audio_format": "flac"},
-                ["-f", "bestaudio", "-x", "--audio-format", "flac"],
+                ["-f", "bestaudio/best", "-x", "--audio-format", "flac"],
             ),
         )
         for config, expected in cases:
@@ -2251,17 +2261,17 @@ class PipelineOptionsTests(unittest.TestCase):
         wrapper = _load_wrapper(self)
         self.assertEqual(
             wrapper._audio_format_args({"audio_format": "mp3", "mp3_quality": "V0", "channel_mode": "mono"}),
-            ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+            ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "0",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
         self.assertEqual(
             wrapper._audio_format_args({"audio_format": "mp3", "mp3_quality": "320k", "channel_mode": "mono"}),
-            ["-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "192K",
+            ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "192K",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
         self.assertEqual(
             wrapper._audio_format_args({"audio_format": "best", "channel_mode": "mono"}),
-            ["-f", "bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "96K",
+            ["-f", "bestaudio/best", "-x", "--audio-format", "opus", "--audio-quality", "96K",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
 
@@ -2307,21 +2317,21 @@ class V24AudioPipelineTests(unittest.TestCase):
         wrapper = _load_wrapper(self)
         self.assertEqual(
             wrapper._audio_format_args({"audio_format": "opus", "channel_mode": "stereo"}),
-            ["-f", "bestaudio[acodec=opus]/bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "128K"],
+            ["-f", "bestaudio[acodec=opus]/bestaudio/best", "-x", "--audio-format", "opus", "--audio-quality", "128K"],
         )
         self.assertEqual(
             wrapper._audio_format_args({"audio_format": "opus", "channel_mode": "mono"}),
-            ["-f", "bestaudio[acodec=opus]/bestaudio", "-x", "--audio-format", "opus", "--audio-quality", "96K",
+            ["-f", "bestaudio[acodec=opus]/bestaudio/best", "-x", "--audio-format", "opus", "--audio-quality", "96K",
              "--postprocessor-args", "ExtractAudio:-ac 1"],
         )
         self.assertEqual(
             wrapper._audio_format_args({"audio_format": "m4a"}),
-            ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"],
+            ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"],
         )
         for audio_format, prefix in (
-            ("m4a", ["-f", "bestaudio[ext=m4a]/bestaudio", "-x", "--audio-format", "m4a"]),
-            ("ogg", ["-f", "bestaudio", "-x", "--audio-format", "vorbis", "--audio-quality", "0"]),
-            ("flac", ["-f", "bestaudio", "-x", "--audio-format", "flac"]),
+            ("m4a", ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"]),
+            ("ogg", ["-f", "bestaudio/best", "-x", "--audio-format", "vorbis", "--audio-quality", "0"]),
+            ("flac", ["-f", "bestaudio/best", "-x", "--audio-format", "flac"]),
         ):
             with self.subTest(audio_format=audio_format):
                 args = wrapper._audio_format_args({"audio_format": audio_format, "channel_mode": "mono"})
@@ -2390,6 +2400,81 @@ class V24AudioPipelineTests(unittest.TestCase):
             self.assertEqual(picture["disposition"]["attached_pic"], 1)
             self.assertEqual(probe["format"]["tags"]["title"], "Preserved title")
 
+    def test_muxed_av_audio_conversion_maps_audio_without_regular_video(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "muxed.mp4"
+            _make_muxed_mp4(source)
+
+            try:
+                result = wrapper._ensure_audio_properties(
+                    source, {"audio_format": "best", "channel_mode": "mono"}
+                )
+            except wrapper._YtDlpError as error:
+                self.fail(f"muxed audio conversion should succeed: {error}")
+
+            probe = _probe_media(result)
+            audio_streams = [s for s in probe["streams"] if s["codec_type"] == "audio"]
+            ordinary_video = [
+                s for s in probe["streams"]
+                if s["codec_type"] == "video" and not s.get("disposition", {}).get("attached_pic")
+            ]
+            self.assertEqual(len(audio_streams), 1)
+            self.assertEqual(audio_streams[0]["codec_name"], "opus")
+            self.assertEqual(audio_streams[0]["channels"], 1)
+            self.assertEqual(ordinary_video, [])
+
+    def test_interactive_opus_cut_from_muxed_av_uses_best_fallback_and_drops_video(self):
+        wrapper = _load_wrapper(self)
+        real_run = wrapper.subprocess.run
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "muxed.mp4"
+            cut_source = Path(tmp) / "cut.mp4"
+            _make_muxed_mp4(source)
+            yt_dlp_commands = []
+
+            def fake_run(command, **kwargs):
+                if command[0] != "yt-dlp":
+                    return real_run(command, **kwargs)
+                yt_dlp_commands.append(command)
+                real_run(
+                    ["ffmpeg", "-y", "-v", "error", "-i", str(source),
+                     "-ss", "0", "-t", "1.5", "-map", "0", "-c", "copy", str(cut_source)],
+                    check=True,
+                )
+                print_index = command.index("--print-to-file")
+                Path(command[print_index + 2]).write_text(f"{cut_source}\n", encoding="utf-8")
+                return SimpleNamespace(stdout="")
+
+            with mock.patch.object(
+                wrapper, "_fetch_info_with_access",
+                return_value=({"title": "Cut", "channel": "Artist", "duration": 2}, False),
+            ), mock.patch.object(wrapper, "effective_download_dir", return_value=None), \
+                 mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run), \
+                 mock.patch("builtins.input", side_effect=["0:00", "0:01", "", "audio"]):
+                try:
+                    result = wrapper.interactive_cut(
+                        "https://example.invalid/muxed-cut",
+                        {"auto_tag": False, "rsgain": False, "audio_format": "best",
+                         "channel_mode": "mono", "embed_thumbnail": False},
+                    )
+                except wrapper._YtDlpError as error:
+                    self.fail(f"muxed Opus cut should succeed: {error}")
+
+            cut_command = next(command for command in yt_dlp_commands if "--download-sections" in command)
+            self.assertEqual(
+                cut_command[cut_command.index("-f") + 1],
+                "bestaudio[acodec=opus]/bestaudio/best",
+            )
+            probe = _probe_media(result)
+            self.assertEqual(
+                [s for s in probe["streams"] if s["codec_type"] == "video"],
+                [],
+            )
+            audio = next(s for s in probe["streams"] if s["codec_type"] == "audio")
+            self.assertEqual(audio["codec_name"], "opus")
+            self.assertEqual(audio["channels"], 1)
+
     def test_mono_mp3_ogg_and_flac_are_encoded_with_their_configured_quality(self):
         wrapper = _load_wrapper(self)
         real_run = wrapper.subprocess.run
@@ -2445,7 +2530,7 @@ class V24AudioPipelineTests(unittest.TestCase):
             )
             before = source.read_bytes()
 
-            with self.assertRaisesRegex(wrapper._YtDlpError, "preserve all media streams"):
+            with self.assertRaisesRegex(wrapper._YtDlpError, "preserve the audio stream"):
                 wrapper._ensure_audio_properties(
                     source, {"audio_format": "best", "channel_mode": "mono"}
                 )
@@ -2546,6 +2631,10 @@ class V24AudioPipelineTests(unittest.TestCase):
                 self.assertEqual(final_encode[final_encode.index("-ac") + 1], channels)
                 self.assertEqual(final_encode[final_encode.index("-application") + 1], "voip")
                 cut_command = next(command for command in commands if "--download-sections" in command)
+                self.assertEqual(
+                    cut_command[cut_command.index("-f") + 1],
+                    "bestaudio[acodec=opus]/bestaudio/best",
+                )
                 self.assertNotIn("--audio-format", cut_command)
                 self.assertNotIn("--postprocessor-args", cut_command)
 

@@ -658,10 +658,20 @@ def _ensure_audio_properties(
     os.close(descriptor)
     temporary_path = Path(temporary_name)
     temporary_path.unlink(missing_ok=True)
-    command = [
-        "ffmpeg", "-y", "-v", "error", "-i", str(media_path),
-        "-map", "0", "-map_metadata", "0", "-c", "copy",
+    preserved_streams = [
+        stream for stream in streams
+        if stream.get("codec_type") == "audio"
+        or (
+            stream.get("codec_type") == "video"
+            and stream.get("disposition", {}).get("attached_pic") == 1
+        )
     ]
+    command = ["ffmpeg", "-y", "-v", "error", "-i", str(media_path)]
+    for stream in preserved_streams:
+        stream_index = stream.get("index")
+        if stream_index is not None:
+            command.extend(["-map", f"0:{stream_index}"])
+    command.extend(["-map_metadata", "0", "-c", "copy"])
     if needs_encode:
         command.extend(["-c:a", encoder])
         if encoder == "libopus":
@@ -709,7 +719,7 @@ def _ensure_audio_properties(
     except subprocess.CalledProcessError as error:
         detail = _yt_dlp_error_text(error)
         raise _YtDlpError(
-            "FFmpeg could not preserve all media streams, metadata, and artwork "
+            "FFmpeg could not preserve the audio stream(s), metadata, and attached artwork "
             f"while converting '{media_path}' ({container_name}, {source_codec}): {detail}"
         ) from None
     finally:
@@ -728,7 +738,7 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     mono = channel_mode == "mono"
     if audio_format == "opus":
         args = [
-            "-f", "bestaudio[acodec=opus]/bestaudio", "-x", "--audio-format", "opus",
+            "-f", "bestaudio[acodec=opus]/bestaudio/best", "-x", "--audio-format", "opus",
             "--audio-quality", "96K" if mono else "128K",
         ]
         if mono:
@@ -742,7 +752,7 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
             "V5": "5",
         }.get(mp3_quality, "0")
         args = [
-            "-f", "bestaudio", "-x", "--audio-format", "mp3",
+            "-f", "bestaudio/best", "-x", "--audio-format", "mp3",
             "--audio-quality", quality,
         ]
         if mono:
@@ -750,7 +760,7 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
         return args
     if audio_format == "m4a":
         args = [
-            "-f", "bestaudio[ext=m4a]/bestaudio", "-x",
+            "-f", "bestaudio[ext=m4a]/bestaudio/best", "-x",
             "--audio-format", "m4a",
         ]
         if mono:
@@ -758,24 +768,24 @@ def _audio_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
         return args
     if audio_format == "ogg":
         args = [
-            "-f", "bestaudio", "-x", "--audio-format", "vorbis",
+            "-f", "bestaudio/best", "-x", "--audio-format", "vorbis",
             "--audio-quality", "0",
         ]
         if mono:
             args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
         return args
     if audio_format == "flac":
-        args = ["-f", "bestaudio", "-x", "--audio-format", "flac"]
+        args = ["-f", "bestaudio/best", "-x", "--audio-format", "flac"]
         if mono:
             args += ["--postprocessor-args", "ExtractAudio:-ac 1"]
         return args
     if mono:
         return [
-            "-f", "bestaudio", "-x", "--audio-format", "opus",
+            "-f", "bestaudio/best", "-x", "--audio-format", "opus",
             "--audio-quality", "96K",
             "--postprocessor-args", "ExtractAudio:-ac 1",
         ]
-    return ["-f", "bestaudio", "-x", "--audio-format", "best"]
+    return ["-f", "bestaudio/best", "-x", "--audio-format", "best"]
 
 
 def _choose_channel_mode(config: Mapping[str, Any] | None = None) -> str:
@@ -991,10 +1001,7 @@ def interactive_cut(url, config=None):
             "-application", app_type,
         ]
         ffmpeg_options = " ".join(ffmpeg_args)
-        format_args = [
-            "-f",
-            "bestaudio[acodec=opus]/bestaudio" if audio_format == "opus" else "bestaudio",
-        ]
+        format_args = ["-f", "bestaudio[acodec=opus]/bestaudio/best"]
         postprocessor_args = None
         print(f"Applying FFmpeg overrides: {ffmpeg_options}")
     else:
