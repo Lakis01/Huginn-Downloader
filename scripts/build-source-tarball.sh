@@ -17,8 +17,8 @@ if [[ ${GITHUB_REF_TYPE:-} == tag && -n ${GITHUB_REF_NAME:-} && ${GITHUB_REF_NAM
 fi
 git -C "$ROOT" rev-parse --verify HEAD >/dev/null
 mkdir -p -- "$OUT_DIR"
-output="$OUT_DIR/firefox-youtube-downloader-${VERSION}-source.tar.gz"
-git -C "$ROOT" archive --format=tar --prefix="firefox-youtube-downloader-${VERSION}/" HEAD \
+output="$OUT_DIR/huginn-downloader-${VERSION}-source.tar.gz"
+git -C "$ROOT" archive --format=tar --prefix="huginn-downloader-${VERSION}/" HEAD \
     | gzip -n > "$output"
 gzip -t "$output"
 printf '%s\n' "$output"

@@ -1,4 +1,4 @@
-/* Segmented YouTube Downloader pill for watch pages.
+/* Segmented Huginn Downloader pill for YouTube watch pages.
    Light surface matches the like/dislike segmented pill; dark
    surface follows html[dark]. Never use badge-chip variables here:
    they resolve to near-invisible 5% white on dark YouTube. */

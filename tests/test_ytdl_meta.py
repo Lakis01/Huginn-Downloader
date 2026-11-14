@@ -1377,6 +1377,100 @@ class WrapperTests(unittest.TestCase):
                         self.assertEqual(rsgain_calls, [])
                     self.assertEqual(result, str(moved_media))
 
+    def test_auto_tag_disabled_during_download_skips_tagging_and_cleans_sidecars(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            moved_media = root / "download.opus"
+            thumbnail = moved_media.with_suffix(".jpg")
+            podcast_dir = root / "Podcasts"
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append((command, kwargs))
+                if command[0] == "yt-dlp":
+                    print_index = command.index("--print-to-file")
+                    Path(command[print_index + 2]).write_text(
+                        f"{moved_media}\n", encoding="utf-8"
+                    )
+                    self._write_download_sidecars(
+                        moved_media,
+                        {
+                            "title": "Track",
+                            "channel": "Artist",
+                            "duration": 180,
+                            "thumbnail_filepath": str(thumbnail),
+                        },
+                    )
+                return SimpleNamespace(stdout="")
+
+            config = {
+                "download_dir": None,
+                "auto_tag": True,
+                "rsgain": False,
+                "embed_thumbnail": True,
+                "thumbnail_jpg": False,
+                "long_audio_enabled": True,
+                "long_audio_minutes": 1,
+                "long_audio_dir": str(podcast_dir),
+            }
+            with mock.patch.object(wrapper, "effective_download_dir", return_value=None):
+                with mock.patch.object(
+                    wrapper,
+                    "load_config",
+                    side_effect=[config, {"auto_tag": False}],
+                ):
+                    with mock.patch.object(wrapper, "strip_language_tags") as strip:
+                        with mock.patch.object(wrapper, "tag_audio_file") as tag:
+                            with mock.patch.object(wrapper.shutil, "copy2") as copy:
+                                with mock.patch.object(
+                                    wrapper,
+                                    "_ensure_audio_properties",
+                                    side_effect=lambda path, *_args, **_kwargs: path,
+                                ):
+                                    with mock.patch.object(
+                                        wrapper.subprocess, "run", side_effect=fake_run
+                                    ):
+                                        result = wrapper.download_audio(
+                                            "https://example.invalid/audio"
+                                        )
+
+            final_path = podcast_dir / moved_media.name
+            self.assertEqual(result, str(final_path))
+            self.assertEqual(final_path.read_bytes(), b"downloaded audio")
+            self.assertFalse(moved_media.exists())
+            self.assertFalse(Path(f"{moved_media}.info.json").exists())
+            self.assertFalse(thumbnail.exists())
+            tag.assert_not_called()
+            copy.assert_not_called()
+            strip.assert_called_once_with(str(moved_media))
+
+    def test_finalize_empty_tag_metadata_without_cover_skips_media_copy(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "download.opus"
+            media.write_bytes(b"original audio")
+            info_path = Path(f"{media}.info.json")
+            info_path.write_text(json.dumps({"title": "", "duration": 100}), encoding="utf-8")
+            config = {
+                "auto_tag": True,
+                "rsgain": False,
+                "embed_thumbnail": True,
+                "thumbnail_jpg": False,
+                "long_audio_enabled": False,
+            }
+
+            with mock.patch.object(wrapper, "load_config", return_value={"auto_tag": True}):
+                with mock.patch.object(wrapper.shutil, "copy2", wraps=wrapper.shutil.copy2) as copy:
+                    with mock.patch.object(wrapper, "tag_audio_file") as tag:
+                        result = wrapper.finalize_audio_download(media, config=config)
+
+            self.assertEqual(result, str(media))
+            self.assertEqual(media.read_bytes(), b"original audio")
+            self.assertFalse(info_path.exists())
+            copy.assert_not_called()
+            tag.assert_not_called()
+
     def test_audio_download_retries_auth_failure_with_browser_cookies(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:
@@ -2243,10 +2337,46 @@ class WrapperTests(unittest.TestCase):
                     )
         output = stderr.getvalue()
         self.assertEqual(result, 1)
-        wrapper.check_ytdlp_update.assert_called_once_with(allow_network=True)
+        self.assertEqual(
+            wrapper.check_ytdlp_update.call_args_list,
+            [mock.call(allow_network=False), mock.call(allow_network=True)],
+        )
         self.assertIn("2026.01.01", output)
         self.assertIn("2026.10.26", output)
         self.assertIn("pipx upgrade yt-dlp", output)
+        self.assertIn("may have contributed", output)
+
+    def test_main_warns_about_outdated_yt_dlp_but_attempts_download(self):
+        wrapper = _load_wrapper(self)
+        events = []
+        stale_status = {
+            "installed": "2026.01.01",
+            "latest": "2026.10.26",
+            "outdated": True,
+            "age_days": 299,
+            "reason": "behind_latest",
+            "update_hint": "pipx upgrade yt-dlp",
+        }
+
+        def check_version(*, allow_network):
+            events.append(("check", allow_network))
+            return stale_status
+
+        def download(_url):
+            events.append(("download", None))
+            return "/tmp/done.opus"
+
+        with mock.patch.object(wrapper, "check_ytdlp_update", side_effect=check_version):
+            with mock.patch.object(wrapper, "download_audio", side_effect=download):
+                with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                    with mock.patch("sys.stdout", new_callable=io.StringIO):
+                        result = wrapper.main(
+                            ["yt-dlp-wrapper.py", "audio", "https://example.invalid/x"]
+                        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(events, [("check", False), ("download", None)])
+        self.assertIn("pipx upgrade yt-dlp", stderr.getvalue())
 
     def test_main_omits_update_hint_on_ytdlp_error_when_up_to_date(self):
         wrapper = _load_wrapper(self)

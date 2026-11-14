@@ -25,22 +25,24 @@ package_root="$temporary_root/package"
 mkdir -p -- "$package_root/DEBIAN"
 bash "$ROOT/packaging/linux/stage-root.sh" \
     "$ROOT" "$package_root" /usr/lib/mozilla/native-messaging-hosts
+install -Dm755 "$ROOT/scripts/install-apt-deps.sh" \
+    "$package_root/usr/lib/firefox-youtube-downloader/install-apt-deps.sh"
 cat > "$package_root/DEBIAN/control" <<EOF
 Package: $PACKAGE_NAME
 Version: $VERSION
 Section: video
 Priority: optional
 Architecture: all
-Depends: yt-dlp, ffmpeg, python3, python3-mutagen, python3-pil
-Suggests: rsgain
-Maintainer: Firefox YouTube Downloader contributors <noreply@github.com>
-Description: Local Native Messaging companion for the Firefox downloader add-on
+Depends: python3
+Suggests: yt-dlp, ffmpeg, python3-mutagen, python3-pil, rsgain
+Maintainer: Huginn Downloader contributors <noreply@github.com>
+Description: Local Native Messaging companion for Huginn Downloader
  Installs the per-machine host and desktop launchers. Install the signed XPI
  separately in Firefox. ReplayGain support is optional.
 EOF
 chmod 755 "$package_root/DEBIAN"
 chmod 644 "$package_root/DEBIAN/control"
 
-output="$OUT_DIR/${PACKAGE_NAME}_${VERSION}_all.deb"
+output="$OUT_DIR/huginn-companion_${VERSION}_all.deb"
 dpkg-deb --build --root-owner-group "$package_root" "$output"
 printf '%s\n' "$output"

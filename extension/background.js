@@ -1,6 +1,6 @@
 'use strict';
 
-/* YouTube Downloader background script: icon context menu plus
+/* Huginn Downloader background script: icon context menu plus
    watch-page pill relay, both dispatched to the native host. */
 
 const HOST_ID = 'firefox_youtube_downloader';
@@ -155,7 +155,7 @@ async function setupMenus() {
   const items = [
     {
       id: 'ytdl-root',
-      title: 'YouTube Downloader',
+      title: 'Huginn Downloader',
       contexts: MENU_CONTEXTS.slice(),
       icons: { 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' },
     },

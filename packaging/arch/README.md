@@ -1,7 +1,7 @@
 # Arch Linux recipe
 
 This archive contains the `PKGBUILD` and `.SRCINFO` for building the
-Firefox YouTube Downloader companion with `makepkg`. It is a recipe, not a
+Huginn Downloader companion with `makepkg`. It is a recipe, not a
 prebuilt package and not an AUR submission. The build downloads the source
 tarball attached to the matching GitHub release and verifies its SHA-256.
 

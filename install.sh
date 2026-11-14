@@ -141,9 +141,11 @@ if $CHECK_DEPS; then
     else
         printf '  missing: Python libraries mutagen, Pillow\n'
     fi
-    printf '\nSuggested dependencies (review; this command is not run):\n'
-    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools desktop-file-utils\n'
-    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools desktop-file-utils\n'
+    printf '\nCore media dependencies (probe only):\n'
+    bash "$ROOT/scripts/install-apt-deps.sh" --check
+    printf '\nOptional desktop integrations (review; this command is not run):\n'
+    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools desktop-file-utils\n'
+    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools desktop-file-utils\n'
     printf 'Optional ReplayGain: sudo apt install rsgain\n'
     printf 'GNOME usually includes kgx or ptyxis; install gnome-terminal only if desired. Clipboard tools: wl-clipboard on Wayland, xclip or xsel on X11.\n'
     exit 0
@@ -434,7 +436,7 @@ import sys
 destination, host_path = sys.argv[1:]
 manifest = {
     "name": "firefox_youtube_downloader",
-    "description": "Native Messaging host for Firefox YouTube Downloader Plugin",
+    "description": "Native Messaging host for Huginn Downloader",
     "path": host_path,
     "type": "stdio",
     "allowed_extensions": ["firefox-youtube-downloader@lakis01.github.io"],

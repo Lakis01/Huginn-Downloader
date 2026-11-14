@@ -1,17 +1,17 @@
 pkgbase = firefox-youtube-downloader-companion
-	pkgdesc = Local Native Messaging companion for Firefox YouTube Downloader
+	pkgdesc = Local Native Messaging companion for Huginn Downloader
 	pkgver = @VERSION@
 	pkgrel = 1
-	url = https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin
+	url = https://github.com/Lakis01/Huginn-Downloader
 	arch = any
 	license = MIT
-	depends = yt-dlp
-	depends = ffmpeg
 	depends = python
-	depends = python-mutagen
-	depends = python-pillow
+	optdepends = yt-dlp: downloader backend
+	optdepends = ffmpeg: media conversion and probing
+	optdepends = python-mutagen: automatic audio tagging
+	optdepends = python-pillow: thumbnail handling
 	optdepends = rsgain: optional ReplayGain normalization
-	source = firefox-youtube-downloader-@VERSION@-source.tar.gz::https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin/releases/download/v@VERSION@/firefox-youtube-downloader-@VERSION@-source.tar.gz
+	source = huginn-downloader-@VERSION@-source.tar.gz::https://github.com/Lakis01/Huginn-Downloader/releases/download/v@VERSION@/huginn-downloader-@VERSION@-source.tar.gz
 	sha256sums = @SOURCE_SHA256@
 
 pkgname = firefox-youtube-downloader-companion

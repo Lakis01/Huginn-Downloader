@@ -467,12 +467,61 @@ def _long_audio_target_dir(cfg, duration_seconds) -> Path | None:
     return path
 
 
+def _refresh_auto_tag_before_finalize(config, enabled_at_start):
+    """Honor a tag opt-out made while the download was running."""
+    if not enabled_at_start:
+        return False
+    try:
+        latest_config = load_config()
+    except Exception:
+        return True
+    if latest_config.get("auto_tag", True) is False:
+        config["auto_tag"] = False
+        return False
+    return True
+
+
+def _has_usable_tag_metadata(meta, thumbnail_path):
+    """Return whether tagging has useful text or a local cover to embed."""
+    if thumbnail_path is not None:
+        try:
+            if Path(thumbnail_path).is_file():
+                return True
+        except OSError:
+            pass
+    fields = (
+        "title", "artist", "album", "date", "composer", "composers",
+        "lyricists", "producers", "arrangers", "conductors", "engineers",
+        "performers", "instruments", "publisher", "isrc", "genre",
+        "recordingdate", "studio",
+    )
+    for key in fields:
+        value = meta.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, (list, tuple)) and any(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            return True
+    return False
+
+
 def finalize_audio_download(
-    media_path, filename_suffix="", config=None, duration_seconds=None
+    media_path,
+    filename_suffix="",
+    config=None,
+    duration_seconds=None,
+    *,
+    refresh_auto_tag=False,
 ) -> str:
     """Tag, name, and route a downloaded audio file before optional ReplayGain."""
     cfg = dict(config) if config is not None else load_config()
-    auto_tag = cfg.get("auto_tag", True)
+    auto_tag_enabled_at_start = cfg.get("auto_tag", True)
+    auto_tag = (
+        _refresh_auto_tag_before_finalize(cfg, auto_tag_enabled_at_start)
+        if refresh_auto_tag
+        else auto_tag_enabled_at_start
+    )
     do_rsgain = cfg.get("rsgain", False)
     embed_thumbnail = cfg.get("embed_thumbnail", True)
     thumbnail_jpg = cfg.get("thumbnail_jpg", False)
@@ -480,21 +529,31 @@ def finalize_audio_download(
     if not auto_tag:
         print("Skipping automatic tag extraction (auto_tag=false).")
         strip_language_tags(str(media_path))
-        info_path = _info_sidecar_path(media_path) if cfg.get("long_audio_enabled") else None
+        info_path = _info_sidecar_path(media_path)
+        info = {}
         sidecar_duration = None
-        if info_path is not None:
+        if info_path.is_file():
             try:
                 with info_path.open("r", encoding="utf-8") as sidecar:
-                    sidecar_duration = json.load(sidecar).get("duration")
+                    info = json.load(sidecar)
+                if not isinstance(info, dict):
+                    info = {}
+                sidecar_duration = info.get("duration")
             except (OSError, json.JSONDecodeError, AttributeError):
                 pass
+        thumbnail_path = (
+            _find_thumbnail(media_path, info)
+            if embed_thumbnail and isinstance(info, dict)
+            else None
+        )
         duration = duration_seconds if duration_seconds is not None else sidecar_duration
         long_dir = _long_audio_target_dir(cfg, duration)
         final_path = media_path
         if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
             final_path = _move_collision_safe(media_path, long_dir / media_path.name)
-        if info_path is not None:
-            info_path.unlink(missing_ok=True)
+        info_path.unlink(missing_ok=True)
+        if thumbnail_path:
+            thumbnail_path.unlink(missing_ok=True)
         if do_rsgain:
             print("ReplayGain normalization (rsgain: analyzing -> applying)...")
             _run_rsgain(str(final_path))
@@ -519,6 +578,19 @@ def finalize_audio_download(
     else:
         print("\n\033[1;34mStandard track detected.\033[0m\n")
     thumbnail_path = _find_thumbnail(media_path, info) if embed_thumbnail else None
+
+    if not _has_usable_tag_metadata(meta, thumbnail_path):
+        long_dir = _long_audio_target_dir(cfg, duration)
+        final_path = media_path
+        if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
+            final_path = _move_collision_safe(media_path, long_dir / media_path.name)
+        info_path.unlink(missing_ok=True)
+        if thumbnail_path:
+            thumbnail_path.unlink(missing_ok=True)
+        if do_rsgain:
+            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+            _run_rsgain(str(final_path))
+        return str(final_path)
 
     target_path = media_path.with_name(
         f"{_final_stem(meta, filename_suffix)}{media_path.suffix}"
@@ -937,6 +1009,7 @@ def _remove_temp_file(path):
 
 
 def download_audio(url, config=None):
+    config_was_live = config is None
     cfg = dict(config) if config is not None else load_config()
     cfg["channel_mode"] = _choose_channel_mode(cfg)
     cfg.pop("mono_audio", None)
@@ -987,7 +1060,13 @@ def download_audio(url, config=None):
         if Path(filepath) != Path(original_filepath):
             _move_audio_sidecar(original_filepath, filepath)
         duration = _read_duration_print_to_file(duration_path)
-        return finalize_audio_download(filepath, "", cfg, duration)
+        return finalize_audio_download(
+            filepath,
+            "",
+            cfg,
+            duration,
+            refresh_auto_tag=config_was_live,
+        )
     finally:
         _remove_temp_file(print_path)
         _remove_temp_file(duration_path)
@@ -1022,6 +1101,7 @@ def download_video(url, config=None):
 
 
 def interactive_cut(url, config=None):
+    config_was_live = config is None
     cfg = dict(config) if config is not None else load_config()
     auto_tag = cfg.get("auto_tag", True)
     print(f"Fetching metadata for {url}...")
@@ -1165,7 +1245,11 @@ def interactive_cut(url, config=None):
             if Path(filepath) != Path(original_filepath):
                 _move_audio_sidecar(original_filepath, filepath)
             return finalize_audio_download(
-                filepath, filename_suffix, cfg, end_sec - start_sec
+                filepath,
+                filename_suffix,
+                cfg,
+                end_sec - start_sec,
+                refresh_auto_tag=config_was_live,
             )
         finally:
             _remove_temp_file(print_path)
@@ -1181,19 +1265,22 @@ def _print_update_hint(status):
     hint = status.get("update_hint") or "yt-dlp -U"
     if latest:
         print(
-            f"Your yt-dlp is out of date (installed {installed}, "
+            f"An outdated yt-dlp version may have contributed "
+            f"(installed {installed}, "
             f"latest {latest}). Update with: {hint}",
             file=sys.stderr,
         )
     elif isinstance(age_days, int):
         print(
-            f"Your yt-dlp is out of date (installed {installed}, "
+            f"An outdated yt-dlp version may have contributed "
+            f"(installed {installed}, "
             f"{age_days} days old). Update with: {hint}",
             file=sys.stderr,
         )
     else:
         print(
-            f"Your yt-dlp may be out of date (installed {installed}). "
+            f"An outdated yt-dlp version may have contributed "
+            f"(installed {installed}). "
             f"Update with: {hint}",
             file=sys.stderr,
         )
@@ -1239,6 +1326,15 @@ def main(argv=None):
             return 1
 
         mode, url = args[0], args[1]
+        if mode not in {"audio", "video", "cut"}:
+            print("Unknown mode.")
+            return 1
+        try:
+            status = check_ytdlp_update(allow_network=False)
+        except Exception:
+            status = None
+        if status and status.get("outdated"):
+            _print_update_notice(status)
         try:
             if mode == "audio":
                 download_audio(url)
@@ -1258,12 +1354,6 @@ def main(argv=None):
             if status and status.get("outdated"):
                 _print_update_hint(status)
             return 1
-        try:
-            status = check_ytdlp_update(allow_network=True)
-        except Exception:
-            status = None
-        if status and status.get("outdated"):
-            _print_update_notice(status)
         return 0
     finally:
         if wait_keypress and sys.stdin.isatty():

@@ -31,10 +31,10 @@ command -v gh >/dev/null 2>&1 || {
 }
 
 expected_assets=(
-    "firefox-youtube-downloader-companion_${VERSION}_all.deb"
-    "firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
-    "firefox-youtube-downloader-${VERSION}-source.tar.gz"
-    "firefox-youtube-downloader-${VERSION}-arch-pkgbuild.tar.gz"
+    "huginn-companion_${VERSION}_all.deb"
+    "huginn-companion-${VERSION}-1.noarch.rpm"
+    "huginn-downloader-${VERSION}-source.tar.gz"
+    "huginn-downloader-${VERSION}-arch-pkgbuild.tar.gz"
 )
 upload_paths=()
 for asset in "${expected_assets[@]}"; do
@@ -59,8 +59,8 @@ done
 }
 
 release_assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
-grep -Fxq 'firefox-youtube-downloader-signed.xpi' <<<"$release_assets" || {
-    printf 'Draft release %s is missing firefox-youtube-downloader-signed.xpi.\n' "$TAG" >&2
+grep -Fxq 'huginn-signed.xpi' <<<"$release_assets" || {
+    printf 'Draft release %s is missing huginn-signed.xpi.\n' "$TAG" >&2
     exit 1
 }
 

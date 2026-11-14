@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       upload_to_draft:
-        description: Upload package assets to an existing signed-XPI draft release
+        description: Upload package assets to an existing Huginn-signed-XPI draft release
         required: false
         type: boolean
         default: false
@@ -39,8 +39,8 @@ jobs:
           sudo apt-get install -y dpkg-dev
           bash scripts/build-source-tarball.sh dist
           bash scripts/build-deb.sh dist
-          dpkg-deb --info "dist/firefox-youtube-downloader-companion_${version}_all.deb"
-          dpkg-deb --contents "dist/firefox-youtube-downloader-companion_${version}_all.deb"
+          dpkg-deb --info "dist/huginn-companion_${version}_all.deb"
+          dpkg-deb --contents "dist/huginn-companion_${version}_all.deb"
 
       - name: Build and inspect Fedora RPM
         shell: bash
@@ -59,21 +59,21 @@ jobs:
               dnf install -y rpm-build python3 tar gzip shadow-utils
               useradd --create-home package-builder
               su - package-builder -s /bin/bash -c \
-                "bash /src/scripts/build-rpm.sh /src/dist/firefox-youtube-downloader-${VERSION}-source.tar.gz /out"
-              rpm -qip "/out/firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
-              rpm -qlp "/out/firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
-              rpm -qp --requires "/out/firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
+                "bash /src/scripts/build-rpm.sh /src/dist/huginn-downloader-${VERSION}-source.tar.gz /out"
+              rpm -qip "/out/huginn-companion-${VERSION}-1.noarch.rpm"
+              rpm -qlp "/out/huginn-companion-${VERSION}-1.noarch.rpm"
+              rpm -qp --requires "/out/huginn-companion-${VERSION}-1.noarch.rpm"
             '
           mv "$rpm_out"/*.rpm dist/
           rmdir "$rpm_out"
 
       - name: Build Arch PKGBUILD recipe
-        run: bash scripts/build-arch-recipe.sh "dist/firefox-youtube-downloader-${VERSION}-source.tar.gz" dist
+        run: bash scripts/build-arch-recipe.sh "dist/huginn-downloader-${VERSION}-source.tar.gz" dist
 
       - name: Save package artifacts for manual verification
         uses: actions/upload-artifact@v4
         with:
-          name: firefox-youtube-downloader-linux-${{ github.run_id }}
+          name: huginn-downloader-linux-${{ github.run_id }}
           path: |
             dist/*.deb
             dist/*.rpm
@@ -85,7 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          recipe="firefox-youtube-downloader-${VERSION}-arch-pkgbuild.tar.gz"
+          recipe="huginn-downloader-${VERSION}-arch-pkgbuild.tar.gz"
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e RECIPE="$recipe" \
             -v "$GITHUB_WORKSPACE/dist:/assets:ro" \
             archlinux:base-devel \

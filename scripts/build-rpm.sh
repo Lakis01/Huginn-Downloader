@@ -30,7 +30,7 @@ for subdir in BUILD BUILDROOT RPMS SOURCES SPECS SRPMS; do
     mkdir -p -- "$topdir/$subdir"
 done
 cp -- "$SOURCE_TARBALL" \
-    "$topdir/SOURCES/firefox-youtube-downloader-${VERSION}-source.tar.gz"
+    "$topdir/SOURCES/huginn-downloader-${VERSION}-source.tar.gz"
 spec="$topdir/SPECS/firefox-youtube-downloader-companion.spec"
 cp -- "$ROOT/packaging/fedora/firefox-youtube-downloader-companion.spec" "$spec"
 rpmbuild --define "_topdir $topdir" --define "app_version $VERSION" -bb "$spec"
@@ -41,4 +41,6 @@ rpm_file="$topdir/RPMS/noarch/${PACKAGE_NAME}-${VERSION}-1.noarch.rpm"
     exit 1
 }
 cp -- "$rpm_file" "$OUT_DIR/"
-printf '%s\n' "$OUT_DIR/${rpm_file##*/}"
+output="$OUT_DIR/huginn-companion-${VERSION}-1.noarch.rpm"
+mv -- "$OUT_DIR/${rpm_file##*/}" "$output"
+printf '%s\n' "$output"

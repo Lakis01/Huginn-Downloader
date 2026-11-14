@@ -59,6 +59,27 @@ function presetKeyFor(downloadDir, presets = PRESETS) {
   return 'custom';
 }
 
+function updateDownloadPresets(response) {
+  const directories = response.user_download_directories || {};
+  for (const [key, value] of Object.entries(directories)) {
+    if (typeof value !== 'string' || !value) continue;
+    if (key === 'music' || key === 'downloads') PRESETS[key] = value;
+    if (key === 'videos' || key === 'downloads') VIDEO_PRESETS[key] = value;
+  }
+  const labels = [
+    ['downloadFolder', 'music', PRESETS.music],
+    ['downloadFolder', 'downloads', PRESETS.downloads],
+    ['videoDownloadFolder', 'videos', VIDEO_PRESETS.videos],
+    ['videoDownloadFolder', 'downloads', VIDEO_PRESETS.downloads],
+  ];
+  for (const [selectId, value, label] of labels) {
+    const select = $(selectId);
+    if (!select || !select.options) continue;
+    const option = Array.from(select.options).find((item) => item.value === value);
+    if (option) option.textContent = label;
+  }
+}
+
 function updateFormatNote() {
   const note = $('formatNote');
   if (!note) return;
@@ -145,6 +166,7 @@ function renderUpdateNote(status) {
 
 function renderConnected(response) {
   setVisible(true);
+  updateDownloadPresets(response);
   lastDeps = response.deps || null;
   $('statusText').textContent = `Connected (companion ${response.version || 'unknown'})`;
   const config = response.config || {};

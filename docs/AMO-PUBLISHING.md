@@ -5,8 +5,8 @@ listing in the Firefox Add-ons catalog. Both routes use Mozilla's signing
 service. An **Unlisted** add-on is signed but does not appear in catalog search;
 a **Listed** add-on is signed and reviewed for public discovery.
 
-The add-on is one part of a two-part application. The XPI contains the Firefox
-interface; downloading is performed by the user's locally installed companion
+Huginn Downloader is a two-part application. The XPI contains the Firefox
+frontend; downloading is performed by the user's locally installed companion
 (`install.sh` on Linux/macOS or `install.ps1` on Windows) and `yt-dlp`. Users
 also need FFmpeg; automatic audio tagging uses Python, Mutagen, and Pillow, and
 ReplayGain is optional (`rsgain`). The browser add-on does not bundle or
@@ -78,7 +78,7 @@ file themselves and cannot discover it by searching AMO.
     `scripts/sign-xpi.sh` submits `extension/` with
     `npx web-ext sign --channel=unlisted`, validates the newest artifact in
     `web-ext-artifacts/`, and copies it to the deterministic release path
-    `dist/firefox-youtube-downloader-signed.xpi`. It exits non-zero when the
+    `dist/huginn-signed.xpi`. It exits non-zero when the
     two `AMO_JWT_*` variables are unset or when no signed `.xpi` appears.
 3. Verify it is a valid archive and contains the expected manifest/version:
 
@@ -89,19 +89,19 @@ file themselves and cannot discover it by searching AMO.
 
    Record the exact signed artifact name and its SHA-256 in the release notes
    if you want users to be able to verify downloads.
-4. Create a **draft** GitHub Release for the matching source tag/version,
-   attaching `dist/firefox-youtube-downloader-signed.xpi`. Create and push the
+ 4. Create a **draft** GitHub Release for the matching source tag/version,
+    attaching `dist/huginn-signed.xpi`. Create and push the
    tag explicitly first so the `push.tags` package workflow has a ref to run
    against; then create the draft for that existing tag. For example:
 
    ```sh
-   VERSION=2.5.0
+    VERSION=2.5.1
    TAG="v$VERSION"
    git tag -a "$TAG" -m "$TAG"
    git push origin "$TAG"
-   gh release create "$TAG" dist/firefox-youtube-downloader-signed.xpi \
+    gh release create "$TAG" dist/huginn-signed.xpi \
      --draft --verify-tag --target main \
-     --title "Firefox YouTube Downloader $VERSION" \
+      --title "Huginn Downloader $VERSION" \
      --notes-file release-notes.md
    ```
 
@@ -115,8 +115,8 @@ file themselves and cannot discover it by searching AMO.
    manually dispatch it with `upload_to_draft=true` and the release tag:
 
    ```sh
-   gh workflow run release-linux-packages.yml --ref v2.5.0 \
-     -f upload_to_draft=true -f release_tag=v2.5.0
+    gh workflow run release-linux-packages.yml --ref v2.5.1 \
+      -f upload_to_draft=true -f release_tag=v2.5.1
    ```
 
    Verify all assets and their displayed SHA-256 digests, then publish the
@@ -149,7 +149,7 @@ it to AMO's review and content policies.
    Include the full companion requirement prominently in the description, for
    example:
 
-   > Requires the free Firefox YouTube Downloader companion installer
+    > Requires the free Huginn Downloader companion installer
    > (`install.sh` on Linux/macOS or `install.ps1` on Windows), plus locally
    > installed `yt-dlp` and FFmpeg. The companion runs on your computer; it is
    > not bundled with this add-on. Python, Mutagen, and Pillow are needed for
@@ -206,44 +206,34 @@ version as available. Keep the previous GitHub release and store listing
 clearly distinguished; a Listed version is installed through AMO, while an
 Unlisted release is installed from its signed XPI.
 
-## AMO store survival, copyright & trademark best practices
+## AMO review and intellectual-property notes
 
-- **Why Mozilla permits Native Messaging bridges.** This add-on follows the
-  same architecture as long-standing AMO-hosted extensions such as `ff2mpv`
-  and *Video DownloadHelper*'s companion mode: the XPI itself contains only a
-  Firefox interface (menus, watch-page controls, settings popup) and talks to
-  a user-installed local program over Native Messaging. It bundles no
+- **Describe the Native Messaging design factually.** The XPI contains the
+  Firefox interface (menus, watch-page controls, settings popup) and passes a
+  user-selected mode and URL to the locally installed companion. It bundles no
   downloader, ships no media-handling binary, sends nothing to a
   project-owned server, and declares `data_collection_permissions.required:
-  ["none"]`. Reviewers evaluate the XPI on what it does — pass a
-  user-selected mode and URL to the user's own companion. This architecture
-  may be reviewable under current AMO policy, but Mozilla independently
-  reviews each submission and can reject, require updates to, or remove it;
-  do not assume these examples guarantee approval.
-- **Why keeping `yt-dlp` external to the `.xpi` is essential.** Never bundle
+  ["none"]`. Mozilla independently reviews each submission and can reject,
+  require updates to, or remove it; this architecture does not guarantee
+  approval.
+- **Keep the XPI and companion responsibilities clear.** Do not bundle
   `yt-dlp`, FFmpeg, `rsgain`, or Python libraries inside the signed package.
-  The XPI must remain a thin client: any downloading, transcoding, or tagging
-  capability that shipped inside the archive would be reviewed as the
-  add-on's own behavior and could trigger copyright-related rejection. With
-  `yt-dlp` installed separately by the user via their OS package manager, the
-  add-on never distributes or controls the fetching tool — the same boundary
-  that keeps the `ff2mpv` model viable.
-- **How to phrase public store titles (nominative fair use).** Do not prefix
-  the listing name with the brand (`"YouTube Downloader ..."` reads as an
-  official YouTube product). Use the `"... for YouTube"` form instead — e.g.
-  *"Downloader for YouTube (yt-dlp companion)"* — which nominatively names the
-  site the add-on interoperates with without claiming affiliation. The same
-  rule applies to icons, screenshots, and descriptions: describe compatibility
-  ("works on YouTube pages") rather than adopting YouTube branding.
+  The XPI is the Firefox frontend; the companion and user-installed `yt-dlp`
+  perform downloads locally. This describes the software architecture, not a
+  legal conclusion: using an external backend or presenting a frontend does
+  not by itself decide copyright or anti-circumvention liability.
+- **Use the Huginn Downloader brand consistently.** The existing AMO add-on ID
+  stays unchanged so the release updates the same listing. Describe YouTube as
+  a compatible site rather than implying affiliation with YouTube or Google.
 - **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases are still
   subject to Mozilla policy.** Unlisted signing produces a Mozilla signature
   without a catalog page, and the signed artifact is attached to a GitHub
-  Release that this project controls — but unlisted signing only means no
+   Release that this project controls — but unlisted signing only means no
   public catalog listing; signing does not grant policy immunity. Mozilla may
   revoke or blocklist signatures or prevent installs under policy or security
   action, and GitHub hosting doesn't override AMO/Firefox decisions. If a
   Listed catalog page were ever removed, Release-attached
-  `dist/firefox-youtube-downloader-signed.xpi` installs are not automatically
+   `dist/huginn-signed.xpi` installs are not automatically
   protected: keep Listed and Unlisted versions clearly distinguished and do
   not promise users that direct installs cannot be affected.
 

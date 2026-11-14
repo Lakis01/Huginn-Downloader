@@ -39,7 +39,7 @@ if command -v makepkg >/dev/null 2>&1; then
     mv -- "$recipe_dir/.SRCINFO.generated" "$recipe_dir/.SRCINFO"
 fi
 
-output="$OUT_DIR/firefox-youtube-downloader-${VERSION}-arch-pkgbuild.tar.gz"
+output="$OUT_DIR/huginn-downloader-${VERSION}-arch-pkgbuild.tar.gz"
 tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
     -czf "$output" -C "$recipe_dir" PKGBUILD .SRCINFO README.md
 printf '%s\n' "$output"

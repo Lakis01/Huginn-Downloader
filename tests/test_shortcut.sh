@@ -508,7 +508,7 @@ for manifest in (
     value = json.loads(manifest.read_text())
     assert value == {
         "name": "firefox_youtube_downloader",
-        "description": "Native Messaging host for Firefox YouTube Downloader Plugin",
+        "description": "Native Messaging host for Huginn Downloader",
         "path": str(home / ".local/bin/yt-dlp-native-host.py"),
         "type": "stdio",
         "allowed_extensions": ["firefox-youtube-downloader@lakis01.github.io"],
@@ -664,6 +664,13 @@ assert_file_contains "$TMP/check-deps.out" 'Desktop session:' '--check-deps desk
 assert_file_contains "$TMP/check-deps.out" 'Display server:' '--check-deps display detection'
 assert_file_contains "$TMP/check-deps.out" 'Debian 13.7 (GNOME)' '--check-deps Debian instructions'
 assert_file_contains "$TMP/check-deps.out" 'LMDE 7 (Cinnamon)' '--check-deps LMDE instructions'
+assert_file_contains "$TMP/check-deps.out" 'Core media dependencies (probe only):' \
+    '--check-deps explains media dependency probe'
+if grep -Fq 'sudo apt install yt-dlp' "$TMP/check-deps.out"; then
+    fail '--check-deps must not suggest replacing an existing yt-dlp command'
+fi
+grep -Eq 'All requested dependencies are available|Missing dependencies; apt packages to install:' \
+    "$TMP/check-deps.out" || fail '--check-deps includes the read-only apt helper result'
 [[ ! -e "$deps_home/.local" && ! -e "$deps_home/.config" && ! -e "$deps_home/.mozilla" ]] \
     || fail '--check-deps wrote files into HOME'
 pass '--check-deps detects session prerequisites without writing files'
@@ -693,35 +700,90 @@ pass 'macOS check-deps and install use the Library manifest without Linux deskto
 apt_stubs="$TMP/apt-stubs"
 mkdir -p "$apt_stubs"
 cat > "$apt_stubs/apt-get" <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$APT_LOG"
+#!/bin/bash
+printf 'apt-get %s\n' "$*" >> "$APT_LOG"
 STUB
 cat > "$apt_stubs/sudo" <<'STUB'
-#!/usr/bin/env bash
+#!/bin/bash
+printf 'sudo %s\n' "$*" >> "${SUDO_LOG:-/dev/null}"
 exec "$@"
 STUB
-chmod +x "$apt_stubs/apt-get" "$apt_stubs/sudo"
-
-apt_helper_log="$TMP/apt-helper.log"
-if ! APT_LOG="$apt_helper_log" PATH="$apt_stubs:$PATH" \
-    bash "$ROOT/scripts/install-apt-deps.sh" > "$TMP/apt-helper.out" 2>&1; then
-    fail 'apt helper runs through the fake apt-get and sudo commands'
+cat > "$apt_stubs/python3" <<'STUB'
+#!/bin/bash
+if [[ ${1:-} == -c ]]; then
+    case ${2:-} in
+        *'import mutagen'*) [[ " ${PYTHON_MODULES:-} " == *' mutagen '* ]] ;;
+        *'import PIL'*) [[ " ${PYTHON_MODULES:-} " == *' PIL '* ]] ;;
+        *) exit 1 ;;
+    esac
 fi
-mapfile -t apt_calls < "$apt_helper_log"
-assert_eq 'update' "${apt_calls[0]:-}" 'apt helper refreshes package metadata first'
-assert_eq 'install -y yt-dlp ffmpeg python3 python3-mutagen python3-pil' \
-    "${apt_calls[1]:-}" 'default apt dependencies include tagging but omit rsgain'
-assert_eq 2 "${#apt_calls[@]}" 'default apt install performs exactly two package-manager calls'
-pass 'apt helper installs core and automatic-tagging dependencies without optional rsgain'
+STUB
+chmod +x "$apt_stubs/apt-get" "$apt_stubs/sudo" "$apt_stubs/python3"
 
-: > "$apt_helper_log"
-if ! APT_LOG="$apt_helper_log" PATH="$apt_stubs:$PATH" \
-    bash "$ROOT/scripts/install-apt-deps.sh" --with-rsgain > "$TMP/apt-rsgain.out" 2>&1; then
+apt_log="$TMP/apt-helper.log"
+sudo_log="$TMP/apt-sudo.log"
+for command_name in yt-dlp ffmpeg ffprobe rsgain; do
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$apt_stubs/$command_name"
+    chmod +x "$apt_stubs/$command_name"
+done
+: > "$apt_log"
+: > "$sudo_log"
+if ! HOME="$TMP/apt-home" PYTHON_MODULES='mutagen PIL' APT_LOG="$apt_log" \
+    SUDO_LOG="$sudo_log" PATH="$apt_stubs" /bin/bash \
+    "$ROOT/scripts/install-apt-deps.sh" --check > "$TMP/apt-all-present.out" 2>&1; then
+    fail 'apt helper checks an already satisfied dependency set'
+fi
+[[ ! -s "$apt_log" && ! -s "$sudo_log" ]] \
+    || fail 'apt helper used apt or sudo when all requested dependencies were present'
+if ! HOME="$TMP/apt-home" PYTHON_MODULES='mutagen PIL' APT_LOG="$apt_log" \
+    SUDO_LOG="$sudo_log" PATH="$apt_stubs" /bin/bash \
+    "$ROOT/scripts/install-apt-deps.sh" > "$TMP/apt-all-present-install.out" 2>&1; then
+    fail 'apt helper skips installation when dependencies are already present'
+fi
+[[ ! -s "$apt_log" && ! -s "$sudo_log" ]] \
+    || fail 'apt helper used apt or sudo during an all-present install'
+pass 'apt dependency check and install are no-ops when complete'
+
+: > "$apt_log"
+: > "$sudo_log"
+rm -f "$apt_stubs/yt-dlp" "$apt_stubs/ffprobe"
+if ! HOME="$TMP/apt-home" PYTHON_MODULES='PIL' APT_LOG="$apt_log" \
+    SUDO_LOG="$sudo_log" PATH="$apt_stubs" /bin/bash \
+    "$ROOT/scripts/install-apt-deps.sh" --check > "$TMP/apt-partial-check.out" 2>&1; then
+    fail 'apt helper checks a partially missing dependency set'
+fi
+assert_file_contains "$TMP/apt-partial-check.out" 'yt-dlp ffmpeg python3-mutagen' \
+    'apt package mapping for missing yt-dlp, ffprobe and Mutagen'
+[[ ! -s "$apt_log" && ! -s "$sudo_log" ]] \
+    || fail '--check invoked a package manager'
+if ! HOME="$TMP/apt-home" PYTHON_MODULES='PIL' APT_LOG="$apt_log" \
+    SUDO_LOG="$sudo_log" PATH="$apt_stubs" /bin/bash \
+    "$ROOT/scripts/install-apt-deps.sh" > "$TMP/apt-helper.out" 2>&1; then
+    fail 'apt helper installs only missing dependencies'
+fi
+assert_file_contains "$apt_log" 'apt-get update' 'apt metadata refresh when dependencies are missing'
+assert_file_contains "$apt_log" 'apt-get install -y yt-dlp ffmpeg python3-mutagen' \
+    'apt helper installs only missing packages and maps ffprobe to ffmpeg'
+! grep -q 'python3-pil\|rsgain' "$apt_log" \
+    || fail 'apt helper installed already-present Pillow or opt-in rsgain'
+pass 'apt helper maps missing commands/imports and installs only missing packages'
+
+rm -f "$apt_stubs/rsgain"
+: > "$apt_log"
+for command_name in yt-dlp ffprobe; do
+    printf '#!/bin/bash\nexit 0\n' > "$apt_stubs/$command_name"
+    chmod +x "$apt_stubs/$command_name"
+done
+if ! HOME="$TMP/apt-home" PYTHON_MODULES='mutagen PIL' APT_LOG="$apt_log" \
+    SUDO_LOG="$sudo_log" PATH="$apt_stubs" /bin/bash \
+    "$ROOT/scripts/install-apt-deps.sh" --with-rsgain > "$TMP/apt-rsgain.out" 2>&1; then
     fail 'apt helper accepts the explicit optional rsgain choice'
 fi
-assert_file_contains "$apt_helper_log" 'install -y yt-dlp ffmpeg python3 python3-mutagen python3-pil rsgain' \
-    'rsgain is included only by the explicit helper option'
+assert_file_contains "$apt_log" 'install -y rsgain' 'rsgain is included only by the explicit helper option'
 pass 'apt helper includes rsgain only when explicitly requested'
+
+rm -f "$apt_stubs/python3" "$apt_stubs/yt-dlp" "$apt_stubs/ffmpeg" \
+    "$apt_stubs/ffprobe" "$apt_stubs/rsgain"
 
 apt_default_log="$TMP/apt-default-install.log"
 HOME="$TMP/no-apt-home" APT_LOG="$apt_default_log" PATH="$apt_stubs:$PATH" \
@@ -747,11 +809,18 @@ case " ${ID:-} ${ID_LIKE:-} " in
             [[ $optional == true ]] && args+=(--with-rsgain)
             HOME="$install_home" APT_LOG="$apt_log" PATH="$apt_stubs:$PATH" \
                 "$INSTALLER" "${args[@]}" > "$TMP/apt-installer-$optional.out"
-            assert_file_contains "$apt_log" 'update' "apt update runs before install ($optional)"
-            if [[ $optional == true ]]; then
-                assert_file_contains "$apt_log" 'rsgain' 'installer includes opt-in rsgain'
+            if [[ -s $apt_log ]]; then
+                assert_file_contains "$apt_log" 'apt-get update' \
+                    "apt update runs only when dependencies are missing ($optional)"
+                if [[ $optional == true ]]; then
+                    assert_file_contains "$apt_log" 'rsgain' 'installer includes missing opt-in rsgain'
+                else
+                    ! grep -q 'rsgain' "$apt_log" || fail 'default installer unexpectedly included rsgain'
+                fi
             else
-                ! grep -q 'rsgain' "$apt_log" || fail 'default installer unexpectedly included rsgain'
+                assert_file_contains "$TMP/apt-installer-$optional.out" \
+                    'All requested dependencies are available.' \
+                    "installer reports complete dependencies ($optional)"
             fi
         done
         pass 'Debian-family installer uses explicit apt opt-in and optional rsgain'

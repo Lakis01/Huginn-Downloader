@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=YouTube Video Download
+Name=Huginn Video Download
 Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh video
 NoDisplay=true
 Terminal=false

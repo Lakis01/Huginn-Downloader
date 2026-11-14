@@ -39,6 +39,7 @@ class LinuxPackageStagingTests(unittest.TestCase):
                 "yt-dlp-native-host.py",
             }
             self.assertEqual({path.name for path in app_dir.iterdir()}, expected_runtime_files)
+            self.assertFalse((app_dir / "install-apt-deps.sh").exists())
             manifest_path = stage / "usr/lib64/mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["name"], "firefox_youtube_downloader")
@@ -52,13 +53,16 @@ class LinuxPackageStagingTests(unittest.TestCase):
             desktop_files = sorted(desktop_dir.glob("*.desktop"))
             self.assertEqual(len(desktop_files), 3)
             desktop_text = "\n".join(path.read_text(encoding="utf-8") for path in desktop_files)
+            self.assertIn("Name=Huginn Audio Download", desktop_text)
+            self.assertIn("Name=Huginn Video Download", desktop_text)
+            self.assertIn("Name=Huginn Interactive Audio Cut", desktop_text)
             self.assertIn("Exec=/usr/lib/firefox-youtube-downloader/yt-dlp-shortcut.sh audio", desktop_text)
             self.assertIn("Exec=/usr/lib/firefox-youtube-downloader/yt-dlp-shortcut.sh video", desktop_text)
             self.assertIn("Exec=/usr/lib/firefox-youtube-downloader/yt-dlp-shortcut.sh cut", desktop_text)
             self.assertNotIn("/home/", desktop_text)
             self.assertNotIn("/.local/", desktop_text)
 
-    def test_deb_builder_declares_core_tagging_deps_and_only_suggests_rsgain(self):
+    def test_deb_builder_requires_only_python_and_suggests_media_dependencies(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             capture = tmp / "captured-root"
@@ -90,26 +94,29 @@ class LinuxPackageStagingTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             version = json.loads(MANIFEST.read_text(encoding="utf-8"))["version"]
             tag = f"v{version}"
-            package = output_dir / f"firefox-youtube-downloader-companion_{version}_all.deb"
+            package = output_dir / f"huginn-companion_{version}_all.deb"
             self.assertEqual(package.read_bytes(), b"fake package")
             self.assertEqual({path.name for path in (capture / "DEBIAN").iterdir()}, {"control"})
             control = (capture / "DEBIAN/control").read_text(encoding="utf-8")
             self.assertIn("Package: firefox-youtube-downloader-companion", control)
             self.assertIn(f"Version: {version}", control)
             self.assertIn("Architecture: all", control)
+            self.assertIn("Depends: python3", control)
             self.assertIn(
-                "Depends: yt-dlp, ffmpeg, python3, python3-mutagen, python3-pil",
+                "Suggests: yt-dlp, ffmpeg, python3-mutagen, python3-pil, rsgain",
                 control,
             )
-            self.assertIn("Suggests: rsgain", control)
             manifest_path = capture / "usr/lib/mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
             self.assertTrue(manifest_path.is_file())
             self.assertEqual(
                 json.loads(manifest_path.read_text(encoding="utf-8"))["path"],
                 "/usr/lib/firefox-youtube-downloader/yt-dlp-native-host.py",
             )
+            self.assertTrue(
+                (capture / "usr/lib/firefox-youtube-downloader/install-apt-deps.sh").is_file()
+            )
 
-    def test_rpm_builder_emits_fedora_noarch_metadata_without_rsgain_requirement(self):
+    def test_rpm_builder_emits_python_requirement_and_media_suggestions(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             source_tarball = tmp / "source.tar.gz"
@@ -146,17 +153,30 @@ class LinuxPackageStagingTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             version = env["PACKAGE_VERSION"]
-            package = output_dir / f"firefox-youtube-downloader-companion-{version}-1.noarch.rpm"
+            package = output_dir / f"huginn-companion-{version}-1.noarch.rpm"
             self.assertEqual(package.read_bytes(), b"fake rpm")
             spec = (tmp / "captured.spec").read_text(encoding="utf-8")
             self.assertIn("BuildArch:      noarch", spec)
-            self.assertIn("Requires:       yt-dlp", spec)
-            self.assertIn("Requires:       ffmpeg-free", spec)
-            self.assertIn("Requires:       python3-mutagen", spec)
-            self.assertIn("Requires:       python3-pillow", spec)
+            self.assertIn("Requires:       python3", spec)
+            self.assertIn("Suggests:       yt-dlp", spec)
+            self.assertIn("Suggests:       ffmpeg-free", spec)
+            self.assertIn("Suggests:       python3-mutagen", spec)
+            self.assertIn("Suggests:       python3-pillow", spec)
+            self.assertIn("Suggests:       rsgain", spec)
+            self.assertNotIn("Requires:       yt-dlp", spec)
+            self.assertNotIn("Requires:       ffmpeg-free", spec)
             self.assertNotIn("Requires:       rsgain", spec)
             self.assertNotIn("%post", spec)
             self.assertNotIn("%postun", spec)
+
+    def test_arch_recipe_keeps_media_dependencies_optional(self):
+        recipe = (ROOT / "packaging/arch/PKGBUILD.in").read_text(encoding="utf-8")
+        self.assertIn("depends=('python')", recipe)
+        self.assertIn("'yt-dlp: downloader backend'", recipe)
+        self.assertIn("'ffmpeg: media conversion and probing'", recipe)
+        self.assertIn("'python-mutagen: automatic audio tagging'", recipe)
+        self.assertIn("'python-pillow: thumbnail handling'", recipe)
+        self.assertIn("'rsgain: optional ReplayGain normalization'", recipe)
 
     def test_source_tarball_builder_rejects_a_tag_that_disagrees_with_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -185,7 +205,7 @@ class LinuxPackageStagingTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            archive_path = Path(tmp) / f"firefox-youtube-downloader-{committed_version}-source.tar.gz"
+            archive_path = Path(tmp) / f"huginn-downloader-{committed_version}-source.tar.gz"
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(archive_path.is_file())
@@ -217,7 +237,7 @@ class LinuxPackageStagingTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             version = json.loads(MANIFEST.read_text(encoding="utf-8"))["version"]
-            recipe_archive = output_dir / f"firefox-youtube-downloader-{version}-arch-pkgbuild.tar.gz"
+            recipe_archive = output_dir / f"huginn-downloader-{version}-arch-pkgbuild.tar.gz"
             with tarfile.open(recipe_archive, "r:gz") as archive:
                 recipe = archive.extractfile("PKGBUILD").read().decode("utf-8")
                 srcinfo = archive.extractfile(".SRCINFO").read().decode("utf-8")
@@ -226,6 +246,12 @@ class LinuxPackageStagingTests(unittest.TestCase):
             self.assertIn(f"sha256sums=('{expected_sha}')", recipe)
             self.assertIn(f"pkgver = {version}", srcinfo)
             self.assertIn(f"sha256sums = {expected_sha}", srcinfo)
+            self.assertIn("depends = python", srcinfo)
+            self.assertNotIn("\tdepends = yt-dlp\n", srcinfo)
+            self.assertIn("optdepends = yt-dlp: downloader backend", srcinfo)
+            self.assertIn("optdepends = ffmpeg: media conversion and probing", srcinfo)
+            self.assertIn("optdepends = python-mutagen: automatic audio tagging", srcinfo)
+            self.assertIn("optdepends = python-pillow: thumbnail handling", srcinfo)
             self.assertIn("optdepends = rsgain", srcinfo)
 
 
@@ -245,7 +271,7 @@ class ReleaseAssetUploadTests(unittest.TestCase):
                 "if args[:2] == ['release', 'view'] and '--json' in args and 'isDraft' in args:\n"
                 " print(os.environ.get('GH_DRAFT', 'true'))\n"
                 "elif args[:2] == ['release', 'view'] and '--json' in args and 'assets' in args:\n"
-                " print(os.environ.get('GH_ASSETS', 'firefox-youtube-downloader-signed.xpi'))\n"
+                " print(os.environ.get('GH_ASSETS', 'huginn-signed.xpi'))\n"
                 "elif args[:2] == ['release', 'upload']:\n"
                 " open(os.environ['GH_UPLOAD_LOG'], 'w').write('\\n'.join(os.path.basename(p) for p in args[3:-1]))\n"
                 "else:\n"
@@ -258,10 +284,10 @@ class ReleaseAssetUploadTests(unittest.TestCase):
             version = json.loads(MANIFEST.read_text(encoding="utf-8"))["version"]
             tag = f"v{version}"
             for name in (
-                f"firefox-youtube-downloader-companion_{version}_all.deb",
-                f"firefox-youtube-downloader-companion-{version}-1.noarch.rpm",
-                f"firefox-youtube-downloader-{version}-source.tar.gz",
-                f"firefox-youtube-downloader-{version}-arch-pkgbuild.tar.gz",
+                f"huginn-companion_{version}_all.deb",
+                f"huginn-companion-{version}-1.noarch.rpm",
+                f"huginn-downloader-{version}-source.tar.gz",
+                f"huginn-downloader-{version}-arch-pkgbuild.tar.gz",
             ):
                 (assets / name).write_bytes(b"fixture")
             (assets / "firefox-youtube-downloader.xpi").write_bytes(b"unsigned local build")
@@ -288,10 +314,10 @@ class ReleaseAssetUploadTests(unittest.TestCase):
             self.assertEqual(
                 set(uploaded),
                 {
-                    f"firefox-youtube-downloader-companion_{version}_all.deb",
-                    f"firefox-youtube-downloader-companion-{version}-1.noarch.rpm",
-                    f"firefox-youtube-downloader-{version}-source.tar.gz",
-                    f"firefox-youtube-downloader-{version}-arch-pkgbuild.tar.gz",
+                    f"huginn-companion_{version}_all.deb",
+                    f"huginn-companion-{version}-1.noarch.rpm",
+                    f"huginn-downloader-{version}-source.tar.gz",
+                    f"huginn-downloader-{version}-arch-pkgbuild.tar.gz",
                 },
             )
 

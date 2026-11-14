@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the Firefox YouTube Downloader companion on Windows."""
+"""Install the Huginn Downloader companion on Windows."""
 
 import argparse
 import json
@@ -65,7 +65,7 @@ def _check_deps() -> int:
 
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Install the Firefox YouTube Downloader Windows companion."
+        description="Install the Huginn Downloader Windows companion."
     )
     parser.add_argument("--install", action="store_true", help="apply the installation")
     parser.add_argument("--yes", action="store_true", help="do not ask for confirmation")
@@ -160,7 +160,7 @@ def _install_windows(args, environment: dict[str, str]) -> int:
         stream.write(trampoline)
     manifest = {
         "name": HOST_NAME,
-        "description": "Native Messaging host for Firefox YouTube Downloader Plugin",
+        "description": "Native Messaging host for Huginn Downloader",
         "path": str(paths["trampoline"]),
         "type": "stdio",
         "allowed_extensions": [EXTENSION_ID],

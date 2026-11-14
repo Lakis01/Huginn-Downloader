@@ -33,10 +33,12 @@ function testManifest() {
   const raw = readFile('extension/manifest.json');
   const manifest = JSON.parse(raw);
   assert.equal(manifest.manifest_version, 2);
+  assert.equal(manifest.name, 'Huginn Downloader');
+  assert.equal(manifest.homepage_url, 'https://github.com/Lakis01/Huginn-Downloader');
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.0', 'manifest version is 2.5.0');
+  assert.equal(manifest.version, '2.5.1', 'manifest version is 2.5.1');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -57,6 +59,18 @@ function testManifest() {
   assertAsciiNoEmoji('extension/manifest.json', raw);
 }
 
+function testReadmeBrandAndSetupGuidance() {
+  const readme = readFile('README.md');
+  const normalizedReadme = readme.toLowerCase().replace(/\s+/g, ' ');
+  assert.ok(readme.startsWith('# Huginn Downloader'), 'README uses the visible project brand');
+  assert.ok(readme.includes('Pin Huginn Downloader to the toolbar'), 'README tells users to pin the extension');
+  assert.ok(normalizedReadme.includes('both the firefox extension and the local companion'), 'README explains both parts are required');
+  assert.ok(readme.includes('CachyOS') && readme.includes('KDE'), 'README lists CachyOS + KDE testing');
+  assert.ok(readme.includes('LMDE 7') && readme.includes('Cinnamon'), 'README lists LMDE 7 + Cinnamon testing');
+  assert.ok(readme.includes('Debian 13') && readme.includes('GNOME'), 'README lists Debian 13 + GNOME testing');
+  assert.ok(readme.includes('does not grant download rights'), 'README avoids claiming legal immunity');
+}
+
 // --- icons ---
 function testIcons() {
   for (const name of ['plugin.svg', 'audio.svg', 'video.svg', 'cut.svg']) {
@@ -66,6 +80,7 @@ function testIcons() {
   }
   const plugin = readFile('extension/icons/plugin.svg');
   assert.match(plugin, /rounded|rx=/i, 'plugin badge is rounded');
+  assert.ok(plugin.includes('<title>Huginn Downloader raven</title>'), 'plugin badge is named for the raven brand');
   const badgeFills = { 'audio.svg': '#0b6bcb', 'video.svg': '#7c3aed', 'cut.svg': '#b45309' };
   for (const [name, fill] of Object.entries(badgeFills)) {
     const raw = readFile(`extension/icons/${name}`);
@@ -93,7 +108,7 @@ function testBackgroundStatic() {
   for (const id of ['ytdl-root', 'ytdl-audio', 'ytdl-video', 'ytdl-cut']) {
     assert.ok(src.includes(`"${id}"`) || src.includes(`'${id}'`), `background creates ${id}`);
   }
-  assert.ok(src.includes('YouTube Downloader'), 'root title is YouTube Downloader');
+  assert.ok(src.includes('Huginn Downloader'), 'root title is Huginn Downloader');
   assert.ok(src.includes('"Audio"') || src.includes("'Audio'"), 'audio title');
   assert.ok(src.includes('"Video"') || src.includes("'Video'"), 'video title');
   assert.ok(src.includes('Cut Audio'), 'cut title');
@@ -193,7 +208,7 @@ async function testBackgroundBehavior() {
   const { created, handlers, calls } = runBackgroundFixture();
   await new Promise((resolve) => setTimeout(resolve, 0));
   const byId = new Map(created.map((item) => [item.id, item]));
-  assert.equal(byId.get('ytdl-root').title, 'YouTube Downloader');
+  assert.equal(byId.get('ytdl-root').title, 'Huginn Downloader');
   assert.equal(JSON.stringify(byId.get('ytdl-root').icons), JSON.stringify({ 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' }));
   assert.equal(byId.get('ytdl-audio').parentId, 'ytdl-root');
   assert.equal(byId.get('ytdl-audio').title, 'Audio');
@@ -805,12 +820,18 @@ function testPopup() {
   assert.ok(html.includes('id="audioFormat"'), 'popup has #audioFormat select');
   assert.ok(html.includes('aria-label="Audio format"'), 'audio format select is labelled');
   assert.ok(html.includes('class="select"'), 'selects use themed .select class');
-  assert.ok(html.includes('value="best"') && html.includes('Native Opus / M4A (no conversion \u2014 best quality)'), 'best option verbatim');
-  assert.ok(html.includes('value="opus"'), 'popup offers forced opus format');
-  assert.ok(html.includes('value="mp3"') && html.includes('MP3 (FFmpeg conversion for legacy devices)'), 'mp3 option verbatim');
-  assert.ok(html.includes('value="m4a"') && html.includes('M4A / AAC (native when available)'), 'm4a option verbatim');
-  assert.ok(html.includes('value="ogg"') && html.includes('Ogg Vorbis'), 'ogg option verbatim');
-  assert.ok(html.includes('value="flac"') && html.includes('FLAC'), 'flac option verbatim');
+  const audioOptionsMarkup = html.match(/<select id="audioFormat"[^>]*>([\s\S]*?)<\/select>/);
+  assert.ok(audioOptionsMarkup, 'audio format options are present');
+  const audioOptions = Array.from(audioOptionsMarkup[1].matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g), (match) => [match[1], match[2]]);
+  assert.deepEqual(audioOptions, [
+    ['best', 'Best available'],
+    ['mp3', 'MP3'],
+    ['m4a', 'M4A / AAC'],
+    ['ogg', 'Ogg Vorbis'],
+    ['flac', 'FLAC'],
+    ['opus', 'Opus'],
+  ], 'short codec labels put forced Opus last');
+  assert.ok(!audioOptionsMarkup[1].includes('('), 'codec option labels have no parenthetical explanations');
   assert.ok(html.includes('id="mp3QualityRow"'), 'popup has #mp3QualityRow');
   assert.ok(html.includes('sub-row'), 'mp3 row uses .sub-row');
   assert.ok(/id="mp3QualityRow"[^>]*hidden/.test(html) || /hidden[^>]*id="mp3QualityRow"/.test(html), 'mp3 row starts hidden');
@@ -1140,20 +1161,25 @@ async function testPopupVideoFolderIsIndependentFromAudioFolder() {
     ok: true,
     version: '2.5.0',
     config: {
-      download_dir: '~/Music/Youtube Downloads',
-      video_download_dir: '~/Videos/Youtube Downloads',
+      download_dir: '~/Musik/Youtube Downloads',
+      video_download_dir: '~/Meine Videos/Youtube Downloads',
       auto_tag: true,
     },
+    user_download_directories: {
+      music: '~/Musik/Youtube Downloads',
+      videos: '~/Meine Videos/Youtube Downloads',
+      downloads: '~/Heruntergeladen/Youtube',
+    },
     deps: { yt_dlp: true, ffmpeg: true, rsgain: false },
-    effective_download_dir: '/home/user/Music/Youtube Downloads',
-    effective_video_download_dir: '/home/user/Videos/Youtube Downloads',
+    effective_download_dir: '/home/user/Musik/Youtube Downloads',
+    effective_video_download_dir: '/home/user/Meine Videos/Youtube Downloads',
     ytdlp_config_exists: false,
     yt_dlp_status: { outdated: false },
   });
   fx.triggerReady();
   await tick(30);
-  assert.equal(fx.elements.get('downloadFolder').value, 'music', 'audio keeps its own Music preset');
-  assert.equal(fx.elements.get('videoDownloadFolder').value, 'videos', 'video defaults to its Videos preset');
+  assert.equal(fx.elements.get('downloadFolder').value, 'music', 'audio uses the XDG Music preset');
+  assert.equal(fx.elements.get('videoDownloadFolder').value, 'videos', 'video uses the XDG Videos preset');
   fx.nativeCalls.length = 0;
   const videoSelect = fx.elements.get('videoDownloadFolder');
   videoSelect.value = 'custom';
@@ -1250,14 +1276,14 @@ function testSignScript() {
   assert.ok(sh.includes('WEB_EXT_API_KEY') && sh.includes('WEB_EXT_API_SECRET'), 'sign script passes AMO credentials via env vars so npx never logs them');
   assert.ok(sh.includes('python3 -m zipfile -t'), 'sign script validates the signed xpi');
   assert.ok(sh.includes('trap') && sh.includes('.amo-upload-uuid'), 'sign script traps EXIT to remove the uuid artifact');
-  assert.ok(sh.includes('firefox-youtube-downloader-signed.xpi'), 'sign script copies the signed artifact to dist');
+  assert.ok(sh.includes('huginn-signed.xpi'), 'sign script copies the signed artifact to dist');
   const stat = fs.statSync(path.join(ROOT, 'scripts', 'sign-xpi.sh'));
   assert.ok(stat.mode & 0o111, 'sign script is executable');
   const gi = readFile('.gitignore');
   assert.ok(gi.split('\n').some((line) => line.trim() === 'web-ext-artifacts/' || line.trim() === 'web-ext-artifacts'), '.gitignore lists web-ext-artifacts/');
   assert.ok(gi.split('\n').some((line) => line.trim() === 'extension/.amo-upload-uuid'), '.gitignore lists extension/.amo-upload-uuid');
   const os = require('node:os');
-  const signed = path.join(ROOT, 'dist', 'firefox-youtube-downloader-signed.xpi');
+  const signed = path.join(ROOT, 'dist', 'huginn-signed.xpi');
   const artifactsDir = path.join(ROOT, 'web-ext-artifacts');
   const uuidFile = path.join(ROOT, 'extension', '.amo-upload-uuid');
   const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sign-xpi-backup-'));
@@ -1297,7 +1323,7 @@ function testSignScript() {
     fs.chmodSync(stub, 0o755);
     const env = { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}`, AMO_JWT_ISSUER: 'test-issuer', AMO_JWT_SECRET: 'test-secret' };
     const out = require('node:child_process').execFileSync('bash', [path.join(ROOT, 'scripts', 'sign-xpi.sh')], { cwd: ROOT, env, encoding: 'utf8' });
-    assert.ok(out.includes('firefox-youtube-downloader-signed.xpi'), 'sign script prints the signed output path');
+    assert.ok(out.includes('huginn-signed.xpi'), 'sign script prints the signed output path');
     assert.ok(fs.existsSync(signed), 'stubbed sign produces the dist artifact');
     require('node:child_process').execFileSync('python3', ['-m', 'zipfile', '-t', signed], { stdio: 'ignore' });
     assert.ok(!fs.existsSync(uuidFile), 'sign script removes extension/.amo-upload-uuid on exit');
@@ -1354,6 +1380,7 @@ function testBuildScript() {
 
 async function main() {
   testManifest();
+  testReadmeBrandAndSetupGuidance();
   testIcons();
   testBackgroundStatic();
   await testBackgroundBehavior();
