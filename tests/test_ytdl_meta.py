@@ -1862,7 +1862,10 @@ class WrapperTests(unittest.TestCase):
     def test_video_mode_preserves_stream_and_thumbnail_behavior_without_rsgain(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:
-            config = {"download_dir": tmp, "auto_tag": True, "rsgain": False,
+            audio_dir = os.path.join(tmp, "audio")
+            video_dir = os.path.join(tmp, "video")
+            config = {"download_dir": audio_dir, "auto_tag": True, "rsgain": False,
+                      "video_download_dir": video_dir,
                       "long_audio_enabled": True, "long_audio_minutes": 1,
                       "long_audio_dir": os.path.join(tmp, "Podcasts")}
             with mock.patch.object(wrapper.subprocess, "run") as run:
@@ -1890,7 +1893,8 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("--ies", command)
         self.assertEqual(command[command.index("--ies") + 1], "youtube,youtube:tab")
         self.assertIn("-P", command)
-        self.assertEqual(command[command.index("-P") + 1], tmp)
+        self.assertEqual(command[command.index("-P") + 1], video_dir)
+        self.assertNotEqual(command[command.index("-P") + 1], audio_dir)
         self.assertEqual(command[-2:], ["--", "https://www.youtube.com/watch?v=video"])
         self.assertIsNone(kwargs.get("stdout"))
         self.assertEqual(kwargs.get("stderr"), subprocess.PIPE)
@@ -1901,7 +1905,7 @@ class WrapperTests(unittest.TestCase):
     def test_video_mode_omits_ies_for_non_youtube(self):
         wrapper = _load_wrapper(self)
         with mock.patch.object(
-            wrapper, "effective_download_dir", return_value=None
+            wrapper, "effective_video_download_dir", return_value=None, create=True
         ):
             with mock.patch.object(wrapper.subprocess, "run") as run:
                 wrapper.download_video(

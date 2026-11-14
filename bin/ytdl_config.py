@@ -9,6 +9,7 @@ from typing import Any
 
 
 DEFAULT_FRESH_DOWNLOAD_DIR = "~/Music/Youtube Downloads"
+DEFAULT_VIDEO_DOWNLOAD_DIR = "~/Videos/Youtube Downloads"
 ALT_FRESH_DOWNLOAD_DIR = "~/Downloads/Youtube"
 SUPPORTED_AUDIO_FORMATS = ("best", "opus", "mp3", "m4a", "ogg", "flac")
 SUPPORTED_MP3_QUALITIES = ("V0", "320k", "V2", "V5")
@@ -16,6 +17,7 @@ LEGACY_MP3_QUALITY_ALIASES = {"128k": "V5"}
 
 _DEFAULT_CONFIG = {
     "download_dir": None,
+    "video_download_dir": DEFAULT_VIDEO_DOWNLOAD_DIR,
     "auto_tag": True,
     "rsgain": False,
     "audio_format": "best",
@@ -98,6 +100,9 @@ def load_config(
     download_dir = stored.get("download_dir", config["download_dir"])
     if download_dir is None or isinstance(download_dir, str):
         config["download_dir"] = download_dir
+    video_download_dir = stored.get("video_download_dir", config["video_download_dir"])
+    if video_download_dir is None or isinstance(video_download_dir, str):
+        config["video_download_dir"] = video_download_dir
     for key in ("auto_tag", "rsgain"):
         value = stored.get(key, config[key])
         if isinstance(value, bool):
@@ -144,6 +149,11 @@ def save_config(
         if value is not None and not isinstance(value, str):
             raise TypeError("download_dir must be a string or None")
         normalized["download_dir"] = value
+    if "video_download_dir" in config:
+        value = config["video_download_dir"]
+        if value is not None and not isinstance(value, str):
+            raise TypeError("video_download_dir must be a string or None")
+        normalized["video_download_dir"] = value
     for key in ("auto_tag", "rsgain"):
         if key in config:
             value = config[key]
@@ -226,3 +236,17 @@ def effective_download_dir(
     if ytdlp_config_exists(env, platform_name):
         return None
     return _expand_user(DEFAULT_FRESH_DOWNLOAD_DIR, env)
+
+
+def effective_video_download_dir(
+    config: Mapping[str, Any],
+    env: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
+) -> str | None:
+    """Resolve the video override, or use yt-dlp's configured paths when selected."""
+    download_dir = config.get("video_download_dir", DEFAULT_VIDEO_DOWNLOAD_DIR)
+    if download_dir is not None:
+        return _expand_user(download_dir, env)
+    if ytdlp_config_exists(env, platform_name):
+        return None
+    return _expand_user(DEFAULT_VIDEO_DOWNLOAD_DIR, env)

@@ -79,6 +79,7 @@ class NativeHostTests(unittest.TestCase):
                 response["config"],
                 {
                     "download_dir": None,
+                    "video_download_dir": "~/Videos/Youtube Downloads",
                     "auto_tag": True,
                     "rsgain": False,
                     "audio_format": "best",
@@ -92,6 +93,10 @@ class NativeHostTests(unittest.TestCase):
                 },
             )
             self.assertEqual(response["effective_download_dir"], str(Path(tmp) / "Music/Youtube Downloads"))
+            self.assertEqual(
+                response["effective_video_download_dir"],
+                str(Path(tmp) / "Videos/Youtube Downloads"),
+            )
             self.assertFalse(response["ytdlp_config_exists"])
             self.assertEqual(response["deps"], {"yt_dlp": True, "ffmpeg": True, "rsgain": True})
 
@@ -115,6 +120,7 @@ class NativeHostTests(unittest.TestCase):
             responses[0]["config"],
             {
                 "download_dir": None,
+                "video_download_dir": "~/Videos/Youtube Downloads",
                 "auto_tag": False,
                 "rsgain": False,
                 "audio_format": "best",

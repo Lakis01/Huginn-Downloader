@@ -30,6 +30,7 @@ class ConfigTests(unittest.TestCase):
             config,
             {
                 "download_dir": None,
+                "video_download_dir": "~/Videos/Youtube Downloads",
                 "auto_tag": True,
                 "rsgain": False,
                 "audio_format": "best",
@@ -44,6 +45,51 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(DEFAULT_FRESH_DOWNLOAD_DIR, "~/Music/Youtube Downloads")
         self.assertEqual(ALT_FRESH_DOWNLOAD_DIR, "~/Downloads/Youtube")
+        self.assertEqual(
+            getattr(ytdl_config, "DEFAULT_VIDEO_DOWNLOAD_DIR", None),
+            "~/Videos/Youtube Downloads",
+        )
+
+    def test_legacy_config_migrates_video_folder_without_changing_audio_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            path = config_path(env)
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({"download_dir": "~/Music/Existing", "auto_tag": False}),
+                encoding="utf-8",
+            )
+
+            config = load_config(env)
+
+        self.assertEqual(config["download_dir"], "~/Music/Existing")
+        self.assertEqual(config.get("video_download_dir"), "~/Videos/Youtube Downloads")
+
+    def test_effective_video_dir_uses_project_default_only_for_explicit_keep(self):
+        resolver = getattr(ytdl_config, "effective_video_download_dir", None)
+        self.assertTrue(callable(resolver), "video folder resolver is available")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            expected = str(Path(tmp) / "Videos/Youtube Downloads")
+            self.assertEqual(
+                resolver({"video_download_dir": "~/Videos/Youtube Downloads"}, env),
+                expected,
+            )
+            self.assertEqual(resolver({"video_download_dir": None}, env), expected)
+
+    def test_effective_video_dir_defers_to_existing_ytdlp_config_when_selected(self):
+        resolver = getattr(ytdl_config, "effective_video_download_dir", None)
+        self.assertTrue(callable(resolver), "video folder resolver is available")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            ytdlp_config_file = Path(tmp) / ".config/yt-dlp/config"
+            ytdlp_config_file.parent.mkdir(parents=True)
+            ytdlp_config_file.write_text("--paths home:~/Videos/FromYtDlp\n", encoding="utf-8")
+            self.assertIsNone(resolver({"video_download_dir": None}, env))
+            self.assertEqual(
+                resolver({"video_download_dir": "~/Videos/Override"}, env),
+                str(Path(tmp) / "Videos/Override"),
+            )
 
     def test_config_path_uses_xdg_config_home_from_supplied_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -64,6 +110,7 @@ class ConfigTests(unittest.TestCase):
             env = {"HOME": tmp}
             expected = {
                 "download_dir": "~/Music/custom",
+                "video_download_dir": "~/Videos/Youtube Downloads",
                 "auto_tag": False,
                 "rsgain": True,
                 "audio_format": "best",
@@ -107,6 +154,7 @@ class ConfigTests(unittest.TestCase):
             env = {"HOME": tmp}
             expected = {
                 "download_dir": None,
+                "video_download_dir": "~/Videos/Youtube Downloads",
                 "auto_tag": True,
                 "rsgain": False,
                 "audio_format": "mp3",
@@ -151,6 +199,13 @@ class ConfigTests(unittest.TestCase):
                     with self.assertRaises((TypeError, ValueError)):
                         save_config(config, env)
 
+            self.assertFalse(config_path(env).exists())
+
+    def test_save_config_rejects_invalid_video_download_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            with self.assertRaises(TypeError):
+                save_config({"video_download_dir": 12}, env)
             self.assertFalse(config_path(env).exists())
 
     def test_effective_download_dir_is_none_when_yt_dlp_config_exists(self):

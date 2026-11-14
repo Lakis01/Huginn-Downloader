@@ -475,6 +475,7 @@ home = Path(sys.argv[1])
 config = json.loads((home / ".config/youtube-downloader/config.json").read_text())
 assert config == {
     "download_dir": "~/Music/Youtube Downloads",
+    "video_download_dir": "~/Videos/Youtube Downloads",
     "auto_tag": True,
     "rsgain": False,
     "audio_format": "best",
@@ -576,6 +577,7 @@ if process.returncode != 0:
 config = json.loads((Path(home) / ".config/youtube-downloader/config.json").read_text())
 assert config == {
     "download_dir": "~/Downloads/Youtube",
+    "video_download_dir": "~/Videos/Youtube Downloads",
     "auto_tag": False,
     "rsgain": True,
     "audio_format": "best",
@@ -604,6 +606,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     config = json.load(stream)
 assert config["download_dir"] is None, config
+assert config["video_download_dir"] == "~/Videos/Youtube Downloads", config
 assert config["auto_tag"] is True, config
 assert config["rsgain"] is False, config
 assert config["audio_format"] == "best", config
@@ -622,6 +625,7 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     config = json.load(stream)
 assert config == {
     "download_dir": None,
+    "video_download_dir": "~/Videos/Youtube Downloads",
     "auto_tag": True,
     "rsgain": True,
     "audio_format": "best",

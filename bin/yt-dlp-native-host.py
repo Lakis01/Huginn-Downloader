@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from ytdl_config import (
     effective_download_dir,
+    effective_video_download_dir,
     load_config,
     save_config,
     ytdlp_config_exists,
@@ -203,6 +204,7 @@ def _config_response():
         "version": VERSION,
         "config": config,
         "effective_download_dir": effective_download_dir(config),
+        "effective_video_download_dir": effective_video_download_dir(config),
         "ytdlp_config_exists": ytdlp_config_exists(),
         "deps": _dependencies(),
         "yt_dlp_status": yt_dlp_status,

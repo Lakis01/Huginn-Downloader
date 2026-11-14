@@ -14,7 +14,7 @@ import urllib.parse
 from collections.abc import Mapping
 from typing import Any
 
-from ytdl_config import effective_download_dir, load_config
+from ytdl_config import effective_download_dir, effective_video_download_dir, load_config
 from ytdl_meta import parse_info, sanitize_filename, strip_language_tags, tag_audio_file
 
 try:
@@ -910,7 +910,7 @@ def download_audio(url, config=None):
 
 def download_video(url, config=None):
     cfg = dict(config) if config is not None else load_config()
-    effective_dir = effective_download_dir(cfg)
+    effective_dir = effective_video_download_dir(cfg)
     print("[1/2] Downloading video & audio streams...")
     extras = []
     if is_youtube_url(url):
