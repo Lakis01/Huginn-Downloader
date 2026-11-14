@@ -543,7 +543,7 @@ def finalize_audio_download(
                 pass
         thumbnail_path = (
             _find_thumbnail(media_path, info)
-            if embed_thumbnail and isinstance(info, dict)
+            if auto_tag_enabled_at_start and embed_thumbnail and isinstance(info, dict)
             else None
         )
         duration = duration_seconds if duration_seconds is not None else sidecar_duration

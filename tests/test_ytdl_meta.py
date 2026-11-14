@@ -1471,6 +1471,29 @@ class WrapperTests(unittest.TestCase):
             copy.assert_not_called()
             tag.assert_not_called()
 
+    def test_auto_tag_disabled_preserves_preexisting_same_stem_thumbnail(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "Track.opus"
+            thumbnail = Path(tmp) / "Track.jpg"
+            media.write_bytes(b"audio")
+            thumbnail.write_bytes(b"user artwork")
+
+            with mock.patch.object(wrapper, "strip_language_tags"):
+                result = wrapper.finalize_audio_download(
+                    media,
+                    config={
+                        "auto_tag": False,
+                        "rsgain": False,
+                        "embed_thumbnail": True,
+                        "long_audio_enabled": False,
+                    },
+                )
+
+            self.assertEqual(result, str(media))
+            self.assertTrue(thumbnail.exists(), "user artwork is not a generated download sidecar")
+            self.assertEqual(thumbnail.read_bytes(), b"user artwork")
+
     def test_audio_download_retries_auth_failure_with_browser_cookies(self):
         wrapper = _load_wrapper(self)
         with tempfile.TemporaryDirectory() as tmp:

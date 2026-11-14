@@ -125,6 +125,24 @@ STUB
     chmod +x "$TMP/stubs/$terminal"
 }
 
+shortcut_path_home="$TMP/shortcut-path-home"
+shortcut_path_stubs="$TMP/shortcut-path-stubs"
+mkdir -p "$shortcut_path_home/.local/bin" "$shortcut_path_stubs"
+printf '#!/bin/bash\nexit 0\n' > "$shortcut_path_home/.local/bin/yt-dlp"
+chmod +x "$shortcut_path_home/.local/bin/yt-dlp"
+cat > "$shortcut_path_stubs/konsole" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$PATH" > "$PATH_CAPTURE"
+STUB
+chmod +x "$shortcut_path_stubs/konsole"
+shortcut_path_capture="$TMP/shortcut-path.capture"
+HOME="$shortcut_path_home" PATH="$shortcut_path_stubs:/usr/bin" \
+    PATH_CAPTURE="$shortcut_path_capture" YTDL_TERMINAL="$shortcut_path_stubs/konsole" \
+    "$SHORTCUT" audio 'https://example.invalid/path-test'
+assert_eq "$shortcut_path_home/.local/bin" "$(head -n 1 "$shortcut_path_capture" | cut -d: -f1)" \
+    'direct hotkey prefers user-local tools'
+pass 'direct desktop shortcuts find yt-dlp installed under ~/.local/bin'
+
 valid_url='https://www.youtube.com/watch?v=video123&list=PL123'
 other_url='https://youtu.be/short123'
 

@@ -61,7 +61,15 @@ class NativeHostTests(unittest.TestCase):
 
     def test_ping_and_get_config_use_native_message_framing(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            os.environ, {"HOME": tmp}, clear=False
+            os.environ,
+            {
+                "HOME": tmp,
+                "XDG_CONFIG_HOME": str(Path(tmp) / ".config"),
+                "XDG_MUSIC_DIR": "",
+                "XDG_VIDEOS_DIR": "",
+                "XDG_DOWNLOAD_DIR": "",
+            },
+            clear=False,
         ), mock.patch.object(
             HOST.shutil,
             "which",
@@ -103,7 +111,15 @@ class NativeHostTests(unittest.TestCase):
 
     def test_set_config_merges_partial_updates_and_persists_empty_dir_as_none(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            os.environ, {"HOME": tmp}, clear=False
+            os.environ,
+            {
+                "HOME": tmp,
+                "XDG_CONFIG_HOME": str(Path(tmp) / ".config"),
+                "XDG_MUSIC_DIR": "",
+                "XDG_VIDEOS_DIR": "",
+                "XDG_DOWNLOAD_DIR": "",
+            },
+            clear=False,
         ):
             responses = run_host(
                 [
@@ -289,6 +305,7 @@ class NativeHostTests(unittest.TestCase):
             os.environ,
             {
                 "HOME": tmp,
+                "XDG_CONFIG_HOME": str(Path(tmp) / ".config"),
                 "XDG_MUSIC_DIR": "$HOME/Musik",
                 "XDG_VIDEOS_DIR": "$HOME/Filme",
                 "XDG_DOWNLOAD_DIR": "$HOME/Heruntergeladen",
