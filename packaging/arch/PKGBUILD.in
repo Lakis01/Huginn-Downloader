@@ -1,0 +1,17 @@
+pkgname=firefox-youtube-downloader-companion
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Local Native Messaging companion for Firefox YouTube Downloader'
+arch=('any')
+url='https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin'
+license=('MIT')
+depends=('yt-dlp' 'ffmpeg' 'python' 'python-mutagen' 'python-pillow')
+optdepends=('rsgain: optional ReplayGain normalization')
+source=("firefox-youtube-downloader-${pkgver}-source.tar.gz::https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin/releases/download/v${pkgver}/firefox-youtube-downloader-${pkgver}-source.tar.gz")
+sha256sums=('@SOURCE_SHA256@')
+
+package() {
+  local source_root="$srcdir/firefox-youtube-downloader-${pkgver}"
+  bash "$source_root/packaging/linux/stage-root.sh" \
+    "$source_root" "$pkgdir" /usr/lib/mozilla/native-messaging-hosts
+}

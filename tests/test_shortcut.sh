@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 SHORTCUT="$ROOT/bin/yt-dlp-shortcut.sh"
+SOURCE_WRAPPER="$ROOT/bin/yt-dlp-wrapper.py"
 INSTALLER="$ROOT/install.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT
@@ -85,7 +86,7 @@ assert_launch() {
     [[ -f "$CALL_ARGS" ]] || fail "$label (terminal was not launched)"
     mapfile -t args < "$CALL_ARGS"
     assert_eq '-e' "${args[0]:-}" "$label: Konsole execute option"
-    assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+    assert_eq "$SOURCE_WRAPPER" "${args[1]:-}" "$label: wrapper path"
     assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
     assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
     assert_eq "$url" "${args[4]:-}" "$label: URL argument"
@@ -98,14 +99,14 @@ assert_terminal_args() {
     mapfile -t args < "$CALL_ARGS"
     if [[ $separator == '-e' || $separator == '-x' ]]; then
         assert_eq "$separator" "${args[0]:-}" "$label: terminal separator"
-        assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+        assert_eq "$SOURCE_WRAPPER" "${args[1]:-}" "$label: wrapper path"
         assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
         assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
         assert_eq "$url" "${args[4]:-}" "$label: URL argument"
         assert_eq 5 "${#args[@]}" "$label: argument count"
     else
         assert_eq '--' "${args[0]:-}" "$label: terminal separator"
-        assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+        assert_eq "$SOURCE_WRAPPER" "${args[1]:-}" "$label: wrapper path"
         assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
         assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
         assert_eq "$url" "${args[4]:-}" "$label: URL argument"
@@ -155,6 +156,18 @@ for terminal_spec in \
     assert_terminal_args "$terminal" "$separator" cut 'https://vimeo.com/12345' "$terminal argv"
 done
 pass 'uses the required argv shape for every supported terminal emulator'
+
+system_package_dir="$TMP/usr/lib/firefox-youtube-downloader"
+mkdir -p "$system_package_dir" "$TMP/system-package-home"
+cp -- "$SHORTCUT" "$system_package_dir/yt-dlp-shortcut.sh"
+cp -- "$SOURCE_WRAPPER" "$system_package_dir/yt-dlp-wrapper.py"
+rm -f -- "$CALL_ARGS"
+HOME="$TMP/system-package-home" YTDL_TERMINAL=konsole \
+    "$system_package_dir/yt-dlp-shortcut.sh" audio "$valid_url"
+mapfile -t package_args < "$CALL_ARGS"
+assert_eq "$system_package_dir/yt-dlp-wrapper.py" "${package_args[1]:-}" \
+    'system package shortcut resolves its sibling wrapper'
+pass 'system package shortcut uses the wrapper installed beside it'
 
 for unsafe_url in \
     'file:///etc/passwd' \
@@ -661,8 +674,10 @@ STUB
 chmod +x "$macos_stubs/uname"
 macos_home="$TMP/macos-home"
 HOME="$macos_home" PATH="$macos_stubs:$PATH" "$INSTALLER" --check-deps > "$TMP/macos-check-deps.out"
-assert_file_contains "$TMP/macos-check-deps.out" 'brew install yt-dlp ffmpeg rsgain python pillow' \
+assert_file_contains "$TMP/macos-check-deps.out" 'brew install yt-dlp ffmpeg python pillow' \
     'macOS dependency suggestions'
+assert_file_contains "$TMP/macos-check-deps.out" 'Optional ReplayGain: brew install rsgain' \
+    'macOS rsgain remains optional'
 HOME="$macos_home" PATH="$macos_stubs:$PATH" "$INSTALLER" --install --yes > "$TMP/macos-install.out"
 macos_manifest="$macos_home/Library/Application Support/Mozilla/NativeMessagingHosts/firefox_youtube_downloader.json"
 [[ -f "$macos_manifest" ]] || fail 'macOS Native Messaging manifest was not installed'

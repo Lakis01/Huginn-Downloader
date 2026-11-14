@@ -36,7 +36,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.4.0', 'manifest version is 2.4.0');
+  assert.equal(manifest.version, '2.5.0', 'manifest version is 2.5.0');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -1094,7 +1094,7 @@ async function testPopupChannelAndFolder() {
   }
   const fx = createPopupFixture({
     ok: true,
-    version: '2.4.0',
+    version: '2.5.0',
     config: { auto_tag: true, rsgain: false, audio_format: 'best', mp3_quality: 'V0', channel_mode: 'ask', download_dir: '~/Music/Youtube Downloads' },
     deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
     effective_download_dir: '/home/user/Music/Youtube Downloads',
@@ -1135,7 +1135,7 @@ async function testPopupVideoFolderIsIndependentFromAudioFolder() {
   }
   const fx = createPopupFixture({
     ok: true,
-    version: '2.4.0',
+    version: '2.5.0',
     config: {
       download_dir: '~/Music/Youtube Downloads',
       video_download_dir: '~/Videos/Youtube Downloads',
@@ -1177,7 +1177,7 @@ async function testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves() {
   for (const invalid of ['0', '-5', 'not-a-number', '1.5']) {
     const fx = createPopupFixture({
       ok: true,
-      version: '2.4.0',
+      version: '2.5.0',
       config: { audio_format: 'best', channel_mode: 'stereo', long_audio_minutes: 30 },
       deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
       yt_dlp_status: { outdated: false },

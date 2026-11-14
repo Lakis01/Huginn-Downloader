@@ -108,7 +108,8 @@ if $CHECK_DEPS; then
     if $IS_MACOS; then
         printf 'Platform: macOS (%s)\n' "$(sw_vers -productVersion 2>/dev/null || printf 'version unknown')"
         printf 'Suggested dependencies (review; this command is not run):\n'
-        printf 'brew install yt-dlp ffmpeg rsgain python pillow\n'
+        printf 'brew install yt-dlp ffmpeg python pillow\n'
+        printf 'Optional ReplayGain: brew install rsgain\n'
         exit 0
     fi
     desktop_session=${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-unknown}}
@@ -155,7 +156,7 @@ if $INSTALL_DEPS; then
     fi
     . /etc/os-release
     distro_ids=" ${ID:-} ${ID_LIKE:-} "
-    case $distro_ids in
+    case "$distro_ids" in
         *" debian "*|*" ubuntu "*) ;;
         *)
             printf '%s\n' 'Automatic apt dependency installation is only supported on Debian-family Linux.' >&2
