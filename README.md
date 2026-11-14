@@ -561,7 +561,7 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 167 Python tests (includes package layout/release tests)
+python3 -m unittest discover -s tests -v  # 168 Python tests (includes package layout/release tests)
 bash tests/test_shortcut.sh               # 47 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh

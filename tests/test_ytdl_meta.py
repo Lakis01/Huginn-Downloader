@@ -1553,6 +1553,47 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("100%", terminal.getvalue())
         self.assertEqual(popen.call_count, 2)
 
+    def test_tty_stream_failure_terminates_and_reaps_yt_dlp_child(self):
+        wrapper = _load_wrapper(self)
+
+        class TTY(io.StringIO):
+            def isatty(self):
+                return True
+
+        class Pipe:
+            closed = False
+
+            def read1(self, _size):
+                raise OSError("stderr pipe failed")
+
+            def close(self):
+                self.closed = True
+
+        class Process:
+            def __init__(self):
+                self.stderr = Pipe()
+                self.terminated = False
+                self.waited = False
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout=None):
+                self.waited = True
+                return -15
+
+        process = Process()
+        with (
+            mock.patch.object(wrapper.sys, "stderr", TTY()),
+            mock.patch.object(wrapper.subprocess, "Popen", return_value=process),
+        ):
+            with self.assertRaisesRegex(OSError, "stderr pipe failed"):
+                wrapper._run_with_auth_retry(["yt-dlp", "--quiet", "--progress", "https://example.invalid/media"])
+
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.waited)
+        self.assertTrue(process.stderr.closed)
+
     def test_metadata_command_places_separator_before_url_and_ies_for_youtube(self):
         wrapper = _load_wrapper(self)
         for url, expect_ies in (

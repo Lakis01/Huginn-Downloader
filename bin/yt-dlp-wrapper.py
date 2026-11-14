@@ -864,6 +864,20 @@ def _run_yt_dlp_command(command):
             if final_text:
                 output_stream.write(final_text)
                 output_stream.flush()
+    except BaseException:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            process.wait()
+        raise
     finally:
         stderr_pipe.close()
 
