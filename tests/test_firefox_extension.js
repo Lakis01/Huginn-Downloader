@@ -69,6 +69,11 @@ function testReadmeBrandAndSetupGuidance() {
   assert.ok(readme.includes('LMDE 7') && readme.includes('Cinnamon'), 'README lists LMDE 7 + Cinnamon testing');
   assert.ok(readme.includes('Debian 13') && readme.includes('GNOME'), 'README lists Debian 13 + GNOME testing');
   assert.ok(readme.includes('does not grant download rights'), 'README avoids claiming legal immunity');
+  assert.ok(readme.includes('scripts/sign-xpi-kwallet.sh'), 'README documents keyring-backed signing');
+  assert.ok(readme.includes('KWallet Manager'), 'README documents manual local keyring enrollment');
+  assert.ok(readme.includes('AMO_JWT_ISSUER') && readme.includes('AMO_JWT_SECRET'), 'README names the two wallet entries');
+  assert.ok(!readme.includes('scripts/setup-amo-credentials-kwallet.sh'), 'README does not ask the setup script to read credentials');
+  assert.ok(normalizedReadme.includes('other processes running as the same user'), 'README states the local keyring trust boundary');
 }
 
 // --- icons ---

@@ -278,6 +278,25 @@ temporarily load it from `about:debugging`. Maintainers sign releases with
 the signed artifact is
 `dist/huginn-signed.xpi`.
 
+On KDE, enter AMO credentials directly in **KWallet Manager** once:
+
+1. Open and unlock your wallet.
+2. Create a folder named `Huginn Downloader`.
+3. In that folder, create password entries named `AMO_JWT_ISSUER` and
+   `AMO_JWT_SECRET`, and enter the corresponding values from your saved AMO
+   credentials. Do not paste the values into chat or a terminal.
+4. For each local signing run, use `./scripts/sign-xpi-kwallet.sh`.
+
+The wrapper reads those entries locally and passes them directly to the signer;
+it does not print them, put them in command arguments, or write them to `.env`
+or the repository. KWallet must be available and unlocked. KWallet protects
+credentials at rest, but not from malware or other processes running as the same
+user while the wallet is unlocked. The environment-variable signing path remains
+available for CI. Signing still contacts AMO; the wrapper only avoids re-entering
+and exposing the credentials to the LLM conversation. If the saved API secret
+is lost, do not assume AMO can display it again; create and save a new credential
+pair through AMO's credential manager.
+
 Project maintainers can create signed Unlisted release files or publish a
 Listed AMO add-on by following [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md).
 
