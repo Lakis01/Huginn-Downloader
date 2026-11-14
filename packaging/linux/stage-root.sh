@@ -63,7 +63,7 @@ import sys
 destination, host_path, extension_id = sys.argv[1:]
 manifest = {
     "name": "firefox_youtube_downloader",
-    "description": "Native Messaging host for Firefox YouTube Downloader Plugin",
+    "description": "Native Messaging host for Huginn Downloader",
     "path": host_path,
     "type": "stdio",
     "allowed_extensions": [extension_id],

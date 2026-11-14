@@ -1,17 +1,23 @@
 pkgname=firefox-youtube-downloader-companion
 pkgver=@VERSION@
 pkgrel=1
-pkgdesc='Local Native Messaging companion for Firefox YouTube Downloader'
+pkgdesc='Local Native Messaging companion for Huginn Downloader'
 arch=('any')
-url='https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin'
+url='https://github.com/Lakis01/Huginn-Downloader'
 license=('MIT')
-depends=('yt-dlp' 'ffmpeg' 'python' 'python-mutagen' 'python-pillow')
-optdepends=('rsgain: optional ReplayGain normalization')
-source=("firefox-youtube-downloader-${pkgver}-source.tar.gz::https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin/releases/download/v${pkgver}/firefox-youtube-downloader-${pkgver}-source.tar.gz")
+depends=('python')
+optdepends=(
+  'yt-dlp: downloader backend'
+  'ffmpeg: media conversion and probing'
+  'python-mutagen: automatic audio tagging'
+  'python-pillow: thumbnail handling'
+  'rsgain: optional ReplayGain normalization'
+)
+source=("huginn-downloader-${pkgver}-source.tar.gz::https://github.com/Lakis01/Huginn-Downloader/releases/download/v${pkgver}/huginn-downloader-${pkgver}-source.tar.gz")
 sha256sums=('@SOURCE_SHA256@')
 
 package() {
-  local source_root="$srcdir/firefox-youtube-downloader-${pkgver}"
+  local source_root="$srcdir/huginn-downloader-${pkgver}"
   bash "$source_root/packaging/linux/stage-root.sh" \
     "$source_root" "$pkgdir" /usr/lib/mozilla/native-messaging-hosts
 }

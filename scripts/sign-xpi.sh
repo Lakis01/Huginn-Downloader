@@ -66,7 +66,7 @@ fi
 
 python3 -m zipfile -t "$newest"
 
-OUT="$ROOT/dist/firefox-youtube-downloader-signed.xpi"
+OUT="$ROOT/dist/huginn-signed.xpi"
 mkdir -p "$(dirname "$OUT")"
 cp "$newest" "$OUT"
 echo "$OUT"

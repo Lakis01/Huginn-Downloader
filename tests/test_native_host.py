@@ -55,13 +55,21 @@ def run_host(messages, trailing=b""):
 @unittest.skipUnless(HOST is not None, "native messaging host has not been implemented")
 class NativeHostTests(unittest.TestCase):
     def test_version_is_current_and_youtube_only_gate_is_removed(self):
-        self.assertEqual(HOST.VERSION, "2.5.0")
+        self.assertEqual(HOST.VERSION, "2.5.1")
         self.assertFalse(hasattr(HOST, "_is_youtube_url"))
         self.assertFalse(hasattr(HOST, "YOUTUBE_HOSTS"))
 
     def test_ping_and_get_config_use_native_message_framing(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            os.environ, {"HOME": tmp}, clear=False
+            os.environ,
+            {
+                "HOME": tmp,
+                "XDG_CONFIG_HOME": str(Path(tmp) / ".config"),
+                "XDG_MUSIC_DIR": "",
+                "XDG_VIDEOS_DIR": "",
+                "XDG_DOWNLOAD_DIR": "",
+            },
+            clear=False,
         ), mock.patch.object(
             HOST.shutil,
             "which",
@@ -74,7 +82,7 @@ class NativeHostTests(unittest.TestCase):
         self.assertEqual(len(responses), 2)
         for response in responses:
             self.assertTrue(response["ok"])
-            self.assertEqual(response["version"], "2.5.0")
+            self.assertEqual(response["version"], "2.5.1")
             self.assertEqual(
                 response["config"],
                 {
@@ -103,7 +111,15 @@ class NativeHostTests(unittest.TestCase):
 
     def test_set_config_merges_partial_updates_and_persists_empty_dir_as_none(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            os.environ, {"HOME": tmp}, clear=False
+            os.environ,
+            {
+                "HOME": tmp,
+                "XDG_CONFIG_HOME": str(Path(tmp) / ".config"),
+                "XDG_MUSIC_DIR": "",
+                "XDG_VIDEOS_DIR": "",
+                "XDG_DOWNLOAD_DIR": "",
+            },
+            clear=False,
         ):
             responses = run_host(
                 [
@@ -284,10 +300,58 @@ class NativeHostTests(unittest.TestCase):
         check.assert_called_once_with(allow_network=False)
         self.assertEqual(responses[0]["yt_dlp_status"], sentinel)
 
+    def test_config_response_includes_localized_download_presets(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ,
+            {
+                "HOME": tmp,
+                "XDG_CONFIG_HOME": str(Path(tmp) / ".config"),
+                "XDG_MUSIC_DIR": "$HOME/Musik",
+                "XDG_VIDEOS_DIR": "$HOME/Filme",
+                "XDG_DOWNLOAD_DIR": "$HOME/Heruntergeladen",
+            },
+            clear=False,
+        ):
+            response = run_host([{"action": "ping"}])[0]
+
+        self.assertEqual(
+            response["user_download_directories"],
+            {
+                "music": "~/Musik/Youtube Downloads",
+                "videos": "~/Filme/Youtube Downloads",
+                "downloads": "~/Heruntergeladen/Youtube",
+            },
+        )
+
 
 class NativeHostPresenceTests(unittest.TestCase):
     def test_native_host_entrypoint_exists(self):
         self.assertTrue(HOST_PATH.is_file(), f"missing native host: {HOST_PATH}")
+
+    def test_linux_native_host_prefers_user_local_bin_before_usr_bin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            user_bin = home / ".local" / "bin"
+            system_bin = home / "system-bin"
+            user_bin.mkdir(parents=True)
+            system_bin.mkdir()
+            user_ytdlp = user_bin / "yt-dlp"
+            system_ytdlp = system_bin / "yt-dlp"
+            user_ytdlp.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            system_ytdlp.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            user_ytdlp.chmod(0o755)
+            system_ytdlp.chmod(0o755)
+            initial_path = os.pathsep.join((str(system_bin), "/usr/bin"))
+
+            with mock.patch.dict(
+                os.environ, {"HOME": str(home), "PATH": initial_path}, clear=False
+            ), mock.patch.object(HOST.sys, "platform", "linux"):
+                HOST._ensure_linux_gui_path()
+                resolved = HOST.shutil.which("yt-dlp")
+                path_entries = os.environ["PATH"].split(os.pathsep)
+
+            self.assertEqual(resolved, str(user_ytdlp))
+            self.assertEqual(path_entries[0], str(user_bin))
 
 
 if __name__ == "__main__":

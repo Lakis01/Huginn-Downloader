@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=YouTube Interactive Cut Audio
+Name=Huginn Interactive Audio Cut
 Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh cut
 NoDisplay=true
 Terminal=false

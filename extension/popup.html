@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>YouTube Downloader</title>
+<title>Huginn Downloader</title>
 <link rel="stylesheet" href="popup.css">
 </head>
 <body>
 <main class="panel" data-view="panel">
-  <h1>YouTube Downloader</h1>
+  <h1>Huginn Downloader</h1>
   <p class="status" role="status">
     <span class="dot" id="statusDot" aria-hidden="true"></span>
     <span id="statusText">Checking companion connection...</span>
@@ -16,12 +16,12 @@
   <section id="connectedView" hidden>
     <h2>Audio format</h2>
     <select id="audioFormat" class="select" aria-label="Audio format">
-      <option value="best">Native Opus / M4A (no conversion — best quality)</option>
-      <option value="opus">Opus (forced container, transcodes only if needed)</option>
-      <option value="mp3">MP3 (FFmpeg conversion for legacy devices)</option>
-      <option value="m4a">M4A / AAC (native when available)</option>
+      <option value="best">Best available</option>
+      <option value="mp3">MP3</option>
+      <option value="m4a">M4A / AAC</option>
       <option value="ogg">Ogg Vorbis</option>
       <option value="flac">FLAC</option>
+      <option value="opus">Opus</option>
     </select>
     <div id="mp3QualityRow" class="sub-row" hidden>
       <label for="mp3Quality" class="sub-label">MP3 quality</label>
@@ -77,8 +77,8 @@
     <h2>Download folder</h2>
     <select id="downloadFolder" class="select" aria-label="Download folder">
       <option value="keep">Keep yt-dlp config</option>
-      <option value="music">~/Music/Youtube Downloads</option>
-      <option value="downloads">~/Downloads/Youtube</option>
+      <option value="music">Music folder</option>
+      <option value="downloads">Downloads folder</option>
       <option value="custom">Custom folder</option>
     </select>
     <input type="text" id="customDir" class="path" placeholder="/home/user/Music/Youtube" aria-label="Custom download folder" hidden>
@@ -87,8 +87,8 @@
     <h2>Video folder</h2>
     <select id="videoDownloadFolder" class="select" aria-label="Video download folder">
       <option value="keep">Keep yt-dlp config</option>
-      <option value="videos">~/Videos/Youtube Downloads</option>
-      <option value="downloads">~/Downloads/Youtube</option>
+      <option value="videos">Videos folder</option>
+      <option value="downloads">Downloads folder</option>
       <option value="custom">Custom folder</option>
     </select>
     <input type="text" id="customVideoDir" class="path" placeholder="/home/user/Videos/Youtube" aria-label="Custom video folder" hidden>

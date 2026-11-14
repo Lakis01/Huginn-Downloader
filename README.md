@@ -1,21 +1,24 @@
-# Firefox YouTube Downloader
+# Huginn Downloader
 
-A Firefox add-on and local companion that sends safe web-page/link URLs to
-`yt-dlp` from the right-click menu and shortcuts, plus YouTube-specific
-watch-page controls, for audio, video, or a selected audio cut. The add-on
-supplies the interface; a small Native Messaging host and `yt-dlp` run on your
-own computer. The companion is not bundled with the add-on, and the extension
-sends nothing to a project-owned server.
+Huginn Downloader is a Firefox extension and a separate local companion. Both
+the Firefox extension and the local companion are required: the extension
+provides the settings popup, YouTube watch-page controls, and browser context
+menu; the companion connects Firefox to the local
+`yt-dlp` backend, which fetches the media. The companion is not bundled with
+the extension, and the extension sends nothing to a project-owned server.
 
-This runs `yt-dlp` and FFmpeg locally on your computer: downloads go directly
-from the source to your machine, without an upload queue or ads. The extension
-adds YouTube watch-page controls, a right-click menu, and system keyboard
-shortcuts, with choices for native Opus/M4A, forced Opus, MP3
+`yt-dlp` and FFmpeg run locally on your computer: downloads go directly from
+the source to your machine, without an upload queue or ads. Huginn adds YouTube
+watch-page controls, a right-click menu, and system keyboard shortcuts, with
+choices for native Opus/M4A, forced Opus, MP3
 (`V0`/`V2`/`V5`/`320k`), Ogg, FLAC, channels, and cover art. Speed depends on
 the site, available formats, and your connection; native streams avoid an
 extra conversion when they match your chosen settings.
 
 ## Screenshots & interface overview
+
+The context-menu screenshot predates the v2.5.1 rebrand; the current menu label
+is **Huginn Downloader**.
 
 ![Watch-page download pill](docs/screenshots/watch-page-pill.png)
 ![Right-click context menu](docs/screenshots/context-menu.png)
@@ -26,7 +29,7 @@ Four touchpoints (three to start a download, plus popup settings):
    YouTube's Like/Dislike controls on watch pages. Click **Audio** for the best
    native audio stream, **Video** for best video+audio, or **Cut** to pick start
    / end timestamps and encoding settings interactively in your terminal.
-2. **Right-click `YouTube Downloader` ▸ `Audio` / `Video` / `Cut Audio`
+2. **Right-click `Huginn Downloader` ▸ `Audio` / `Video` / `Cut Audio`
    submenu** (context menu) — available broadly on pages, frames, links,
    images, video/audio elements, and text selections, not just YouTube. On
    YouTube it works on cards in feeds and search results: if hover-autoplay
@@ -34,10 +37,8 @@ Four touchpoints (three to start a download, plus popup settings):
    menu may show the browser defaults. Any safe HTTP(S) URL is accepted and
    handed to the local companion, so the menu works on any media site
    `yt-dlp` supports.
- 3. **Extension popup** — click the toolbar icon to check the companion
-    connection, toggle automatic tagging, ReplayGain, cover art, channels, and
-    long-audio routing, pick the audio format and MP3 quality, and choose
-    separate audio and video folders.
+ 3. **Extension popup** — click the toolbar icon to manage audio/video folders,
+     formats, tagging, artwork, ReplayGain, channels, and long-audio routing.
 4. **Global keyboard shortcuts & CLI** — assign system-wide hotkeys (for
    example `Meta+Alt+A` for audio, `Meta+Alt+V` for video, `Meta+Alt+C` for
    cut) to `~/.local/bin/yt-dlp-shortcut.sh audio|video|cut` under
@@ -48,10 +49,17 @@ Four touchpoints (three to start a download, plus popup settings):
    supported by `yt-dlp`** — YouTube, SoundCloud, Vimeo, Bandcamp, Twitch,
    and hundreds more.
 
-> **Pin the extension to the toolbar:** click the **Extensions** puzzle-piece
-> button in the top-right Firefox Navigation Toolbar, find **YouTube
-> Downloader**, click its gear/pin icon and choose **Pin to Toolbar**. The
-> popup is then one click away.
+> **Pin Huginn Downloader to the toolbar** for one-click access to its popup.
+> The popup is where you choose download folders and formats and manage tagging,
+> cover art, ReplayGain, channels, and other settings. Click Firefox's
+> **Extensions** puzzle-piece, find **Huginn Downloader**, then choose **Pin to
+> Toolbar** from its menu.
+
+## Tested desktop environments
+
+- CachyOS with KDE Plasma
+- LMDE 7 with Cinnamon
+- Debian 13 with GNOME
 
 ## Why prefer official audio uploads ("Art Tracks")
 
@@ -104,9 +112,19 @@ offers four qualities:
 | `V2` (~190 kbps stereo / ~120 kbps mono VBR) | Balanced | Smaller files where space matters and the source is speech or casual listening. |
 | `V5` (~130 kbps stereo / ~85 kbps mono VBR — compact / speech) | Compact VBR | Speech, podcasts, or constrained storage. True psychoacoustic VBR, preferable to fixed `128k` CBR. |
 
-The remaining **Audio Format** options, selectable in the Firefox popup or via
-`audio_format` in `config.json` (`best`, `opus`, `mp3`, `m4a`, `ogg`, `flac`;
-`mp3_quality` defaults to `V0`):
+The popup uses short format labels. These choices are also available through
+`audio_format` in `config.json`; `mp3_quality` defaults to `V0`.
+
+| Popup label | Format | Behavior |
+| --- | --- | --- |
+| Best available | `best` | Keep native Opus/M4A when possible without lossy re-encoding. |
+| MP3 | `mp3` | Convert through FFmpeg for players that require MP3. |
+| M4A / AAC | `m4a` | Prefer native AAC; convert through FFmpeg only when needed. |
+| Ogg Vorbis | `ogg` | Convert through FFmpeg to Vorbis. |
+| FLAC | `flac` | Convert through FFmpeg; it cannot restore quality lost in the source. |
+| Opus | `opus` | Force Opus; copy native Opus when possible, otherwise convert through FFmpeg. |
+
+More detail on forced Opus and AAC behavior:
 
 - **`opus`**: forces Opus output — prefers `bestaudio[acodec=opus]/bestaudio/best`,
   copies the native Opus stream when stereo and available, and otherwise
@@ -184,29 +202,37 @@ defaulting to stereo); non-interactive runs fall back to stereo.
 ## What you need
 
 - Firefox 115 or newer.
-- The signed XPI from a GitHub Release or the [Firefox Add-ons listing](https://addons.mozilla.org/).
-- The matching local companion installed with a Linux release package or
-  `install.sh`/`install.ps1` on Linux/macOS/Windows.
-- `yt-dlp` and FFmpeg installed locally. Python 3, Mutagen, and Pillow enable
-  audio tagging and cover art; `rsgain` is optional and only used when
-  ReplayGain is enabled.
+- The signed Huginn Downloader extension from a GitHub Release or the
+  [Firefox Add-ons listing](https://addons.mozilla.org/).
+- The matching local companion. The extension and companion are separate
+  components; install both. The companion can be installed with a Linux release
+  package or `install.sh`/`install.ps1` on Linux/macOS/Windows.
+- Local dependencies: `yt-dlp` downloads media; FFmpeg merges, cuts, and
+  converts it; Python 3 runs the Native Messaging host; Mutagen and Pillow
+  support audio tags and cover art; `rsgain` is optional for ReplayGain.
 
-The extension provides a YouTube watch-page Audio/Video/Cut pill, a broadly
-available right-click submenu, and a settings popup. It uses Firefox Native
-Messaging to pass a user-selected mode and URL to the local companion. The
-pill is YouTube-specific; the menu accepts safe HTTP(S) URLs from sites
-supported by `yt-dlp`. The
-extension does not download media itself.
+Huginn is the graphical frontend; the local companion and `yt-dlp` are the
+backend. The extension provides a YouTube watch-page Audio/Video/Cut pill, a
+broadly available right-click submenu, and the settings popup. It uses Firefox
+Native Messaging to pass a user-selected mode and URL to the local companion.
+The pill is YouTube-specific; the menu accepts safe HTTP(S) URLs from sites
+supported by `yt-dlp`. The extension does not download media itself.
+
+Use Huginn only for content you are authorized to download. Running the frontend
+and backend locally does not grant download rights; copyright and
+anti-circumvention rules depend on the content and circumstances.
 
 ### Beginner-friendly dependency guide
 
-In plain language, the three programs the companion needs are:
+The companion uses these local programs and libraries:
 
 - **`yt-dlp`** — the free, open-source downloader that actually fetches the
-  audio/video from the site. This project is only a convenient front-end for
-  it; all media requests come from your own computer.
+  audio/video from the site. Huginn is its graphical frontend; media requests
+  are made by the companion on your computer.
 - **`ffmpeg`** — the free, open-source audio/video toolkit that converts
   between formats (MP3, M4A, Ogg, FLAC, Opus cuts) and trims cut sections.
+- **Python 3** runs the Native Messaging host that connects Firefox to `yt-dlp`.
+- **Mutagen and Pillow** support automatic audio tagging and cover artwork.
 - **`rsgain`** (optional) — a free ReplayGain tool that normalizes loudness
   across tracks. Only needed if you turn on ReplayGain in the popup; the
   popup checks whether `rsgain` is installed and blocks the toggle with
@@ -238,40 +264,44 @@ Firefox Release. Developers can build it with `./scripts/build-xpi.sh` and
 temporarily load it from `about:debugging`. Maintainers sign releases with
 `./scripts/sign-xpi.sh` (see [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md));
 the signed artifact is
-`dist/firefox-youtube-downloader-signed.xpi`.
+`dist/huginn-signed.xpi`.
 
 Project maintainers can create signed Unlisted release files or publish a
 Listed AMO add-on by following [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md).
 
 ## Install the local companion
 
-Install the signed XPI separately in Firefox. For the local companion, Linux
+Install the signed Huginn Downloader XPI separately in Firefox. For the local companion, Linux
 users can use a distro package from the same GitHub Release or the per-user
 `install.sh` fallback. The Windows/macOS instructions below remain separate.
 The distro packages install the Native Messaging host system-wide; `install.sh`
 installs it for the current user. Do not keep both installations active at once.
 
-### Debian 13.7 (GNOME, Wayland)
+### Debian 13 (GNOME)
 
 ```sh
-# From the matching GitHub Release; apt resolves the companion's required dependencies.
-sudo apt install ./firefox-youtube-downloader-companion_2.5.0_all.deb
+# From the matching GitHub Release:
+sudo apt install ./huginn-companion_2.5.1_all.deb
 ```
 
-The `.deb` installs `yt-dlp`, FFmpeg, Python 3, Mutagen, and Pillow as required
-dependencies, so automatic tagging works by default. `rsgain` is only a
-`Suggests` package and is not installed automatically. Enable it separately if
-you want ReplayGain:
+The `.deb` requires Python 3 and suggests `yt-dlp`, FFmpeg, Mutagen, Pillow, and
+`rsgain`; suggestions are not installed automatically. This avoids replacing
+an externally installed `yt-dlp` with a distro version. After installing the
+companion, check and install only missing media dependencies with:
 
 ```sh
-sudo apt install rsgain
+/usr/lib/firefox-youtube-downloader/install-apt-deps.sh --check
+/usr/lib/firefox-youtube-downloader/install-apt-deps.sh
 ```
+
+The helper checks commands and Python imports first and invokes `sudo` only
+when something is missing. Add `--with-rsgain` only if you want ReplayGain.
 
 To install the per-user companion from a source checkout instead:
 
 ```sh
-git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
-cd Firefox-Youtube-Downloader-Plugin
+git clone https://github.com/Lakis01/Huginn-Downloader.git
+cd Huginn-Downloader
 ./install.sh --check-deps
 ./install.sh --install --yes --install-deps
 # Optional ReplayGain package:
@@ -281,22 +311,23 @@ cd Firefox-Youtube-Downloader-Plugin
 GNOME normally includes `kgx` or `ptyxis`; `gnome-terminal` is only needed if
 you want it as an additional terminal option. `wl-clipboard` supplies
 Wayland clipboard/primary-selection support. `--install-deps` is an explicit
-Debian-family opt-in: it runs `apt-get update` and installs the required
-download and tagging dependencies. It does not install desktop/clipboard
+Debian-family opt-in: it probes existing commands and Python imports, then
+installs only missing download and tagging dependencies. It skips `apt-get
+update` when everything is present and does not install desktop/clipboard
 extras or `rsgain` unless `--with-rsgain` is supplied.
 
 ### LMDE 7 (Cinnamon, X11)
 
 ```sh
 # From the matching GitHub Release:
-sudo apt install ./firefox-youtube-downloader-companion_2.5.0_all.deb
+sudo apt install ./huginn-companion_2.5.1_all.deb
 ```
 
 Or use the per-user installer:
 
 ```sh
-git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
-cd Firefox-Youtube-Downloader-Plugin
+git clone https://github.com/Lakis01/Huginn-Downloader.git
+cd Huginn-Downloader
 ./install.sh --check-deps
 ./install.sh --install --yes --install-deps
 ```
@@ -306,17 +337,17 @@ suggested terminal. Install `rsgain` separately only if you use ReplayGain.
 
 ### Fedora
 
-Download `firefox-youtube-downloader-companion-2.5.0-1.noarch.rpm` from the
+Download `huginn-companion-2.5.1-1.noarch.rpm` from the
 matching release and install it with DNF:
 
 ```sh
-sudo dnf install ./firefox-youtube-downloader-companion-2.5.0-1.noarch.rpm
+sudo dnf install ./huginn-companion-2.5.1-1.noarch.rpm
 ```
 
-The RPM depends on Fedora's `ffmpeg-free` package, which has a limited codec
+The RPM suggests Fedora's `ffmpeg-free` package, which has a limited codec
 set. If a conversion needs a codec it lacks, install a compatible FFmpeg build
-from a repository you trust. ReplayGain remains optional; install `rsgain`
-separately if desired.
+from a repository you trust. The release recipe keeps the existing package ID
+for upgrades. ReplayGain remains optional; install `rsgain` separately if desired.
 
 ### Arch Linux
 
@@ -326,7 +357,7 @@ is not automatically submitted to the AUR.
 
 ```sh
 mkdir arch-recipe
-tar -xzf firefox-youtube-downloader-2.5.0-arch-pkgbuild.tar.gz -C arch-recipe
+tar -xzf huginn-downloader-2.5.1-arch-pkgbuild.tar.gz -C arch-recipe
 cd arch-recipe
 makepkg -si
 ```
@@ -344,20 +375,24 @@ yet; maintaining their separate host-registration/integration paths is not
 worth the extra complexity for this companion at present.
 
 For a manual Linux setup, install `yt-dlp`, FFmpeg, Python 3 with Mutagen and
-Pillow, and a terminal emulator. For the full shortcut integration, also
+Pillow, and a terminal emulator. The companion prefers `~/.local/bin` and
+`/usr/local/bin` when searching for tools, so a user-installed `yt-dlp` is not
+shadowed by a distro copy in `/usr/bin`. For the full shortcut integration, also
 install the clipboard and MPRIS tools for your session: `wl-clipboard` on
 Wayland; `xclip` or `xsel` on X11; and `playerctl` (or KDE's `qdbus6`). `rsgain`
 is optional. On Debian-based systems, for example:
 
 ```sh
-sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil \
-  desktop-file-utils
-# Optional features / desktop integrations:
-sudo apt install rsgain wl-clipboard xclip xsel playerctl
-git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
-cd Firefox-Youtube-Downloader-Plugin
+git clone https://github.com/Lakis01/Huginn-Downloader.git
+cd Huginn-Downloader
 ./install.sh --check-deps
+./scripts/install-apt-deps.sh --check
+./scripts/install-apt-deps.sh
 ./install.sh --install --yes
+# Optional features / desktop integrations:
+sudo apt install desktop-file-utils wl-clipboard xclip xsel playerctl
+# Optional ReplayGain:
+./scripts/install-apt-deps.sh --with-rsgain
 ```
 
 openSUSE and other distributions can use their package manager with the
@@ -377,8 +412,8 @@ brew install yt-dlp ffmpeg python pillow
 python3 -m pip install --user mutagen
 # Optional ReplayGain support, if available for your Homebrew setup:
 brew install rsgain
-git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
-cd Firefox-Youtube-Downloader-Plugin
+git clone https://github.com/Lakis01/Huginn-Downloader.git
+cd Huginn-Downloader
 ./install.sh --check-deps
 ./install.sh --install --yes
 ```
@@ -401,8 +436,8 @@ winget install yt-dlp.yt-dlp
 winget install Gyan.FFmpeg.Shared
 winget install Python.Python.3.12
 py -3 -m pip install mutagen Pillow
-git clone https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin.git
-cd Firefox-Youtube-Downloader-Plugin
+git clone https://github.com/Lakis01/Huginn-Downloader.git
+cd Huginn-Downloader
 .\install.ps1 --check-deps
 .\install.ps1 --install --yes
 ```
@@ -421,12 +456,12 @@ The popup stores these options in the user's config file:
 
 | Option | Fresh-install default | Meaning |
 | --- | --- | --- |
-| Audio download folder | `~/Music/Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another audio directory or select `Keep yt-dlp config`; this is `download_dir`. |
-| Video download folder | `~/Videos/Youtube Downloads` | Independent from audio; choose `~/Downloads/Youtube`, a custom path, or `Keep yt-dlp config` (`video_download_dir`). If no yt-dlp config exists, `Keep` falls back to the Videos default. Older configs missing this key migrate to the Videos default. |
+| Audio download folder | XDG Music directory plus `Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another audio directory or select `Keep yt-dlp config`; this is `download_dir`. |
+| Video download folder | XDG Videos directory plus `Youtube Downloads` | Independent from audio; choose the XDG Downloads folder plus `Youtube`, a custom path, or `Keep yt-dlp config` (`video_download_dir`). If no yt-dlp config exists, `Keep` falls back to the Videos directory. |
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
 | Verbose yt-dlp diagnostics | Off (quiet) | The download terminal shows live progress, speed, and ETA even in quiet mode. Turn this on to include yt-dlp's detailed logs (`verbose_output`); those logs may include URLs and request details. |
-| Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `opus`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `opus` forces Opus output (native stream copied when stereo and available, otherwise FFmpeg transcode); `m4a` downloads the native AAC stream when available. |
+| Audio format | Best available (native Opus / M4A, no conversion) | Best available, MP3, M4A / AAC, Ogg Vorbis, FLAC, or Opus. The popup labels are short; the audio-quality section above explains conversion behavior. |
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |
 | Embed thumbnail picture | On | Download and embed cover art (`image/webp`, JPEG for M4A). Turn off to skip thumbnails entirely. |
 | Convert thumbnail to JPEG | Off | Transcode cover art to `image/jpeg` for legacy hardware/car players that cannot render embedded WebP. |
@@ -440,13 +475,21 @@ under `$XDG_CONFIG_HOME`. Windows uses
 existing yt-dlp config such as `~/.config/yt-dlp/config` or
 `%APPDATA%\yt-dlp\config`.
 
+On Linux, Music, Videos, and Downloads follow `XDG_MUSIC_DIR`,
+`XDG_VIDEOS_DIR`, and `XDG_DOWNLOAD_DIR`; if unset, Huginn reads the matching
+entries in `user-dirs.dirs`, then falls back to English folder names. This
+respects localized paths such as `~/Musik`. Empty legacy default folders are
+resolved to the XDG locations without moving files; populated legacy folders
+and custom paths are preserved.
+
 On Linux and macOS, a plain `./install.sh` invocation is a no-write dry run;
 `./install.sh --install` applies the per-user install. On Debian-family Linux,
-`./install.sh --install --install-deps` explicitly runs `apt-get update` and
-installs `yt-dlp`, FFmpeg, Python 3, Mutagen, and Pillow, so automatic tagging
-works immediately. Add `--with-rsgain` only if you want ReplayGain; it is never
-installed by default. The apt helper does not install optional terminal,
-clipboard, or notification integrations. On Windows,
+`./install.sh --install --install-deps` checks commands and Python imports and
+installs only missing `yt-dlp`, FFmpeg, tagging libraries, and Python 3. It
+skips apt entirely when all requested dependencies are already available, so it
+does not replace a curl-installed `yt-dlp`. Add `--with-rsgain` only if you
+want ReplayGain; it is never installed by default. The apt helper does not
+install optional terminal, clipboard, or notification integrations. On Windows,
 `py -3 install.py` is the no-write dry run and
 `py -3 install.py --install --yes` applies it (or use the PowerShell wrapper).
 `--download-dir=ytdlp-default`, `--auto-tag=true|false`, and
@@ -477,8 +520,8 @@ On macOS the native host opens Terminal for the download and removes its
 temporary launcher script after launch. On Windows it prefers Windows Terminal
 and falls back to a separate console window.
 
-KDE users can assign the installed **YouTube Audio Download**, **YouTube Video
-Download**, and **YouTube Interactive Cut Audio** launchers under **System
+KDE users can assign the installed **Huginn Audio Download**, **Huginn Video
+Download**, and **Huginn Interactive Audio Cut** launchers under **System
 Settings → Shortcuts → Custom Shortcuts**. On GNOME or Cinnamon, add the three
 commands above under **Settings → Keyboard → Keyboard Shortcuts → Custom
 Shortcuts** and choose unused key combinations.

@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 set -u
 
+if [[ ${OSTYPE:-} == linux* ]]; then
+    preferred_path=()
+    [[ -n ${HOME:-} && -d $HOME/.local/bin ]] && preferred_path+=("$HOME/.local/bin")
+    [[ -d /usr/local/bin ]] && preferred_path+=(/usr/local/bin)
+    current_path=()
+    IFS=: read -r -a current_path <<< "${PATH:-}"
+    filtered_path=()
+    for entry in "${current_path[@]}"; do
+        duplicate=false
+        for preferred in "${preferred_path[@]}"; do
+            [[ $entry == "$preferred" ]] && duplicate=true && break
+        done
+        if [[ $duplicate == false ]]; then
+            filtered_path+=("$entry")
+        fi
+    done
+    PATH=
+    path_separator=
+    for entry in "${preferred_path[@]}" "${filtered_path[@]}"; do
+        PATH+="$path_separator$entry"
+        path_separator=:
+    done
+    export PATH
+fi
+
 SCRIPT_NAME=${0##*/}
 MODE=audio
 

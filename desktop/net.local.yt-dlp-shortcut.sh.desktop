@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=YouTube Audio Download
+Name=Huginn Audio Download
 Exec=/home/gratis01/.local/bin/yt-dlp-shortcut.sh audio
 NoDisplay=true
 Terminal=false

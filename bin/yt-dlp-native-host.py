@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Firefox Native Messaging host for the YouTube Downloader."""
+"""Firefox Native Messaging host for Huginn Downloader."""
 
 import json
 import os
@@ -18,6 +18,7 @@ from ytdl_config import (
     effective_video_download_dir,
     load_config,
     save_config,
+    user_download_directories,
     ytdlp_config_exists,
 )
 
@@ -36,7 +37,7 @@ except ImportError:  # pragma: no cover - helper ships alongside the host
         }
 
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 MAX_MESSAGE_SIZE = 1024 * 1024
 MODES = {"audio", "video", "cut"}
 
@@ -61,8 +62,24 @@ def _ensure_macos_gui_path():
     os.environ["PATH"] = os.pathsep.join(path_entries)
 
 
+def _ensure_linux_gui_path():
+    """Prefer user-installed tools in GUI-launched Firefox processes."""
+    if not sys.platform.startswith("linux"):
+        return
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    for directory in reversed(
+        (os.path.expanduser("~/.local/bin"), "/usr/local/bin")
+    ):
+        if os.path.isdir(directory):
+            path_entries = [entry for entry in path_entries if entry != directory]
+            path_entries.insert(0, directory)
+    os.environ["PATH"] = os.pathsep.join(path_entries)
+
+
 if sys.platform == "darwin":
     _ensure_macos_gui_path()
+elif sys.platform.startswith("linux"):
+    _ensure_linux_gui_path()
 
 
 def _is_allowed_url(value):
@@ -205,6 +222,7 @@ def _config_response():
         "config": config,
         "effective_download_dir": effective_download_dir(config),
         "effective_video_download_dir": effective_video_download_dir(config),
+        "user_download_directories": user_download_directories(),
         "ytdlp_config_exists": ytdlp_config_exists(),
         "deps": _dependencies(),
         "yt_dlp_status": yt_dlp_status,

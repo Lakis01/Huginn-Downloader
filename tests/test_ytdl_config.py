@@ -20,6 +20,139 @@ from ytdl_config import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_xdg_user_dir_prefers_environment_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".config").mkdir()
+            (home / ".config/user-dirs.dirs").write_text(
+                'XDG_MUSIC_DIR="$HOME/Config Music"\n', encoding="utf-8"
+            )
+            env = {"HOME": tmp, "XDG_MUSIC_DIR": "${HOME}/Env Music"}
+
+            resolver = getattr(ytdl_config, "xdg_user_dir", None)
+            self.assertTrue(callable(resolver), "XDG user directory resolver is available")
+            result = resolver("MUSIC", env)
+
+        self.assertEqual(result, Path(tmp) / "Env Music")
+
+    def test_xdg_user_dir_parses_user_dirs_file_without_shell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_home = home / ".config"
+            config_home.mkdir()
+            (config_home / "user-dirs.dirs").write_text(
+                'XDG_MUSIC_DIR="$HOME/Musik"\n'
+                'XDG_VIDEOS_DIR="${HOME}/Eigene Videos"\n'
+                'XDG_DOWNLOAD_DIR="$(touch ${HOME}/executed)"\n',
+                encoding="utf-8",
+            )
+            env = {"HOME": tmp}
+            resolver = getattr(ytdl_config, "xdg_user_dir", None)
+            self.assertTrue(callable(resolver), "XDG user directory resolver is available")
+
+            music = resolver("MUSIC", env)
+            videos = resolver("VIDEOS", env)
+            downloads = resolver("DOWNLOAD", env)
+
+        self.assertEqual(music, home / "Musik")
+        self.assertEqual(videos, home / "Eigene Videos")
+        self.assertEqual(downloads, home / "Downloads")
+        self.assertFalse((home / "executed").exists(), "user-dirs.dirs must never be evaluated")
+
+    def test_xdg_user_dir_reads_config_home_user_dirs_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_home = home / "settings"
+            config_home.mkdir()
+            (config_home / "user-dirs.dirs").write_text(
+                'XDG_DOWNLOAD_DIR="$HOME/Heruntergeladen"\n', encoding="utf-8"
+            )
+            resolver = getattr(ytdl_config, "xdg_user_dir", None)
+            self.assertTrue(callable(resolver), "XDG user directory resolver is available")
+
+            result = resolver(
+                "DOWNLOAD", {"HOME": tmp, "XDG_CONFIG_HOME": str(config_home)}
+            )
+
+        self.assertEqual(result, home / "Heruntergeladen")
+
+    def test_empty_legacy_default_paths_migrate_to_localized_xdg_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            env = {
+                "HOME": tmp,
+                "XDG_MUSIC_DIR": "$HOME/Musik",
+                "XDG_VIDEOS_DIR": "$HOME/Filme",
+                "XDG_DOWNLOAD_DIR": "$HOME/Heruntergeladen",
+            }
+            path = config_path(env)
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "download_dir": str(home / "Music/Youtube Downloads"),
+                        "video_download_dir": "~/Videos/Youtube Downloads",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(env)
+            get_dirs = getattr(ytdl_config, "user_download_directories", None)
+            self.assertTrue(callable(get_dirs), "popup directory presets are available")
+            audio_dirs = get_dirs(env)
+            effective_audio = effective_download_dir({"download_dir": None}, env)
+
+        self.assertEqual(config["download_dir"], "~/Musik/Youtube Downloads")
+        self.assertEqual(config["video_download_dir"], "~/Filme/Youtube Downloads")
+        self.assertEqual(audio_dirs["music"], "~/Musik/Youtube Downloads")
+        self.assertEqual(audio_dirs["videos"], "~/Filme/Youtube Downloads")
+        self.assertEqual(audio_dirs["downloads"], "~/Heruntergeladen/Youtube")
+        self.assertEqual(effective_audio, str(home / "Musik/Youtube Downloads"))
+
+    def test_populated_legacy_default_paths_are_preserved_including_hidden_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            legacy_music = home / "Music/Youtube Downloads"
+            legacy_videos = home / "Videos/Youtube Downloads"
+            legacy_music.mkdir(parents=True)
+            legacy_videos.mkdir(parents=True)
+            (legacy_music / ".keep").touch()
+            (legacy_videos / ".hidden-cache").touch()
+            env = {"HOME": tmp, "XDG_MUSIC_DIR": "$HOME/Musik", "XDG_VIDEOS_DIR": "$HOME/Filme"}
+            path = config_path(env)
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "download_dir": "~/Music/Youtube Downloads",
+                        "video_download_dir": str(legacy_videos),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(env)
+
+        self.assertEqual(config["download_dir"], "~/Music/Youtube Downloads")
+        self.assertEqual(config["video_download_dir"], str(legacy_videos))
+
+    def test_custom_paths_are_not_localized_or_moved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            custom = home / "Archive/Audio"
+            custom.mkdir(parents=True)
+            env = {"HOME": tmp, "XDG_MUSIC_DIR": "$HOME/Musik"}
+            path = config_path(env)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"download_dir": str(custom)}), encoding="utf-8")
+
+            config = load_config(env)
+            custom_exists = custom.is_dir()
+
+        self.assertEqual(config["download_dir"], str(custom))
+        self.assertTrue(custom_exists)
+
     def test_load_config_returns_defaults_without_reading_user_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = {"HOME": tmp}

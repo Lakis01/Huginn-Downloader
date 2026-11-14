@@ -1,9 +1,10 @@
-"""Shared configuration helpers for the YouTube Downloader plugins."""
+"""Shared configuration helpers for Huginn Downloader."""
 
 from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 from typing import Any
 
@@ -50,6 +51,163 @@ def _expand_user(value: str | Path, env: Mapping[str, str] | None) -> str:
     return path
 
 
+_XDG_USER_DIRS = {
+    "MUSIC": ("XDG_MUSIC_DIR", "Music"),
+    "VIDEOS": ("XDG_VIDEOS_DIR", "Videos"),
+    "DOWNLOAD": ("XDG_DOWNLOAD_DIR", "Downloads"),
+}
+
+
+def _is_linux_platform(platform_name: str | None) -> bool:
+    if platform_name is None:
+        return sys.platform.startswith("linux")
+    return platform_name.startswith("linux") or platform_name == "posix"
+
+
+def _expand_xdg_path(value: str, env: Mapping[str, str] | None) -> Path | None:
+    """Expand only HOME syntax in an XDG user-dir value; never evaluate it."""
+    home = str(_home(env))
+    value = value.replace("${HOME}", home).replace("$HOME", home)
+    if value == "~":
+        value = home
+    elif value.startswith("~/"):
+        value = str(Path(home) / value[2:])
+    path = Path(value)
+    return path if path.is_absolute() else None
+
+
+def _read_user_dir_file(
+    key: str, path: Path, env: Mapping[str, str] | None
+) -> Path | None:
+    """Read one quoted user-dirs.dirs assignment without sourcing shell code."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    result = None
+    for line in lines:
+        name, separator, raw_value = line.partition("=")
+        if not separator or name.strip() != key:
+            continue
+        raw_value = raw_value.strip()
+        if raw_value.startswith('"'):
+            if len(raw_value) < 2 or not raw_value.endswith('"'):
+                continue
+            raw_value = raw_value[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+        elif raw_value.startswith("'"):
+            if len(raw_value) < 2 or not raw_value.endswith("'"):
+                continue
+            raw_value = raw_value[1:-1]
+        else:
+            raw_value = raw_value.split("#", 1)[0].strip()
+        candidate = _expand_xdg_path(raw_value, env)
+        if candidate is not None:
+            result = candidate
+    return result
+
+
+def xdg_user_dir(
+    kind: str,
+    env: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
+) -> Path:
+    """Resolve an XDG Music, Videos, or Downloads directory safely."""
+    normalized_kind = str(kind).upper()
+    if normalized_kind not in _XDG_USER_DIRS:
+        raise ValueError("kind must be MUSIC, VIDEOS, or DOWNLOAD")
+    key, fallback_name = _XDG_USER_DIRS[normalized_kind]
+    home = _home(env)
+    fallback = home / fallback_name
+    if not _is_linux_platform(platform_name):
+        return fallback
+
+    values = _environment(env)
+    explicit = values.get(key)
+    if isinstance(explicit, str) and explicit.strip():
+        expanded = _expand_xdg_path(explicit.strip(), env)
+        if expanded is not None:
+            return expanded
+
+    config_home_value = values.get("XDG_CONFIG_HOME")
+    if config_home_value:
+        config_home = _expand_xdg_path(config_home_value, env)
+    else:
+        config_home = home / ".config"
+    if config_home is not None:
+        configured = _read_user_dir_file(
+            key, config_home / "user-dirs.dirs", env
+        )
+        if configured is not None:
+            return configured
+    return fallback
+
+
+def _display_path(path: Path, env: Mapping[str, str] | None) -> str:
+    home = _home(env)
+    try:
+        relative = path.relative_to(home)
+    except ValueError:
+        return str(path)
+    return "~" if not relative.parts else f"~/{relative.as_posix()}"
+
+
+def user_download_directories(
+    env: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
+) -> dict[str, str]:
+    """Return the popup's display-ready project subfolders."""
+    music = xdg_user_dir("MUSIC", env, platform_name) / "Youtube Downloads"
+    videos = xdg_user_dir("VIDEOS", env, platform_name) / "Youtube Downloads"
+    downloads = xdg_user_dir("DOWNLOAD", env, platform_name) / "Youtube"
+    return {
+        "music": _display_path(music, env),
+        "videos": _display_path(videos, env),
+        "downloads": _display_path(downloads, env),
+    }
+
+
+def _legacy_directory_is_populated(path: Path) -> bool:
+    try:
+        next(path.iterdir())
+    except StopIteration:
+        return False
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _normalize_legacy_default(
+    value: str | None,
+    folder_kind: str,
+    env: Mapping[str, str] | None,
+    platform_name: str | None,
+) -> str | None:
+    if not isinstance(value, str) or not _is_linux_platform(platform_name):
+        return value
+    candidates = {
+        "audio": {
+            DEFAULT_FRESH_DOWNLOAD_DIR: "music",
+            ALT_FRESH_DOWNLOAD_DIR: "downloads",
+        },
+        "video": {
+            DEFAULT_VIDEO_DOWNLOAD_DIR: "videos",
+            ALT_FRESH_DOWNLOAD_DIR: "downloads",
+        },
+    }.get(folder_kind, {})
+    normalized_value = os.path.normpath(os.path.abspath(_expand_user(value, env)))
+    for old_value, new_key in candidates.items():
+        old_path = os.path.normpath(os.path.abspath(_expand_user(old_value, env)))
+        if normalized_value != old_path:
+            continue
+        if _legacy_directory_is_populated(Path(old_path)):
+            return value
+        return user_download_directories(env, platform_name)[new_key]
+    return value
+
+
 def config_path(
     env: Mapping[str, str] | None = None, platform_name: str | None = None
 ) -> Path:
@@ -89,6 +247,9 @@ def load_config(
 ) -> dict[str, Any]:
     """Load the persisted options, applying defaults to missing/invalid values."""
     config = dict(_DEFAULT_CONFIG)
+    config["video_download_dir"] = _normalize_legacy_default(
+        config["video_download_dir"], "video", env, platform_name
+    )
     try:
         stored = json.loads(
             config_path(env, platform_name).read_text(encoding="utf-8")
@@ -132,6 +293,12 @@ def load_config(
     long_dir = stored.get("long_audio_dir", config["long_audio_dir"])
     if isinstance(long_dir, str) and long_dir.strip():
         config["long_audio_dir"] = long_dir
+    config["download_dir"] = _normalize_legacy_default(
+        config["download_dir"], "audio", env, platform_name
+    )
+    config["video_download_dir"] = _normalize_legacy_default(
+        config["video_download_dir"], "video", env, platform_name
+    )
     return config
 
 
@@ -233,10 +400,13 @@ def effective_download_dir(
     """Resolve the app override, or defer to yt-dlp's configured paths."""
     download_dir = config.get("download_dir")
     if download_dir is not None:
+        download_dir = _normalize_legacy_default(
+            download_dir, "audio", env, platform_name
+        )
         return _expand_user(download_dir, env)
     if ytdlp_config_exists(env, platform_name):
         return None
-    return _expand_user(DEFAULT_FRESH_DOWNLOAD_DIR, env)
+    return _expand_user(user_download_directories(env, platform_name)["music"], env)
 
 
 def effective_video_download_dir(
@@ -247,7 +417,10 @@ def effective_video_download_dir(
     """Resolve the video override, or use yt-dlp's configured paths when selected."""
     download_dir = config.get("video_download_dir", DEFAULT_VIDEO_DOWNLOAD_DIR)
     if download_dir is not None:
+        download_dir = _normalize_legacy_default(
+            download_dir, "video", env, platform_name
+        )
         return _expand_user(download_dir, env)
     if ytdlp_config_exists(env, platform_name):
         return None
-    return _expand_user(DEFAULT_VIDEO_DOWNLOAD_DIR, env)
+    return _expand_user(user_download_directories(env, platform_name)["videos"], env)
