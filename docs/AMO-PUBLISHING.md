@@ -90,12 +90,17 @@ file themselves and cannot discover it by searching AMO.
    Record the exact signed artifact name and its SHA-256 in the release notes
    if you want users to be able to verify downloads.
 4. Create a **draft** GitHub Release for the matching source tag/version,
-   attaching `dist/firefox-youtube-downloader-signed.xpi`. For example, after
-   setting `VERSION=2.5.0` and preparing `release-notes.md`:
+   attaching `dist/firefox-youtube-downloader-signed.xpi`. Create and push the
+   tag explicitly first so the `push.tags` package workflow has a ref to run
+   against; then create the draft for that existing tag. For example:
 
    ```sh
-   gh release create "v$VERSION" dist/firefox-youtube-downloader-signed.xpi \
-     --draft --target main \
+   VERSION=2.5.0
+   TAG="v$VERSION"
+   git tag -a "$TAG" -m "$TAG"
+   git push origin "$TAG"
+   gh release create "$TAG" dist/firefox-youtube-downloader-signed.xpi \
+     --draft --verify-tag --target main \
      --title "Firefox YouTube Downloader $VERSION" \
      --notes-file release-notes.md
    ```

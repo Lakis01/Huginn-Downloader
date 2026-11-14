@@ -36,11 +36,13 @@ expected_assets=(
     "firefox-youtube-downloader-${VERSION}-source.tar.gz"
     "firefox-youtube-downloader-${VERSION}-arch-pkgbuild.tar.gz"
 )
+upload_paths=()
 for asset in "${expected_assets[@]}"; do
     [[ -f $ASSET_DIR/$asset ]] || {
         printf 'Missing release asset: %s\n' "$ASSET_DIR/$asset" >&2
         exit 1
     }
+    upload_paths+=("$ASSET_DIR/$asset")
 done
 
 attempts=${YTDL_RELEASE_WAIT_ATTEMPTS:-30}
@@ -62,5 +64,5 @@ grep -Fxq 'firefox-youtube-downloader-signed.xpi' <<<"$release_assets" || {
     exit 1
 }
 
-gh release upload "$TAG" "$ASSET_DIR"/* --clobber
+gh release upload "$TAG" "${upload_paths[@]}" --clobber
 printf 'Uploaded Linux package assets to draft release %s.\n' "$TAG"

@@ -247,7 +247,7 @@ class ReleaseAssetUploadTests(unittest.TestCase):
                 "elif args[:2] == ['release', 'view'] and '--json' in args and 'assets' in args:\n"
                 " print(os.environ.get('GH_ASSETS', 'firefox-youtube-downloader-signed.xpi'))\n"
                 "elif args[:2] == ['release', 'upload']:\n"
-                " pass\n"
+                " open(os.environ['GH_UPLOAD_LOG'], 'w').write('\\n'.join(os.path.basename(p) for p in args[3:-1]))\n"
                 "else:\n"
                 " raise SystemExit(2)\n",
                 encoding="utf-8",
@@ -264,9 +264,11 @@ class ReleaseAssetUploadTests(unittest.TestCase):
                 f"firefox-youtube-downloader-{version}-arch-pkgbuild.tar.gz",
             ):
                 (assets / name).write_bytes(b"fixture")
+            (assets / "firefox-youtube-downloader.xpi").write_bytes(b"unsigned local build")
             env = os.environ | {
                 "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
                 "GH_LOG": str(log),
+                "GH_UPLOAD_LOG": str(tmp / "uploaded-assets.log"),
                 "YTDL_RELEASE_WAIT_ATTEMPTS": "1",
                 "YTDL_RELEASE_WAIT_SECONDS": "0",
             }
@@ -282,6 +284,16 @@ class ReleaseAssetUploadTests(unittest.TestCase):
             self.assertIn(f"release view {tag}", calls)
             self.assertIn(f"release upload {tag}", calls)
             self.assertNotIn("release edit", calls)
+            uploaded = (tmp / "uploaded-assets.log").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(
+                set(uploaded),
+                {
+                    f"firefox-youtube-downloader-companion_{version}_all.deb",
+                    f"firefox-youtube-downloader-companion-{version}-1.noarch.rpm",
+                    f"firefox-youtube-downloader-{version}-source.tar.gz",
+                    f"firefox-youtube-downloader-{version}-arch-pkgbuild.tar.gz",
+                },
+            )
 
             log.write_text("", encoding="utf-8")
             env["GH_DRAFT"] = "false"
