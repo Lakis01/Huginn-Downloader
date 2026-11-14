@@ -1,10 +1,13 @@
 # Backlog
 
+## Completed since last cycle
+
+- Removed the remote `feature/youtube-downloader-sdd` branch after confirming its PR (#1) was merged and it had no unique commits versus `main`.
+
 ## Next build cycle
 
 - Redesign the Firefox extension's raven icon. Review the five prompt directions prepared for the maintainer, choose a direction, and produce polished icon assets that remain recognizable at toolbar sizes.
 - Explain in the README that users can start multiple downloads in parallel and do not need to wait for one download to finish before starting another.
-- Audit the GitHub branch `feature/youtube-downloader-sdd`. At the v2.5.1 release it is 48 commits behind `main` with no unique commits; confirm there is no open PR or other dependency, then delete the remote branch if it is no longer needed.
 - After the maintainer provides three updated screenshots, replace `docs/screenshots/watch-page-pill.png` and `docs/screenshots/context-menu.png`, and add a screenshot of the popup opened from the Firefox toolbar.
 
 ## Companion distribution
