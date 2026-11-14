@@ -425,6 +425,7 @@ The popup stores these options in the user's config file:
 | Video download folder | `~/Videos/Youtube Downloads` | Independent from audio; choose `~/Downloads/Youtube`, a custom path, or `Keep yt-dlp config` (`video_download_dir`). If no yt-dlp config exists, `Keep` falls back to the Videos default. Older configs missing this key migrate to the Videos default. |
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
+| Verbose yt-dlp diagnostics | Off (quiet) | The download terminal shows live progress, speed, and ETA even in quiet mode. Turn this on to include yt-dlp's detailed logs (`verbose_output`); those logs may include URLs and request details. |
 | Audio format | `best` (Native Opus / M4A, no conversion) | `best`, `opus`, `mp3`, `m4a`, `ogg`, or `flac`, selectable in the popup or via `audio_format` in `config.json`. `opus` forces Opus output (native stream copied when stereo and available, otherwise FFmpeg transcode); `m4a` downloads the native AAC stream when available. |
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |
 | Embed thumbnail picture | On | Download and embed cover art (`image/webp`, JPEG for M4A). Turn off to skip thumbnails entirely. |
@@ -560,7 +561,7 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 163 Python tests (includes package layout/release tests)
+python3 -m unittest discover -s tests -v  # 167 Python tests (includes package layout/release tests)
 bash tests/test_shortcut.sh               # 47 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh

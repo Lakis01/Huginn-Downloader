@@ -18,6 +18,7 @@ LEGACY_MP3_QUALITY_ALIASES = {"128k": "V5"}
 _DEFAULT_CONFIG = {
     "download_dir": None,
     "video_download_dir": DEFAULT_VIDEO_DOWNLOAD_DIR,
+    "verbose_output": False,
     "auto_tag": True,
     "rsgain": False,
     "audio_format": "best",
@@ -103,7 +104,7 @@ def load_config(
     video_download_dir = stored.get("video_download_dir", config["video_download_dir"])
     if video_download_dir is None or isinstance(video_download_dir, str):
         config["video_download_dir"] = video_download_dir
-    for key in ("auto_tag", "rsgain"):
+    for key in ("auto_tag", "rsgain", "verbose_output"):
         value = stored.get(key, config[key])
         if isinstance(value, bool):
             config[key] = value
@@ -154,7 +155,7 @@ def save_config(
         if value is not None and not isinstance(value, str):
             raise TypeError("video_download_dir must be a string or None")
         normalized["video_download_dir"] = value
-    for key in ("auto_tag", "rsgain"):
+    for key in ("auto_tag", "rsgain", "verbose_output"):
         if key in config:
             value = config[key]
             if not isinstance(value, bool):

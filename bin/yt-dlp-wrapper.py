@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Download YouTube audio, video, or an interactively selected audio cut."""
 
+import codecs
 import errno
 import json
 import math
@@ -803,22 +804,82 @@ def _choose_channel_mode(config: Mapping[str, Any] | None = None) -> str:
 
 
 def _run_with_auth_retry(command):
-    """Run yt-dlp with TTY progress, retrying once with Firefox cookies on auth errors."""
+    """Run yt-dlp with live terminal output and retry once with Firefox cookies on auth errors."""
     try:
-        subprocess.run(command, check=True, text=True, stdout=None, stderr=subprocess.PIPE)
+        _run_yt_dlp_command(command)
     except subprocess.CalledProcessError as error:
-        print(_yt_dlp_error_text(error), file=sys.stderr)
+        if not getattr(error, "stderr_forwarded", False):
+            print(_yt_dlp_error_text(error), file=sys.stderr)
         if _is_auth_error(error) and "--cookies-from-browser" not in command:
             retry = [*command[:1], "--cookies-from-browser", "firefox", *command[1:]]
             try:
-                subprocess.run(
-                    retry, check=True, text=True, stdout=None, stderr=subprocess.PIPE
-                )
+                _run_yt_dlp_command(retry)
             except subprocess.CalledProcessError as retry_error:
-                print(_yt_dlp_error_text(retry_error), file=sys.stderr)
+                if not getattr(retry_error, "stderr_forwarded", False):
+                    print(_yt_dlp_error_text(retry_error), file=sys.stderr)
                 raise _YtDlpError(_yt_dlp_error_text(retry_error)) from None
         else:
             raise _YtDlpError(_yt_dlp_error_text(error)) from None
+
+
+def _run_yt_dlp_command(command):
+    """Run yt-dlp, forwarding live output when it should be visible to the user."""
+    try:
+        stream_output = sys.stderr.isatty()
+    except (AttributeError, OSError):
+        stream_output = False
+
+    if not stream_output:
+        return subprocess.run(
+            command, check=True, text=True, stdout=None, stderr=subprocess.PIPE
+        )
+
+    process = subprocess.Popen(command, stdout=None, stderr=subprocess.PIPE)
+    stderr_pipe = process.stderr
+    captured = bytearray()
+    encoding = getattr(sys.stderr, "encoding", None) or "utf-8"
+    decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
+    output_stream = sys.stderr
+    binary_stream = getattr(output_stream, "buffer", None)
+    capture_limit = 64 * 1024
+
+    try:
+        while True:
+            chunk = stderr_pipe.read1(4096)
+            if not chunk:
+                break
+            captured.extend(chunk)
+            if len(captured) > capture_limit:
+                del captured[:-capture_limit]
+            if binary_stream is not None:
+                binary_stream.write(chunk)
+                binary_stream.flush()
+            else:
+                text = decoder.decode(chunk)
+                if text:
+                    output_stream.write(text)
+                    output_stream.flush()
+        if binary_stream is None:
+            final_text = decoder.decode(b"", final=True)
+            if final_text:
+                output_stream.write(final_text)
+                output_stream.flush()
+    finally:
+        stderr_pipe.close()
+
+    returncode = process.wait()
+    if returncode:
+        error_text = bytes(captured).decode(encoding, errors="replace")
+        error = subprocess.CalledProcessError(returncode, command, stderr=error_text)
+        error.stderr_forwarded = True
+        raise error
+    return None
+
+
+def _yt_dlp_output_args(config=None):
+    """Keep ordinary output quiet while allowing an explicit verbose mode."""
+    cfg = dict(config) if config is not None else load_config()
+    return ["--verbose"] if cfg.get("verbose_output", False) else ["--quiet"]
 
 
 def _read_print_to_file(print_path):
@@ -897,7 +958,7 @@ def download_audio(url, config=None):
             "yt-dlp",
             *extras,
             *_audio_format_args(cfg),
-            "--quiet",
+            *_yt_dlp_output_args(cfg),
             "--no-playlist",
             "--progress",
             "-o", "%(title)s.%(ext)s",
@@ -935,7 +996,7 @@ def download_video(url, config=None):
         "--embed-thumbnail",
         "--convert-thumbnails", "webp",
         "--embed-metadata",
-        "--quiet",
+        *_yt_dlp_output_args(cfg),
         "--progress",
         "--print",
         "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
@@ -1058,7 +1119,7 @@ def interactive_cut(url, config=None):
                 *extras,
                 *section_args,
                 *format_args,
-                "--quiet",
+                *_yt_dlp_output_args(cfg),
                 "--no-playlist",
                 "--progress",
                 "-o", output_template,
@@ -1068,9 +1129,8 @@ def interactive_cut(url, config=None):
                 rest.extend(["--postprocessor-args", postprocessor_args])
             print("[1/2] Downloading cut...")
             try:
-                subprocess.run(
-                    ["yt-dlp", "--load-info-json", temp_info_path, *rest],
-                    check=True, text=True, stdout=None, stderr=subprocess.PIPE,
+                _run_yt_dlp_command(
+                    ["yt-dlp", "--load-info-json", temp_info_path, *rest]
                 )
             except subprocess.CalledProcessError as error:
                 if not _is_retryable_load_info_error(error):

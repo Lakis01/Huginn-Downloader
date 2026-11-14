@@ -949,6 +949,7 @@ class WrapperTests(unittest.TestCase):
         wrapper = _load_wrapper(self)
         cases = (
             {"audio_format": "best", "mp3_quality": "V0"},
+            {"audio_format": "best", "mp3_quality": "V0", "verbose_output": True},
             {"audio_format": "mp3", "mp3_quality": "V0"},
             {"audio_format": "mp3", "mp3_quality": "320k"},
             {"audio_format": "mp3", "mp3_quality": "V2"},
@@ -985,12 +986,29 @@ class WrapperTests(unittest.TestCase):
                                     wrapper.download_audio("https://example.invalid/audio", config)
 
                     yt_dlp_command = next(command for command in commands if command[0] == "yt-dlp")
+                    verbose = selection.get("verbose_output", False)
+                    self.assertEqual("--verbose" in yt_dlp_command, verbose)
+                    self.assertEqual("--quiet" in yt_dlp_command, not verbose)
+                    self.assertIn("--progress", yt_dlp_command)
+                    output_flag = "--verbose" if verbose else "--quiet"
                     self.assertEqual(
                         yt_dlp_command[
-                            yt_dlp_command.index("-f"):yt_dlp_command.index("--quiet")
+                            yt_dlp_command.index("-f"):yt_dlp_command.index(output_flag)
                         ],
                         wrapper._audio_format_args(selection),
                     )
+
+    def test_video_download_uses_verbose_output_without_disabling_progress(self):
+        wrapper = _load_wrapper(self)
+        commands = []
+        with mock.patch.object(wrapper, "effective_video_download_dir", return_value=None), \
+             mock.patch.object(wrapper, "_run_with_auth_retry", side_effect=lambda command: commands.append(command)):
+            wrapper.download_video("https://example.invalid/video", {"verbose_output": True})
+
+        self.assertEqual(len(commands), 1)
+        self.assertIn("--verbose", commands[0])
+        self.assertNotIn("--quiet", commands[0])
+        self.assertIn("--progress", commands[0])
 
     def test_finalize_uses_appended_info_sidecar_renames_without_overwrite_and_runs_rsgain_once(self):
         wrapper = _load_wrapper(self)
@@ -1433,6 +1451,108 @@ class WrapperTests(unittest.TestCase):
         self.assertNotIn("--cookies-from-browser", byte_error_commands[0])
         self.assertIn("--cookies-from-browser", byte_error_commands[1])
 
+    def test_tty_download_forwards_carriage_return_progress_before_child_exit(self):
+        wrapper = _load_wrapper(self)
+        progress_chunks = [
+            b"\n[download] 25.0% of 10.00MiB at 2.00MiB/s ETA 00:04\r",
+            b"[download] 50.0% of 10.00MiB at 2.00MiB/s ETA 00:02\r",
+        ]
+        class TTY(io.StringIO):
+            def isatty(self):
+                return True
+
+        terminal = TTY()
+
+        class Pipe:
+            def __init__(self, chunks):
+                self.chunks = iter(chunks)
+
+            def read1(self, _size):
+                return next(self.chunks, b"")
+
+            def close(self):
+                pass
+
+        class Process:
+            def __init__(self):
+                self.stderr = Pipe(progress_chunks)
+
+            def wait(self):
+                self.assert_forwarded_before_exit()
+                return 0
+
+            def assert_forwarded_before_exit(self):
+                self_test.assertIn("ETA 00:02", terminal.getvalue())
+
+        self_test = self
+        with mock.patch.object(wrapper.sys, "stderr", terminal), \
+             mock.patch.object(wrapper.subprocess, "Popen", return_value=Process()) as popen, \
+             mock.patch.object(wrapper.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+            wrapper._run_with_auth_retry(["yt-dlp", "--quiet", "--progress", "https://example.invalid/media"])
+
+        self.assertIn("25.0%", terminal.getvalue())
+        self.assertIn("50.0%", terminal.getvalue())
+        self.assertIn("\r", terminal.getvalue())
+        popen.assert_called_once()
+
+    def test_tty_auth_error_still_retries_with_firefox_cookies(self):
+        wrapper = _load_wrapper(self)
+
+        class TTY(io.StringIO):
+            def isatty(self):
+                return True
+
+        terminal = TTY()
+        outputs = [
+            (b"ERROR: Sign in to confirm your age\n", 1),
+            (b"[download] 100% ETA 00:00\n", 0),
+        ]
+        commands = []
+
+        class Pipe:
+            def __init__(self, output):
+                self.output = output
+                self.read = False
+
+            def read1(self, _size):
+                if self.read:
+                    return b""
+                self.read = True
+                return self.output
+
+            def close(self):
+                pass
+
+        class Process:
+            def __init__(self, output, returncode):
+                self.stderr = Pipe(output)
+                self.returncode = returncode
+
+            def wait(self):
+                return self.returncode
+
+        def fake_popen(command, **_kwargs):
+            commands.append(list(command))
+            output, returncode = outputs[len(commands) - 1]
+            return Process(output, returncode)
+
+        with (
+            mock.patch.object(wrapper.sys, "stderr", terminal),
+            mock.patch.object(wrapper.subprocess, "Popen", side_effect=fake_popen) as popen,
+            mock.patch.object(wrapper.subprocess, "run", return_value=SimpleNamespace(returncode=0)),
+        ):
+            wrapper._run_with_auth_retry(["yt-dlp", "--quiet", "--progress", "https://example.invalid/media"])
+
+        self.assertEqual(len(commands), 2)
+        self.assertNotIn("--cookies-from-browser", commands[0])
+        self.assertEqual(
+            commands[1][commands[1].index("--cookies-from-browser") + 1],
+            "firefox",
+        )
+        self.assertIn("Sign in to confirm your age", terminal.getvalue())
+        self.assertIn("100%", terminal.getvalue())
+        self.assertEqual(popen.call_count, 2)
+
     def test_metadata_command_places_separator_before_url_and_ies_for_youtube(self):
         wrapper = _load_wrapper(self)
         for url, expect_ies in (
@@ -1542,7 +1662,7 @@ class WrapperTests(unittest.TestCase):
                 )
                 return SimpleNamespace(stdout="")
 
-            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts"}
+            config = {"download_dir": None, "auto_tag": True, "rsgain": False, "audio_format": "best", "mp3_quality": "V0", "embed_thumbnail": True, "thumbnail_jpg": False, "channel_mode": "stereo", "long_audio_enabled": False, "long_audio_minutes": 30, "long_audio_dir": "~/Podcasts", "verbose_output": True}
             with mock.patch.object(
                 wrapper, "effective_download_dir", return_value=None
             ):
@@ -1565,6 +1685,10 @@ class WrapperTests(unittest.TestCase):
             ]
             self.assertEqual(len(cut_commands), 2)
             self.assertIn("--load-info-json", cut_commands[0])
+            for command in cut_commands:
+                self.assertIn("--verbose", command)
+                self.assertNotIn("--quiet", command)
+                self.assertIn("--progress", command)
             self.assertNotIn(url, cut_commands[0])
             self.assertNotIn("--load-info-json", cut_commands[1])
             self.assertEqual(cut_commands[1][-2:], ["--", url])

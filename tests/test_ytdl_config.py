@@ -31,6 +31,7 @@ class ConfigTests(unittest.TestCase):
             {
                 "download_dir": None,
                 "video_download_dir": "~/Videos/Youtube Downloads",
+                "verbose_output": False,
                 "auto_tag": True,
                 "rsgain": False,
                 "audio_format": "best",
@@ -64,6 +65,17 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config["download_dir"], "~/Music/Existing")
         self.assertEqual(config.get("video_download_dir"), "~/Videos/Youtube Downloads")
+        self.assertFalse(config["verbose_output"])
+
+    def test_verbose_output_defaults_false_and_round_trips_as_a_boolean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            self.assertFalse(load_config(env)["verbose_output"])
+            save_config({"verbose_output": True}, env)
+            self.assertTrue(load_config(env)["verbose_output"])
+
+            with self.assertRaises(TypeError):
+                save_config({"verbose_output": "true"}, env)
 
     def test_effective_video_dir_uses_project_default_only_for_explicit_keep(self):
         resolver = getattr(ytdl_config, "effective_video_download_dir", None)
@@ -111,6 +123,7 @@ class ConfigTests(unittest.TestCase):
             expected = {
                 "download_dir": "~/Music/custom",
                 "video_download_dir": "~/Videos/Youtube Downloads",
+                "verbose_output": False,
                 "auto_tag": False,
                 "rsgain": True,
                 "audio_format": "best",
@@ -155,6 +168,7 @@ class ConfigTests(unittest.TestCase):
             expected = {
                 "download_dir": None,
                 "video_download_dir": "~/Videos/Youtube Downloads",
+                "verbose_output": False,
                 "auto_tag": True,
                 "rsgain": False,
                 "audio_format": "mp3",
