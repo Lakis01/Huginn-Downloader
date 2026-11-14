@@ -89,15 +89,43 @@ file themselves and cannot discover it by searching AMO.
 
    Record the exact signed artifact name and its SHA-256 in the release notes
    if you want users to be able to verify downloads.
-4. Create a GitHub Release for the same source tag/version and attach the
-   signed XPI. Include a short release note, the companion installation link,
-   and the locally required `yt-dlp`/FFmpeg dependencies. Never attach API
-   credentials.
-5. On each release, increment `manifest.json`'s `version`, rerun tests, and
-   submit the new source with `--channel=unlisted`. Replace the old attached
-   artifact with the newly signed XPI; AMO signatures are per submitted
-   version.
-6. Install on each laptop with Firefox's **Add-ons and themes → gear → Install
+4. Create a **draft** GitHub Release for the matching source tag/version,
+   attaching `dist/firefox-youtube-downloader-signed.xpi`. Create and push the
+   tag explicitly first so the `push.tags` package workflow has a ref to run
+   against; then create the draft for that existing tag. For example:
+
+   ```sh
+   VERSION=2.5.0
+   TAG="v$VERSION"
+   git tag -a "$TAG" -m "$TAG"
+   git push origin "$TAG"
+   gh release create "$TAG" dist/firefox-youtube-downloader-signed.xpi \
+     --draft --verify-tag --target main \
+     --title "Firefox YouTube Downloader $VERSION" \
+     --notes-file release-notes.md
+   ```
+
+   Include a short release note, the companion installation link, and the
+   locally required `yt-dlp` and FFmpeg dependencies. Never attach API
+   credentials. The tag starts the Linux package workflow; it waits for this
+   draft before uploading packages.
+5. Wait for **Build Linux release packages** to finish. It builds and attaches
+   the Debian `.deb`, Fedora `.rpm`, a tagged source archive, and an Arch
+   `PKGBUILD`/`.SRCINFO` recipe archive. If the tag-push run did not start,
+   manually dispatch it with `upload_to_draft=true` and the release tag:
+
+   ```sh
+   gh workflow run release-linux-packages.yml --ref v2.5.0 \
+     -f upload_to_draft=true -f release_tag=v2.5.0
+   ```
+
+   Verify all assets and their displayed SHA-256 digests, then publish the
+   draft. The workflow never publishes the release or submits to a distro
+   repository.
+6. For the next update, increment `manifest.json`'s `version` before building
+   or signing, rerun tests, and submit the new source with `--channel=unlisted`.
+   Replace the old attached XPI; AMO signatures are per submitted version.
+7. Install on each laptop with Firefox's **Add-ons and themes → gear → Install
    Add-on From File…** action, then install the matching OS companion using the
    README instructions. On managed Firefox installations, follow the
    organization's extension policy.
@@ -225,6 +253,7 @@ Unlisted release is installed from its signed XPI.
 - [ ] `data_collection_permissions.required` is still `['none']` if the add-on
       still collects no data.
 - [ ] Tests and deterministic local XPI build pass.
+- [ ] The tag package workflow completed; the expected `.deb`, Fedora `.rpm`, source archive, and Arch recipe are attached to the draft.
 - [ ] Permission explanations match actual code and reviewer instructions.
 - [ ] Store text explains that the companion and local `yt-dlp`/FFmpeg are
       required.

@@ -11,6 +11,11 @@ const PRESETS = {
   music: '~/Music/Youtube Downloads',
   downloads: '~/Downloads/Youtube',
 };
+const VIDEO_PRESETS = {
+  keep: null,
+  videos: '~/Videos/Youtube Downloads',
+  downloads: '~/Downloads/Youtube',
+};
 
 let lastDeps = null;
 
@@ -46,9 +51,9 @@ function expandHome(value) {
   return value;
 }
 
-function presetKeyFor(downloadDir) {
+function presetKeyFor(downloadDir, presets = PRESETS) {
   if (downloadDir === null || downloadDir === undefined || downloadDir === '') return 'keep';
-  for (const [key, preset] of Object.entries(PRESETS)) {
+  for (const [key, preset] of Object.entries(presets)) {
     if (key !== 'keep' && preset === downloadDir) return key;
   }
   return 'custom';
@@ -172,6 +177,14 @@ function renderConnected(response) {
   $('effectiveDir').textContent = effective
     ? `Saving to ${effective}${response.ytdlp_config_exists ? '' : ' (yt-dlp config not found, using app default)'}`
     : 'Download folder follows your yt-dlp config.';
+  const videoKey = presetKeyFor(config.video_download_dir, VIDEO_PRESETS);
+  if ($('videoDownloadFolder')) $('videoDownloadFolder').value = videoKey;
+  $('customVideoDir').hidden = videoKey !== 'custom';
+  if (videoKey === 'custom') $('customVideoDir').value = config.video_download_dir || '';
+  const effectiveVideo = response.effective_video_download_dir;
+  $('effectiveVideoDir').textContent = effectiveVideo
+    ? `Saving videos to ${effectiveVideo}${response.ytdlp_config_exists && config.video_download_dir == null ? '' : ' (project video folder)'}`
+    : 'Video folder follows your yt-dlp config.';
   const deps = response.deps || {};
   const missing = Object.entries(deps)
     .filter(([, ok]) => !ok)
@@ -227,6 +240,16 @@ function currentFolderValue() {
     return custom || null;
   }
   return expandHome(PRESETS[key] !== undefined ? PRESETS[key] : null);
+}
+
+function currentVideoFolderValue() {
+  const select = $('videoDownloadFolder');
+  const key = select && select.value ? select.value : 'keep';
+  if (key === 'custom') {
+    const custom = $('customVideoDir').value.trim();
+    return custom || null;
+  }
+  return expandHome(VIDEO_PRESETS[key] !== undefined ? VIDEO_PRESETS[key] : null);
 }
 
 async function copyInstallCommand() {
@@ -313,6 +336,20 @@ function main() {
   $('customDir').addEventListener('change', () => {
     saveConfig({ download_dir: currentFolderValue() });
   });
+  const videoFolderEl = $('videoDownloadFolder');
+  if (videoFolderEl) {
+    videoFolderEl.addEventListener('change', () => {
+      $('customVideoDir').hidden = videoFolderEl.value !== 'custom';
+      if (videoFolderEl.value !== 'custom') {
+        saveConfig({ video_download_dir: currentVideoFolderValue() });
+      }
+    });
+  }
+  if ($('customVideoDir')) {
+    $('customVideoDir').addEventListener('change', () => {
+      saveConfig({ video_download_dir: currentVideoFolderValue() });
+    });
+  }
   $('copyBtn').addEventListener('click', copyInstallCommand);
   $('retryBtn').addEventListener('click', refresh);
 

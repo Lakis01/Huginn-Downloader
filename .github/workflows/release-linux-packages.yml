@@ -1,0 +1,113 @@
+name: Build Linux release packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      upload_to_draft:
+        description: Upload package assets to an existing signed-XPI draft release
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: Existing draft tag (required only when upload_to_draft is true)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Validate tag and build Debian package/source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')
+          if [[ ${GITHUB_REF_TYPE:-branch} == tag ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev
+          bash scripts/build-source-tarball.sh dist
+          bash scripts/build-deb.sh dist
+          dpkg-deb --info "dist/firefox-youtube-downloader-companion_${version}_all.deb"
+          dpkg-deb --contents "dist/firefox-youtube-downloader-companion_${version}_all.deb"
+
+      - name: Build and inspect Fedora RPM
+        shell: bash
+        run: |
+          set -euo pipefail
+          rpm_out="$GITHUB_WORKSPACE/dist/rpm-out"
+          mkdir -p "$rpm_out"
+          chmod 777 "$rpm_out"
+          docker run --rm \
+            -e VERSION="$VERSION" \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -v "$rpm_out:/out" \
+            -w /src \
+            fedora:latest \
+            bash -euc '
+              dnf install -y rpm-build python3 tar gzip shadow-utils
+              useradd --create-home package-builder
+              su - package-builder -s /bin/bash -c \
+                "bash /src/scripts/build-rpm.sh /src/dist/firefox-youtube-downloader-${VERSION}-source.tar.gz /out"
+              rpm -qip "/out/firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
+              rpm -qlp "/out/firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
+              rpm -qp --requires "/out/firefox-youtube-downloader-companion-${VERSION}-1.noarch.rpm"
+            '
+          mv "$rpm_out"/*.rpm dist/
+          rmdir "$rpm_out"
+
+      - name: Build Arch PKGBUILD recipe
+        run: bash scripts/build-arch-recipe.sh "dist/firefox-youtube-downloader-${VERSION}-source.tar.gz" dist
+
+      - name: Save package artifacts for manual verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-youtube-downloader-linux-${{ github.run_id }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*-source.tar.gz
+            dist/*-arch-pkgbuild.tar.gz
+          if-no-files-found: error
+
+      - name: Validate Arch recipe with makepkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          recipe="firefox-youtube-downloader-${VERSION}-arch-pkgbuild.tar.gz"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e RECIPE="$recipe" \
+            -v "$GITHUB_WORKSPACE/dist:/assets:ro" \
+            archlinux:base-devel \
+            bash -euc '
+              mkdir -p /tmp/arch-recipe
+              tar -xzf "/assets/$RECIPE" -C /tmp/arch-recipe
+              cd /tmp/arch-recipe
+              makepkg --printsrcinfo > .SRCINFO.generated
+              diff -u .SRCINFO .SRCINFO.generated
+            '
+
+      - name: Upload Linux packages to the draft release
+        if: github.event_name == 'push' || inputs.upload_to_draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            release_tag=$GITHUB_REF_NAME
+          else
+            release_tag=$RELEASE_TAG
+          fi
+          [[ -n $release_tag ]] || { echo 'release_tag is required for manual draft upload.' >&2; exit 1; }
+          bash scripts/upload-release-packages.sh "$release_tag" dist

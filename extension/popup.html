@@ -76,6 +76,16 @@
     <input type="text" id="customDir" class="path" placeholder="/home/user/Music/Youtube" aria-label="Custom download folder" hidden>
     <p class="note" id="effectiveDir"></p>
 
+    <h2>Video folder</h2>
+    <select id="videoDownloadFolder" class="select" aria-label="Video download folder">
+      <option value="keep">Keep yt-dlp config</option>
+      <option value="videos">~/Videos/Youtube Downloads</option>
+      <option value="downloads">~/Downloads/Youtube</option>
+      <option value="custom">Custom folder</option>
+    </select>
+    <input type="text" id="customVideoDir" class="path" placeholder="/home/user/Videos/Youtube" aria-label="Custom video folder" hidden>
+    <p class="note" id="effectiveVideoDir"></p>
+
     <h2>Long audio routing</h2>
     <label class="toggle">
       <input type="checkbox" id="longAudioEnabled">

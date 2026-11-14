@@ -54,6 +54,7 @@ class WindowsConfigTests(unittest.TestCase):
                 ytdl_config.load_config(env, "nt"),
                 {
                     "download_dir": None,
+                    "video_download_dir": "~/Videos/Youtube Downloads",
                     "auto_tag": False,
                     "rsgain": True,
                     "audio_format": "best",
@@ -69,6 +70,16 @@ class WindowsConfigTests(unittest.TestCase):
             self.assertEqual(
                 ytdl_config.effective_download_dir({"download_dir": None}, env, "nt"),
                 str(Path(tmp) / "home/Music/Youtube Downloads"),
+            )
+
+    def test_video_download_dir_expands_home_on_windows(self):
+        resolver = getattr(ytdl_config, "effective_video_download_dir", None)
+        self.assertTrue(callable(resolver), "video folder resolver is available")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": str(Path(tmp) / "home")}
+            self.assertEqual(
+                resolver({"video_download_dir": "~/Videos/Youtube Downloads"}, env, "nt"),
+                str(Path(tmp) / "home/Videos/Youtube Downloads"),
             )
 
     def test_windows_xdg_override_and_appdata_yt_dlp_configs_are_respected(self):
@@ -97,6 +108,16 @@ class WindowsConfigTests(unittest.TestCase):
                         )
                     )
                     config.unlink()
+
+    def test_video_download_dir_expands_home_on_windows(self):
+        resolver = getattr(ytdl_config, "effective_video_download_dir", None)
+        self.assertTrue(callable(resolver), "video folder resolver is available")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": str(Path(tmp) / "home")}
+            self.assertEqual(
+                resolver({"video_download_dir": "~/Videos/Youtube Downloads"}, env, "nt"),
+                str(Path(tmp) / "home/Videos/Youtube Downloads"),
+            )
 
     def test_windows_home_fallback_and_existing_call_signatures_remain_compatible(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -464,6 +485,7 @@ class WindowsInstallerTests(unittest.TestCase):
                 config,
                 {
                     "download_dir": None,
+                    "video_download_dir": "~/Videos/Youtube Downloads",
                     "auto_tag": True,
                     "rsgain": False,
                     "audio_format": "best",
@@ -509,6 +531,7 @@ class WindowsInstallerTests(unittest.TestCase):
                 json.loads((app / "config.json").read_text(encoding="utf-8")),
                 {
                     "download_dir": "~/Custom",
+                    "video_download_dir": "~/Videos/Youtube Downloads",
                     "auto_tag": False,
                     "rsgain": True,
                     "audio_format": "best",

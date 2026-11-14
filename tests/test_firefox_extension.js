@@ -36,7 +36,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.4.0', 'manifest version is 2.4.0');
+  assert.equal(manifest.version, '2.5.0', 'manifest version is 2.5.0');
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -854,6 +854,8 @@ function testPopup() {
   assert.ok(!html.includes('id="monoAudio"'), 'legacy mono checkbox replaced by channel selector');
   assert.ok(!html.includes('(on by default)') && !html.includes('(off by default)'), 'no on/off-by-default label suffixes');
   assert.ok(html.includes('id="downloadFolder"'), 'popup has #downloadFolder dropdown');
+  assert.ok(html.includes('id="videoDownloadFolder"'), 'popup has a separate #videoDownloadFolder dropdown');
+  assert.ok(js.includes('video_download_dir'), 'popup persists a separate video_download_dir');
   assert.ok(html.indexOf('id="downloadFolder"') < html.indexOf('id="longAudioEnabled"'), 'long-audio routing sits underneath the download folder');
   assert.ok(html.includes('id="longAudioEnabled"'), 'popup has #longAudioEnabled toggle');
   assert.ok(html.includes('id="longAudioMinutes"'), 'popup has #longAudioMinutes input');
@@ -894,7 +896,7 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
   const document = {
@@ -1092,7 +1094,7 @@ async function testPopupChannelAndFolder() {
   }
   const fx = createPopupFixture({
     ok: true,
-    version: '2.4.0',
+    version: '2.5.0',
     config: { auto_tag: true, rsgain: false, audio_format: 'best', mp3_quality: 'V0', channel_mode: 'ask', download_dir: '~/Music/Youtube Downloads' },
     deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
     effective_download_dir: '/home/user/Music/Youtube Downloads',
@@ -1125,6 +1127,46 @@ async function testPopupChannelAndFolder() {
   assert.equal(folderLast.msg.config.download_dir, '/home/user/Podcasts', 'custom download_dir persisted');
 }
 
+async function testPopupVideoFolderIsIndependentFromAudioFolder() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function fire(el, type) {
+    const fns = (el.listeners && el.listeners[type]) || [];
+    for (const fn of fns) await fn({ target: el });
+  }
+  const fx = createPopupFixture({
+    ok: true,
+    version: '2.5.0',
+    config: {
+      download_dir: '~/Music/Youtube Downloads',
+      video_download_dir: '~/Videos/Youtube Downloads',
+      auto_tag: true,
+    },
+    deps: { yt_dlp: true, ffmpeg: true, rsgain: false },
+    effective_download_dir: '/home/user/Music/Youtube Downloads',
+    effective_video_download_dir: '/home/user/Videos/Youtube Downloads',
+    ytdlp_config_exists: false,
+    yt_dlp_status: { outdated: false },
+  });
+  fx.triggerReady();
+  await tick(30);
+  assert.equal(fx.elements.get('downloadFolder').value, 'music', 'audio keeps its own Music preset');
+  assert.equal(fx.elements.get('videoDownloadFolder').value, 'videos', 'video defaults to its Videos preset');
+  fx.nativeCalls.length = 0;
+  const videoSelect = fx.elements.get('videoDownloadFolder');
+  videoSelect.value = 'custom';
+  await fire(videoSelect, 'change');
+  assert.equal(fx.elements.get('customVideoDir').hidden, false, 'video custom path appears independently');
+  fx.elements.get('customVideoDir').value = '/home/user/Archive/Clips';
+  await fire(fx.elements.get('customVideoDir'), 'change');
+  await tick(10);
+  const saved = [...fx.nativeCalls].reverse().find(
+    (call) => call.msg && call.msg.action === 'set_config' && call.msg.config && 'video_download_dir' in call.msg.config,
+  );
+  assert.ok(saved, 'custom video directory is persisted');
+  assert.equal(saved.msg.config.video_download_dir, '/home/user/Archive/Clips');
+  assert.equal('download_dir' in saved.msg.config, false, 'video change does not overwrite audio directory');
+}
+
 async function testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves() {
   const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   async function fire(el, type) {
@@ -1135,7 +1177,7 @@ async function testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves() {
   for (const invalid of ['0', '-5', 'not-a-number', '1.5']) {
     const fx = createPopupFixture({
       ok: true,
-      version: '2.4.0',
+      version: '2.5.0',
       config: { audio_format: 'best', channel_mode: 'stereo', long_audio_minutes: 30 },
       deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
       yt_dlp_status: { outdated: false },
@@ -1299,6 +1341,7 @@ async function main() {
   await testPopupUpdateNote();
   await testPopupAudioFormatAndRsgainGuard();
   await testPopupChannelAndFolder();
+  await testPopupVideoFolderIsIndependentFromAudioFolder();
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   testSignScript();
   testBuildScript();

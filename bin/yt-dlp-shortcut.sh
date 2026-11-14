@@ -206,7 +206,17 @@ notify-send -u low 'yt-dlp auto-download' "Starting $MODE task for: $URL" \
     >/dev/null 2>&1 || true
 
 HOME_DIR=${HOME:-}
-WRAPPER=${YT_DLP_WRAPPER:-$HOME_DIR/.local/bin/yt-dlp-wrapper.py}
+SCRIPT_PATH=${BASH_SOURCE[0]}
+case $SCRIPT_PATH in
+    */*) SCRIPT_DIR=${SCRIPT_PATH%/*}; [[ -n $SCRIPT_DIR ]] || SCRIPT_DIR=/ ;;
+    *) SCRIPT_DIR=. ;;
+esac
+SCRIPT_DIR=$(cd -- "$SCRIPT_DIR" && pwd)
+DEFAULT_WRAPPER="$HOME_DIR/.local/bin/yt-dlp-wrapper.py"
+if [[ -f $SCRIPT_DIR/yt-dlp-wrapper.py ]]; then
+    DEFAULT_WRAPPER="$SCRIPT_DIR/yt-dlp-wrapper.py"
+fi
+WRAPPER=${YT_DLP_WRAPPER:-$DEFAULT_WRAPPER}
 
 terminal_name=${YTDL_TERMINAL:-}
 if [[ -z $terminal_name ]]; then

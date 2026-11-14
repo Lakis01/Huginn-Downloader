@@ -55,7 +55,7 @@ def run_host(messages, trailing=b""):
 @unittest.skipUnless(HOST is not None, "native messaging host has not been implemented")
 class NativeHostTests(unittest.TestCase):
     def test_version_is_current_and_youtube_only_gate_is_removed(self):
-        self.assertEqual(HOST.VERSION, "2.4.0")
+        self.assertEqual(HOST.VERSION, "2.5.0")
         self.assertFalse(hasattr(HOST, "_is_youtube_url"))
         self.assertFalse(hasattr(HOST, "YOUTUBE_HOSTS"))
 
@@ -74,11 +74,12 @@ class NativeHostTests(unittest.TestCase):
         self.assertEqual(len(responses), 2)
         for response in responses:
             self.assertTrue(response["ok"])
-            self.assertEqual(response["version"], "2.4.0")
+            self.assertEqual(response["version"], "2.5.0")
             self.assertEqual(
                 response["config"],
                 {
                     "download_dir": None,
+                    "video_download_dir": "~/Videos/Youtube Downloads",
                     "auto_tag": True,
                     "rsgain": False,
                     "audio_format": "best",
@@ -92,6 +93,10 @@ class NativeHostTests(unittest.TestCase):
                 },
             )
             self.assertEqual(response["effective_download_dir"], str(Path(tmp) / "Music/Youtube Downloads"))
+            self.assertEqual(
+                response["effective_video_download_dir"],
+                str(Path(tmp) / "Videos/Youtube Downloads"),
+            )
             self.assertFalse(response["ytdlp_config_exists"])
             self.assertEqual(response["deps"], {"yt_dlp": True, "ffmpeg": True, "rsgain": True})
 
@@ -115,6 +120,7 @@ class NativeHostTests(unittest.TestCase):
             responses[0]["config"],
             {
                 "download_dir": None,
+                "video_download_dir": "~/Videos/Youtube Downloads",
                 "auto_tag": False,
                 "rsgain": False,
                 "audio_format": "best",

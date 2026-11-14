@@ -1,0 +1,17 @@
+pkgbase = firefox-youtube-downloader-companion
+	pkgdesc = Local Native Messaging companion for Firefox YouTube Downloader
+	pkgver = @VERSION@
+	pkgrel = 1
+	url = https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin
+	arch = any
+	license = MIT
+	depends = yt-dlp
+	depends = ffmpeg
+	depends = python
+	depends = python-mutagen
+	depends = python-pillow
+	optdepends = rsgain: optional ReplayGain normalization
+	source = firefox-youtube-downloader-@VERSION@-source.tar.gz::https://github.com/Lakis01/Firefox-Youtube-Downloader-Plugin/releases/download/v@VERSION@/firefox-youtube-downloader-@VERSION@-source.tar.gz
+	sha256sums = @SOURCE_SHA256@
+
+pkgname = firefox-youtube-downloader-companion

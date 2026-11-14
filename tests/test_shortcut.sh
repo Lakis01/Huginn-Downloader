@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 SHORTCUT="$ROOT/bin/yt-dlp-shortcut.sh"
+SOURCE_WRAPPER="$ROOT/bin/yt-dlp-wrapper.py"
 INSTALLER="$ROOT/install.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT
@@ -85,7 +86,7 @@ assert_launch() {
     [[ -f "$CALL_ARGS" ]] || fail "$label (terminal was not launched)"
     mapfile -t args < "$CALL_ARGS"
     assert_eq '-e' "${args[0]:-}" "$label: Konsole execute option"
-    assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+    assert_eq "$SOURCE_WRAPPER" "${args[1]:-}" "$label: wrapper path"
     assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
     assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
     assert_eq "$url" "${args[4]:-}" "$label: URL argument"
@@ -98,14 +99,14 @@ assert_terminal_args() {
     mapfile -t args < "$CALL_ARGS"
     if [[ $separator == '-e' || $separator == '-x' ]]; then
         assert_eq "$separator" "${args[0]:-}" "$label: terminal separator"
-        assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+        assert_eq "$SOURCE_WRAPPER" "${args[1]:-}" "$label: wrapper path"
         assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
         assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
         assert_eq "$url" "${args[4]:-}" "$label: URL argument"
         assert_eq 5 "${#args[@]}" "$label: argument count"
     else
         assert_eq '--' "${args[0]:-}" "$label: terminal separator"
-        assert_eq "$TMP/home/.local/bin/yt-dlp-wrapper.py" "${args[1]:-}" "$label: wrapper path"
+        assert_eq "$SOURCE_WRAPPER" "${args[1]:-}" "$label: wrapper path"
         assert_eq '--wait-keypress' "${args[2]:-}" "$label: wait-keypress option"
         assert_eq "$mode" "${args[3]:-}" "$label: mode argument"
         assert_eq "$url" "${args[4]:-}" "$label: URL argument"
@@ -155,6 +156,18 @@ for terminal_spec in \
     assert_terminal_args "$terminal" "$separator" cut 'https://vimeo.com/12345' "$terminal argv"
 done
 pass 'uses the required argv shape for every supported terminal emulator'
+
+system_package_dir="$TMP/usr/lib/firefox-youtube-downloader"
+mkdir -p "$system_package_dir" "$TMP/system-package-home"
+cp -- "$SHORTCUT" "$system_package_dir/yt-dlp-shortcut.sh"
+cp -- "$SOURCE_WRAPPER" "$system_package_dir/yt-dlp-wrapper.py"
+rm -f -- "$CALL_ARGS"
+HOME="$TMP/system-package-home" YTDL_TERMINAL=konsole \
+    "$system_package_dir/yt-dlp-shortcut.sh" audio "$valid_url"
+mapfile -t package_args < "$CALL_ARGS"
+assert_eq "$system_package_dir/yt-dlp-wrapper.py" "${package_args[1]:-}" \
+    'system package shortcut resolves its sibling wrapper'
+pass 'system package shortcut uses the wrapper installed beside it'
 
 for unsafe_url in \
     'file:///etc/passwd' \
@@ -475,6 +488,7 @@ home = Path(sys.argv[1])
 config = json.loads((home / ".config/youtube-downloader/config.json").read_text())
 assert config == {
     "download_dir": "~/Music/Youtube Downloads",
+    "video_download_dir": "~/Videos/Youtube Downloads",
     "auto_tag": True,
     "rsgain": False,
     "audio_format": "best",
@@ -576,6 +590,7 @@ if process.returncode != 0:
 config = json.loads((Path(home) / ".config/youtube-downloader/config.json").read_text())
 assert config == {
     "download_dir": "~/Downloads/Youtube",
+    "video_download_dir": "~/Videos/Youtube Downloads",
     "auto_tag": False,
     "rsgain": True,
     "audio_format": "best",
@@ -604,6 +619,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     config = json.load(stream)
 assert config["download_dir"] is None, config
+assert config["video_download_dir"] == "~/Videos/Youtube Downloads", config
 assert config["auto_tag"] is True, config
 assert config["rsgain"] is False, config
 assert config["audio_format"] == "best", config
@@ -622,6 +638,7 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     config = json.load(stream)
 assert config == {
     "download_dir": None,
+    "video_download_dir": "~/Videos/Youtube Downloads",
     "auto_tag": True,
     "rsgain": True,
     "audio_format": "best",
@@ -657,8 +674,10 @@ STUB
 chmod +x "$macos_stubs/uname"
 macos_home="$TMP/macos-home"
 HOME="$macos_home" PATH="$macos_stubs:$PATH" "$INSTALLER" --check-deps > "$TMP/macos-check-deps.out"
-assert_file_contains "$TMP/macos-check-deps.out" 'brew install yt-dlp ffmpeg rsgain python pillow' \
+assert_file_contains "$TMP/macos-check-deps.out" 'brew install yt-dlp ffmpeg python pillow' \
     'macOS dependency suggestions'
+assert_file_contains "$TMP/macos-check-deps.out" 'Optional ReplayGain: brew install rsgain' \
+    'macOS rsgain remains optional'
 HOME="$macos_home" PATH="$macos_stubs:$PATH" "$INSTALLER" --install --yes > "$TMP/macos-install.out"
 macos_manifest="$macos_home/Library/Application Support/Mozilla/NativeMessagingHosts/firefox_youtube_downloader.json"
 [[ -f "$macos_manifest" ]] || fail 'macOS Native Messaging manifest was not installed'
@@ -667,5 +686,84 @@ macos_manifest="$macos_home/Library/Application Support/Mozilla/NativeMessagingH
 [[ ! -e "$macos_home/.local/share/applications" ]] \
     || fail 'macOS installer staged Linux desktop entries'
 pass 'macOS check-deps and install use the Library manifest without Linux desktop staging'
+
+apt_stubs="$TMP/apt-stubs"
+mkdir -p "$apt_stubs"
+cat > "$apt_stubs/apt-get" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$APT_LOG"
+STUB
+cat > "$apt_stubs/sudo" <<'STUB'
+#!/usr/bin/env bash
+exec "$@"
+STUB
+chmod +x "$apt_stubs/apt-get" "$apt_stubs/sudo"
+
+apt_helper_log="$TMP/apt-helper.log"
+if ! APT_LOG="$apt_helper_log" PATH="$apt_stubs:$PATH" \
+    bash "$ROOT/scripts/install-apt-deps.sh" > "$TMP/apt-helper.out" 2>&1; then
+    fail 'apt helper runs through the fake apt-get and sudo commands'
+fi
+mapfile -t apt_calls < "$apt_helper_log"
+assert_eq 'update' "${apt_calls[0]:-}" 'apt helper refreshes package metadata first'
+assert_eq 'install -y yt-dlp ffmpeg python3 python3-mutagen python3-pil' \
+    "${apt_calls[1]:-}" 'default apt dependencies include tagging but omit rsgain'
+assert_eq 2 "${#apt_calls[@]}" 'default apt install performs exactly two package-manager calls'
+pass 'apt helper installs core and automatic-tagging dependencies without optional rsgain'
+
+: > "$apt_helper_log"
+if ! APT_LOG="$apt_helper_log" PATH="$apt_stubs:$PATH" \
+    bash "$ROOT/scripts/install-apt-deps.sh" --with-rsgain > "$TMP/apt-rsgain.out" 2>&1; then
+    fail 'apt helper accepts the explicit optional rsgain choice'
+fi
+assert_file_contains "$apt_helper_log" 'install -y yt-dlp ffmpeg python3 python3-mutagen python3-pil rsgain' \
+    'rsgain is included only by the explicit helper option'
+pass 'apt helper includes rsgain only when explicitly requested'
+
+apt_default_log="$TMP/apt-default-install.log"
+HOME="$TMP/no-apt-home" APT_LOG="$apt_default_log" PATH="$apt_stubs:$PATH" \
+    "$INSTALLER" --install --yes > "$TMP/no-apt-install.out"
+[[ ! -e "$apt_default_log" ]] || fail 'ordinary install invoked apt without --install-deps'
+pass 'ordinary --install never invokes apt implicitly'
+
+for invalid_args in '--install-deps' '--install --with-rsgain' '--with-rsgain --install-deps'; do
+    if HOME="$TMP/invalid-apt-home" APT_LOG="$apt_default_log" PATH="$apt_stubs:$PATH" \
+        "$INSTALLER" $invalid_args > "$TMP/invalid-apt-flags.out" 2>&1; then
+        fail "invalid apt dependency flags unexpectedly succeeded: $invalid_args"
+    fi
+done
+pass 'apt dependency flags require --install and --with-rsgain requires --install-deps'
+
+. /etc/os-release
+case " ${ID:-} ${ID_LIKE:-} " in
+    *" debian "*|*" ubuntu "*)
+        for optional in false true; do
+            apt_log="$TMP/apt-installer-$optional.log"
+            install_home="$TMP/apt-installer-home-$optional"
+            args=(--install --yes --install-deps)
+            [[ $optional == true ]] && args+=(--with-rsgain)
+            HOME="$install_home" APT_LOG="$apt_log" PATH="$apt_stubs:$PATH" \
+                "$INSTALLER" "${args[@]}" > "$TMP/apt-installer-$optional.out"
+            assert_file_contains "$apt_log" 'update' "apt update runs before install ($optional)"
+            if [[ $optional == true ]]; then
+                assert_file_contains "$apt_log" 'rsgain' 'installer includes opt-in rsgain'
+            else
+                ! grep -q 'rsgain' "$apt_log" || fail 'default installer unexpectedly included rsgain'
+            fi
+        done
+        pass 'Debian-family installer uses explicit apt opt-in and optional rsgain'
+        ;;
+    *)
+        apt_reject_log="$TMP/apt-reject.log"
+        if HOME="$TMP/unsupported-apt-home" APT_LOG="$apt_reject_log" PATH="$apt_stubs:$PATH" \
+            "$INSTALLER" --install --yes --install-deps > "$TMP/unsupported-apt.out" 2>&1; then
+            fail 'non-Debian installer unexpectedly accepted --install-deps'
+        fi
+        assert_file_contains "$TMP/unsupported-apt.out" 'only supported on Debian-family Linux' \
+            'non-Debian dependency-installation message'
+        [[ ! -e "$apt_reject_log" ]] || fail 'non-Debian installer invoked apt-get'
+        pass 'non-Debian installer refuses apt dependency installation without invoking apt'
+        ;;
+esac
 
 printf '1..%s\n' "$PASS"
