@@ -80,6 +80,24 @@ file themselves and cannot discover it by searching AMO.
     `web-ext-artifacts/`, and copies it to the deterministic release path
     `dist/huginn-signed.xpi`. It exits non-zero when the
     two `AMO_JWT_*` variables are unset or when no signed `.xpi` appears.
+
+On a KDE workstation, maintainers may store AMO credentials in KWallet instead
+of exporting them for each signing run:
+
+```sh
+./scripts/sign-xpi-kwallet.sh
+```
+
+Before the first local signing run, open KWallet Manager and create a
+`Huginn Downloader` folder in your unlocked wallet. Add password entries named
+`AMO_JWT_ISSUER` and `AMO_JWT_SECRET`, using the values from your saved AMO
+credentials. Enter them in KWallet Manager, not in a terminal or chat. The
+wrapper retrieves them locally, does not write them to the repository, `.env`,
+command arguments, or output, then calls the existing signer. KWallet protects
+values at rest, not from malware or other processes running as the same user
+while the wallet is unlocked. The environment-variable flow remains available
+for CI. If the AMO secret was not saved, do not assume it can be shown again;
+create a new credential pair through AMO's credential manager and save it.
 3. Verify it is a valid archive and contains the expected manifest/version:
 
    ```sh
