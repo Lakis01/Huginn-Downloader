@@ -18,7 +18,14 @@ extra conversion when they match your chosen settings.
 ## Screenshots & interface overview
 
 ![Watch-page download pill](docs/screenshots/watch-page-pill.png)
+
+Download options for audio, video and cut integrate seamlessly into youtube ui. This song is an official audio upload (as can be verified by the description) for which the automatic tag extraction was optimized. 
+
 ![Right-click context menu](docs/screenshots/context-menu.png)
+
+Youtube Downloader also adds three options to the context menu. You can also set custom keyboard shortcuts (for download audio, download video, cut) to run Youtube Downloader on whatever link has been copied to the clipboard.
+
+Despite the name Youtube Downloader (as the backend yt-dlp) supports a wide array of media sources (dailymotion, vimeo, bbc, ard, zdf, ...).
 
 Four touchpoints (three to start a download, plus popup settings):
 
