@@ -489,6 +489,7 @@ config = json.loads((home / ".config/youtube-downloader/config.json").read_text(
 assert config == {
     "download_dir": "~/Music/Youtube Downloads",
     "video_download_dir": "~/Videos/Youtube Downloads",
+    "verbose_output": False,
     "auto_tag": True,
     "rsgain": False,
     "audio_format": "best",
@@ -591,6 +592,7 @@ config = json.loads((Path(home) / ".config/youtube-downloader/config.json").read
 assert config == {
     "download_dir": "~/Downloads/Youtube",
     "video_download_dir": "~/Videos/Youtube Downloads",
+    "verbose_output": False,
     "auto_tag": False,
     "rsgain": True,
     "audio_format": "best",
@@ -639,6 +641,7 @@ with open(sys.argv[1], encoding="utf-8") as stream:
 assert config == {
     "download_dir": None,
     "video_download_dir": "~/Videos/Youtube Downloads",
+    "verbose_output": False,
     "auto_tag": True,
     "rsgain": True,
     "audio_format": "best",

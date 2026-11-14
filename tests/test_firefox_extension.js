@@ -782,6 +782,9 @@ function testPopup() {
   assert.ok(js.includes('set_config') || js.includes('setConfig'), 'popup saves via set_config');
   assert.ok(js.includes('auto_tag') || js.includes('autoTag'), 'automatic tag extraction toggle');
   assert.ok(js.includes('rsgain'), 'rsgain toggle');
+  assert.ok(html.includes('id="verboseOutput"'), 'popup has a verbose yt-dlp output toggle');
+  assert.ok(js.includes('verbose_output'), 'popup persists verbose_output');
+  assert.ok(html.includes('Progress and ETA remain visible'), 'toggle explains quiet-mode progress');
   assert.ok(js.includes('download_dir') || js.includes('downloadDir'), 'download folder selection');
   assert.ok(js.includes('install.sh'), 'disconnected state shows the install command');
   assert.ok(js.includes('Retry') || js.includes('retry'), 'retry connection control');
@@ -896,7 +899,7 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
   const document = {
@@ -1167,6 +1170,34 @@ async function testPopupVideoFolderIsIndependentFromAudioFolder() {
   assert.equal('download_dir' in saved.msg.config, false, 'video change does not overwrite audio directory');
 }
 
+async function testPopupVerboseOutputToggleDefaultsOffAndPersists() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function fire(el, type) {
+    const fns = (el.listeners && el.listeners[type]) || [];
+    for (const fn of fns) await fn({ target: el });
+  }
+  const fx = createPopupFixture({
+    ok: true,
+    version: '2.5.0',
+    config: { audio_format: 'best', auto_tag: true, rsgain: false },
+    deps: { yt_dlp: true, ffmpeg: true, rsgain: false },
+    yt_dlp_status: { outdated: false },
+  });
+  fx.triggerReady();
+  await tick(30);
+  const toggle = fx.elements.get('verboseOutput');
+  assert.equal(toggle.checked, false, 'quiet output remains the default for old configs');
+  toggle.checked = true;
+  await fire(toggle, 'change');
+  await tick(10);
+  const saved = [...fx.nativeCalls].reverse().find(
+    (call) => call.msg && call.msg.action === 'set_config' && call.msg.config && 'verbose_output' in call.msg.config,
+  );
+  assert.ok(saved, 'verbose setting is saved through Native Messaging');
+  assert.equal(saved.msg.config.verbose_output, true);
+  assert.equal(toggle.checked, true, 'render after save preserves the verbose selection');
+}
+
 async function testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves() {
   const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   async function fire(el, type) {
@@ -1342,6 +1373,7 @@ async function main() {
   await testPopupAudioFormatAndRsgainGuard();
   await testPopupChannelAndFolder();
   await testPopupVideoFolderIsIndependentFromAudioFolder();
+  await testPopupVerboseOutputToggleDefaultsOffAndPersists();
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   testSignScript();
   testBuildScript();

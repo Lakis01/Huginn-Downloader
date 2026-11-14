@@ -102,6 +102,7 @@ function pushConfig() {
     channel_mode: channelEl && channelEl.value ? channelEl.value : 'stereo',
     embed_thumbnail: $('embedThumbnail') ? $('embedThumbnail').checked : true,
     thumbnail_jpg: $('thumbnailJpg') ? $('thumbnailJpg').checked : false,
+    verbose_output: $('verboseOutput') ? $('verboseOutput').checked : false,
     long_audio_enabled: $('longAudioEnabled') ? $('longAudioEnabled').checked : false,
     long_audio_minutes: longAudioMinutes,
     long_audio_dir: $('longAudioDir') && $('longAudioDir').value.trim() ? $('longAudioDir').value.trim() : '~/Podcasts',
@@ -149,6 +150,7 @@ function renderConnected(response) {
   const config = response.config || {};
   $('autoTag').checked = config.auto_tag !== false;
   $('rsgain').checked = config.rsgain === true;
+  if ($('verboseOutput')) $('verboseOutput').checked = config.verbose_output === true;
   if ($('audioFormat')) $('audioFormat').value = config.audio_format || 'best';
   if ($('mp3Quality')) $('mp3Quality').value = config.mp3_quality || 'V0';
   if ($('channelMode')) {
@@ -295,6 +297,11 @@ function main() {
     if (rsgainMissingNoteEl && lastDeps && lastDeps.rsgain === true) rsgainMissingNoteEl.hidden = true;
     saveConfig({ rsgain: rsgainEl.checked });
   });
+  if ($('verboseOutput')) {
+    $('verboseOutput').addEventListener('change', (event) => {
+      saveConfig({ verbose_output: event.target.checked });
+    });
+  }
   const audioFormatEl = $('audioFormat');
   if (audioFormatEl) {
     audioFormatEl.addEventListener('change', () => {

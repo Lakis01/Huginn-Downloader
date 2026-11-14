@@ -55,6 +55,7 @@ class WindowsConfigTests(unittest.TestCase):
                 {
                     "download_dir": None,
                     "video_download_dir": "~/Videos/Youtube Downloads",
+                    "verbose_output": False,
                     "auto_tag": False,
                     "rsgain": True,
                     "audio_format": "best",
@@ -486,6 +487,7 @@ class WindowsInstallerTests(unittest.TestCase):
                 {
                     "download_dir": None,
                     "video_download_dir": "~/Videos/Youtube Downloads",
+                    "verbose_output": False,
                     "auto_tag": True,
                     "rsgain": False,
                     "audio_format": "best",
@@ -532,6 +534,7 @@ class WindowsInstallerTests(unittest.TestCase):
                 {
                     "download_dir": "~/Custom",
                     "video_download_dir": "~/Videos/Youtube Downloads",
+                    "verbose_output": False,
                     "auto_tag": False,
                     "rsgain": True,
                     "audio_format": "best",

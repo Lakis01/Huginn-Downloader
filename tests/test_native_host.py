@@ -80,6 +80,7 @@ class NativeHostTests(unittest.TestCase):
                 {
                     "download_dir": None,
                     "video_download_dir": "~/Videos/Youtube Downloads",
+                    "verbose_output": False,
                     "auto_tag": True,
                     "rsgain": False,
                     "audio_format": "best",
@@ -108,7 +109,11 @@ class NativeHostTests(unittest.TestCase):
                 [
                     {
                         "action": "set_config",
-                        "config": {"auto_tag": False, "download_dir": ""},
+                        "config": {
+                            "auto_tag": False,
+                            "download_dir": "",
+                            "verbose_output": True,
+                        },
                     }
                 ]
             )
@@ -121,6 +126,7 @@ class NativeHostTests(unittest.TestCase):
             {
                 "download_dir": None,
                 "video_download_dir": "~/Videos/Youtube Downloads",
+                "verbose_output": True,
                 "auto_tag": False,
                 "rsgain": False,
                 "audio_format": "best",
