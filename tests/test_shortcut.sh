@@ -672,4 +672,83 @@ macos_manifest="$macos_home/Library/Application Support/Mozilla/NativeMessagingH
     || fail 'macOS installer staged Linux desktop entries'
 pass 'macOS check-deps and install use the Library manifest without Linux desktop staging'
 
+apt_stubs="$TMP/apt-stubs"
+mkdir -p "$apt_stubs"
+cat > "$apt_stubs/apt-get" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$APT_LOG"
+STUB
+cat > "$apt_stubs/sudo" <<'STUB'
+#!/usr/bin/env bash
+exec "$@"
+STUB
+chmod +x "$apt_stubs/apt-get" "$apt_stubs/sudo"
+
+apt_helper_log="$TMP/apt-helper.log"
+if ! APT_LOG="$apt_helper_log" PATH="$apt_stubs:$PATH" \
+    bash "$ROOT/scripts/install-apt-deps.sh" > "$TMP/apt-helper.out" 2>&1; then
+    fail 'apt helper runs through the fake apt-get and sudo commands'
+fi
+mapfile -t apt_calls < "$apt_helper_log"
+assert_eq 'update' "${apt_calls[0]:-}" 'apt helper refreshes package metadata first'
+assert_eq 'install -y yt-dlp ffmpeg python3 python3-mutagen python3-pil' \
+    "${apt_calls[1]:-}" 'default apt dependencies include tagging but omit rsgain'
+assert_eq 2 "${#apt_calls[@]}" 'default apt install performs exactly two package-manager calls'
+pass 'apt helper installs core and automatic-tagging dependencies without optional rsgain'
+
+: > "$apt_helper_log"
+if ! APT_LOG="$apt_helper_log" PATH="$apt_stubs:$PATH" \
+    bash "$ROOT/scripts/install-apt-deps.sh" --with-rsgain > "$TMP/apt-rsgain.out" 2>&1; then
+    fail 'apt helper accepts the explicit optional rsgain choice'
+fi
+assert_file_contains "$apt_helper_log" 'install -y yt-dlp ffmpeg python3 python3-mutagen python3-pil rsgain' \
+    'rsgain is included only by the explicit helper option'
+pass 'apt helper includes rsgain only when explicitly requested'
+
+apt_default_log="$TMP/apt-default-install.log"
+HOME="$TMP/no-apt-home" APT_LOG="$apt_default_log" PATH="$apt_stubs:$PATH" \
+    "$INSTALLER" --install --yes > "$TMP/no-apt-install.out"
+[[ ! -e "$apt_default_log" ]] || fail 'ordinary install invoked apt without --install-deps'
+pass 'ordinary --install never invokes apt implicitly'
+
+for invalid_args in '--install-deps' '--install --with-rsgain' '--with-rsgain --install-deps'; do
+    if HOME="$TMP/invalid-apt-home" APT_LOG="$apt_default_log" PATH="$apt_stubs:$PATH" \
+        "$INSTALLER" $invalid_args > "$TMP/invalid-apt-flags.out" 2>&1; then
+        fail "invalid apt dependency flags unexpectedly succeeded: $invalid_args"
+    fi
+done
+pass 'apt dependency flags require --install and --with-rsgain requires --install-deps'
+
+. /etc/os-release
+case " ${ID:-} ${ID_LIKE:-} " in
+    *" debian "*|*" ubuntu "*)
+        for optional in false true; do
+            apt_log="$TMP/apt-installer-$optional.log"
+            install_home="$TMP/apt-installer-home-$optional"
+            args=(--install --yes --install-deps)
+            [[ $optional == true ]] && args+=(--with-rsgain)
+            HOME="$install_home" APT_LOG="$apt_log" PATH="$apt_stubs:$PATH" \
+                "$INSTALLER" "${args[@]}" > "$TMP/apt-installer-$optional.out"
+            assert_file_contains "$apt_log" 'update' "apt update runs before install ($optional)"
+            if [[ $optional == true ]]; then
+                assert_file_contains "$apt_log" 'rsgain' 'installer includes opt-in rsgain'
+            else
+                ! grep -q 'rsgain' "$apt_log" || fail 'default installer unexpectedly included rsgain'
+            fi
+        done
+        pass 'Debian-family installer uses explicit apt opt-in and optional rsgain'
+        ;;
+    *)
+        apt_reject_log="$TMP/apt-reject.log"
+        if HOME="$TMP/unsupported-apt-home" APT_LOG="$apt_reject_log" PATH="$apt_stubs:$PATH" \
+            "$INSTALLER" --install --yes --install-deps > "$TMP/unsupported-apt.out" 2>&1; then
+            fail 'non-Debian installer unexpectedly accepted --install-deps'
+        fi
+        assert_file_contains "$TMP/unsupported-apt.out" 'only supported on Debian-family Linux' \
+            'non-Debian dependency-installation message'
+        [[ ! -e "$apt_reject_log" ]] || fail 'non-Debian installer invoked apt-get'
+        pass 'non-Debian installer refuses apt dependency installation without invoking apt'
+        ;;
+esac
+
 printf '1..%s\n' "$PASS"

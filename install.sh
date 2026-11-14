@@ -11,7 +11,7 @@ IS_MACOS=false
 
 usage() {
     cat <<EOF
-Usage: ${0##*/} [--install [--download-dir=<path|ytdlp-default>] [--auto-tag=<true|false>] [--rsgain=<true|false>] [--yes]]
+Usage: ${0##*/} [--install [--download-dir=<path|ytdlp-default>] [--auto-tag=<true|false>] [--rsgain=<true|false>] [--install-deps [--with-rsgain]] [--yes]]
        ${0##*/} --check-deps
        ${0##*/} [--help]
 
@@ -27,6 +27,8 @@ lowercase() {
 INSTALL=false
 CHECK_DEPS=false
 ASSUME_YES=false
+INSTALL_DEPS=false
+WITH_RSGAIN=false
 DOWNLOAD_DIR_SET=false
 AUTO_TAG_SET=false
 RSGAIN_SET=false
@@ -50,6 +52,8 @@ for argument in "$@"; do
     case $argument in
         --install) INSTALL=true ;;
         --check-deps) CHECK_DEPS=true ;;
+        --install-deps) INSTALL_DEPS=true ;;
+        --with-rsgain) WITH_RSGAIN=true ;;
         --yes) ASSUME_YES=true ;;
         --download-dir=*)
             DOWNLOAD_DIR_SET=true
@@ -64,12 +68,16 @@ for argument in "$@"; do
 done
 
 if $CHECK_DEPS; then
-    if $INSTALL || $ASSUME_YES || $DOWNLOAD_DIR_SET || $AUTO_TAG_SET || $RSGAIN_SET; then
+    if $INSTALL || $ASSUME_YES || $DOWNLOAD_DIR_SET || $AUTO_TAG_SET || $RSGAIN_SET || $INSTALL_DEPS || $WITH_RSGAIN; then
         printf '%s\n' '--check-deps cannot be combined with install or configuration options.' >&2
         exit 2
     fi
-elif ! $INSTALL && { $ASSUME_YES || $DOWNLOAD_DIR_SET || $AUTO_TAG_SET || $RSGAIN_SET; }; then
+elif ! $INSTALL && { $ASSUME_YES || $DOWNLOAD_DIR_SET || $AUTO_TAG_SET || $RSGAIN_SET || $INSTALL_DEPS || $WITH_RSGAIN; }; then
     printf '%s\n' 'Installation and configuration options require --install.' >&2
+    exit 2
+fi
+if $WITH_RSGAIN && ! $INSTALL_DEPS; then
+    printf '%s\n' '--with-rsgain requires --install-deps.' >&2
     exit 2
 fi
 
@@ -133,10 +141,34 @@ if $CHECK_DEPS; then
         printf '  missing: Python libraries mutagen, Pillow\n'
     fi
     printf '\nSuggested dependencies (review; this command is not run):\n'
-    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools desktop-file-utils\n'
-    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install yt-dlp ffmpeg rsgain python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools desktop-file-utils\n'
+    printf 'Debian 13.7 (GNOME) [Wayland default]: sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil nodejs libnotify-bin wl-clipboard playerctl qt6-tools-dev-tools desktop-file-utils\n'
+    printf 'LMDE 7 (Cinnamon) [X11 default]: sudo apt install yt-dlp ffmpeg python3 python3-mutagen python3-pil nodejs gnome-terminal libnotify-bin xclip xsel playerctl qt6-tools-dev-tools desktop-file-utils\n'
+    printf 'Optional ReplayGain: sudo apt install rsgain\n'
     printf 'GNOME usually includes kgx or ptyxis; install gnome-terminal only if desired. Clipboard tools: wl-clipboard on Wayland, xclip or xsel on X11.\n'
     exit 0
+fi
+
+if $INSTALL_DEPS; then
+    if $IS_MACOS || [[ ! -r /etc/os-release ]]; then
+        printf '%s\n' 'Automatic apt dependency installation is only supported on Debian-family Linux.' >&2
+        exit 1
+    fi
+    . /etc/os-release
+    distro_ids=" ${ID:-} ${ID_LIKE:-} "
+    case $distro_ids in
+        *" debian "*|*" ubuntu "*) ;;
+        *)
+            printf '%s\n' 'Automatic apt dependency installation is only supported on Debian-family Linux.' >&2
+            exit 1
+            ;;
+    esac
+    command -v apt-get >/dev/null 2>&1 || {
+        printf '%s\n' 'apt-get was not found; install dependencies with this distribution’s package manager.' >&2
+        exit 1
+    }
+    apt_args=()
+    $WITH_RSGAIN && apt_args+=(--with-rsgain)
+    bash "$ROOT/scripts/install-apt-deps.sh" "${apt_args[@]}"
 fi
 
 CONFIG_DEST=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import config_path; print(config_path())')
