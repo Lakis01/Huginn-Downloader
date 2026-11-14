@@ -81,72 +81,78 @@ file themselves and cannot discover it by searching AMO.
     `dist/huginn-signed.xpi`. It exits non-zero when the
     two `AMO_JWT_*` variables are unset or when no signed `.xpi` appears.
 
-On a KDE workstation, maintainers may store AMO credentials in KWallet instead
-of exporting them for each signing run:
+    On a KDE workstation, maintainers may store AMO credentials in KWallet
+    instead of exporting them for each signing run:
 
-```sh
-./scripts/sign-xpi-kwallet.sh
-```
+    ```sh
+    ./scripts/sign-xpi-kwallet.sh
+    ```
 
-Before the first local signing run, open KWallet Manager and create a
-`Huginn Downloader` folder in your unlocked wallet. Add password entries named
-`AMO_JWT_ISSUER` and `AMO_JWT_SECRET`, using the values from your saved AMO
-credentials. Enter them in KWallet Manager, not in a terminal or chat. The
-wrapper retrieves them locally, does not write them to the repository, `.env`,
-command arguments, or output, then calls the existing signer. KWallet protects
-values at rest, not from malware or other processes running as the same user
-while the wallet is unlocked. The environment-variable flow remains available
-for CI. If the AMO secret was not saved, do not assume it can be shown again;
-create a new credential pair through AMO's credential manager and save it.
-3. Verify it is a valid archive and contains the expected manifest/version:
+    Before the first local signing run, open KWallet Manager and create a
+    `Huginn Downloader` folder in your unlocked wallet. Add password entries
+    named `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`, using the values from your saved
+    AMO credentials. Enter them in KWallet Manager, not in a terminal or chat.
+    The wrapper retrieves them locally, does not write them to the repository,
+    `.env`, command arguments, or output, then calls the existing signer.
+    KWallet protects values at rest, not from malware or other processes running
+    as the same user while the wallet is unlocked. The environment-variable
+    flow remains available for CI. If the AMO secret was not saved, do not
+    assume it can be shown again; create a new credential pair through AMO's
+    credential manager and save it.
 
-   ```sh
-   SIGNED_XPI=$(find web-ext-artifacts -maxdepth 1 -name '*.xpi' -print -quit)
-   python3 -m zipfile -t "$SIGNED_XPI"
-   ```
+ 3. Verify it is a valid archive and contains the expected manifest/version:
 
-   Record the exact signed artifact name and its SHA-256 in the release notes
-   if you want users to be able to verify downloads.
+    ```sh
+    SIGNED_XPI=$(find web-ext-artifacts -maxdepth 1 -name '*.xpi' -print -quit)
+    python3 -m zipfile -t "$SIGNED_XPI"
+    ```
+
+    Record the exact signed artifact name and its SHA-256 in the release notes
+    if you want users to be able to verify downloads.
+
  4. Create a **draft** GitHub Release for the matching source tag/version,
-    attaching `dist/huginn-signed.xpi`. Create and push the
-   tag explicitly first so the `push.tags` package workflow has a ref to run
-   against; then create the draft for that existing tag. For example:
+    attaching `dist/huginn-signed.xpi`. Create and push the tag explicitly
+    first so the `push.tags` package workflow has a ref to run against; then
+    create the draft for that existing tag. For example:
 
-   ```sh
+    ```sh
     VERSION=2.5.1
-   TAG="v$VERSION"
-   git tag -a "$TAG" -m "$TAG"
-   git push origin "$TAG"
+    TAG="v$VERSION"
+    git tag -a "$TAG" -m "$TAG"
+    git push origin "$TAG"
     gh release create "$TAG" dist/huginn-signed.xpi \
-     --draft --verify-tag --target main \
+      --draft --verify-tag --target main \
       --title "Huginn Downloader $VERSION" \
-     --notes-file release-notes.md
-   ```
+      --notes-file release-notes.md
+    ```
 
-   Include a short release note, the companion installation link, and the
-   locally required `yt-dlp` and FFmpeg dependencies. Never attach API
-   credentials. The tag starts the Linux package workflow; it waits for this
-   draft before uploading packages.
-5. Wait for **Build Linux release packages** to finish. It builds and attaches
-   the Debian `.deb`, Fedora `.rpm`, a tagged source archive, and an Arch
-   `PKGBUILD`/`.SRCINFO` recipe archive. If the tag-push run did not start,
-   manually dispatch it with `upload_to_draft=true` and the release tag:
+    Include a short release note, the companion installation link, and the
+    locally required `yt-dlp` and FFmpeg dependencies. Never attach API
+    credentials. The tag starts the Linux package workflow; it waits for this
+    draft before uploading packages.
 
-   ```sh
+ 5. Wait for **Build Linux release packages** to finish. It builds and attaches
+    the Debian `.deb`, Fedora `.rpm`, a tagged source archive, and an Arch
+    `PKGBUILD`/`.SRCINFO` recipe archive. If the tag-push run did not start,
+    manually dispatch it with `upload_to_draft=true` and the release tag:
+
+    ```sh
     gh workflow run release-linux-packages.yml --ref v2.5.1 \
       -f upload_to_draft=true -f release_tag=v2.5.1
-   ```
+    ```
 
-   Verify all assets and their displayed SHA-256 digests, then publish the
-   draft. The workflow never publishes the release or submits to a distro
-   repository.
-6. For the next update, increment `manifest.json`'s `version` before building
-   or signing, rerun tests, and submit the new source with `--channel=unlisted`.
-   Replace the old attached XPI; AMO signatures are per submitted version.
-7. Install on each laptop with Firefox's **Add-ons and themes → gear → Install
-   Add-on From File…** action, then install the matching OS companion using the
-   README instructions. On managed Firefox installations, follow the
-   organization's extension policy.
+    Verify all assets and their displayed SHA-256 digests, then publish the
+    draft. The workflow never publishes the release or submits to a distro
+    repository.
+
+ 6. For the next update, increment `manifest.json`'s `version` before building
+    or signing, rerun tests, and submit the new source with `--channel=unlisted`.
+    Replace the old attached XPI; AMO signatures are per submitted version.
+
+ 7. Install on each laptop with Firefox's **Add-ons and themes → gear → Install
+    Add-on From File…** action, then install the matching OS companion using the
+    README instructions. On managed Firefox installations, follow the
+    organization's extension policy.
 
 The direct XPI is still subject to Mozilla signing and review policies. Do not
 promise that signing is instantaneous; AMO can queue or reject a submission.

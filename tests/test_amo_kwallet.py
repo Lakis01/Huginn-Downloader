@@ -23,12 +23,33 @@ class KWalletSigningTests(unittest.TestCase):
             "if '--read-password' in args:\n"
             "    entry = args[args.index('--read-password') + 1]\n"
             "    path = pathlib.Path(os.environ['KWALLET_VALUES']) / entry\n"
-            "    sys.stdout.buffer.write(path.read_bytes())\n"
+            "    try:\n"
+            "        value = path.read_bytes()\n"
+            "    except FileNotFoundError:\n"
+            "        print(f'Failed to read entry {entry} from wallet')\n"
+            "        raise SystemExit(4)\n"
+            "    if os.environ.get('KWALLET_ERROR'):\n"
+            "        print(os.environ['KWALLET_ERROR'])\n"
+            "        raise SystemExit(int(os.environ.get('KWALLET_EXIT_CODE', '2')))\n"
+            "    sys.stdout.buffer.write(value)\n"
             "else:\n"
             "    raise SystemExit(2)\n",
             encoding="utf-8",
         )
         script.chmod(0o755)
+
+    def test_amo_publishing_keeps_kwallet_guidance_inside_unlisted_steps(self):
+        text = (ROOT / "docs/AMO-PUBLISHING.md").read_text(encoding="utf-8")
+        section = text.split("## Option A", 1)[1].split("## Option B", 1)[0]
+        lines = section.splitlines()
+        step_two = next(index for index, line in enumerate(lines) if "2. Wait for the command" in line)
+        kwallet = next(index for index, line in enumerate(lines) if "On a KDE workstation" in line)
+        step_three = next(index for index, line in enumerate(lines) if "3. Verify it is a valid archive" in line)
+
+        self.assertLess(step_two, kwallet)
+        self.assertLess(kwallet, step_three)
+        self.assertTrue(lines[kwallet].startswith("    "), "KWallet guidance remains inside step 2")
+        self.assertTrue(lines[step_three].startswith(" 3."), "step 3 continues the signing checklist")
 
     def test_kwallet_signer_passes_credentials_to_signer_without_printing(self):
         issuer = "user:12345:67"
@@ -68,7 +89,7 @@ class KWalletSigningTests(unittest.TestCase):
             }
 
             result = subprocess.run(
-                ["/bin/bash", str(sign_wrapper)],
+                ["/bin/bash", str(sign_wrapper), "--channel=unlisted", "argument with spaces"],
                 text=True,
                 capture_output=True,
                 env=env,
@@ -81,7 +102,7 @@ class KWalletSigningTests(unittest.TestCase):
 
         self.assertEqual(captured["issuer"], issuer)
         self.assertEqual(captured["secret"], secret)
-        self.assertEqual(captured["argv"], [])
+        self.assertEqual(captured["argv"], ["--channel=unlisted", "argument with spaces"])
         self.assertEqual(
             calls,
             [
@@ -133,6 +154,153 @@ class KWalletSigningTests(unittest.TestCase):
         self.assertIn("AMO_JWT_ISSUER", result.stderr)
         self.assertNotIn("setup-amo-credentials-kwallet.sh", result.stderr)
         self.assertFalse(signer_called.exists())
+        self.assertNotIn("fixture-secret", result.stdout + result.stderr)
+        self.assertNotIn("Failed to read entry", result.stdout + result.stderr)
+
+    def test_kwallet_signer_fails_closed_when_kwallet_query_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            repo = tmp_path / "checkout"
+            scripts_dir = repo / "scripts"
+            scripts_dir.mkdir(parents=True)
+            sign_wrapper = scripts_dir / "sign-xpi-kwallet.sh"
+            sign_wrapper.write_bytes((ROOT / "scripts/sign-xpi-kwallet.sh").read_bytes())
+            signer_called = tmp_path / "signer-called"
+            (scripts_dir / "sign-xpi.sh").write_text(
+                "#!/bin/bash\ntouch \"$SIGNER_CALLED\"\n", encoding="utf-8"
+            )
+            (scripts_dir / "sign-xpi.sh").chmod(0o755)
+            stub_dir = tmp_path / "bin"
+            stub_dir.mkdir()
+            (stub_dir / "dirname").write_text(
+                "#!/bin/bash\nprintf '%s\\n' \"$FIXTURE_SCRIPTS\"\n", encoding="utf-8"
+            )
+            (stub_dir / "pwd").write_text("#!/bin/bash\nbuiltin pwd\n", encoding="utf-8")
+            (stub_dir / "dirname").chmod(0o755)
+            (stub_dir / "pwd").chmod(0o755)
+            result = subprocess.run(
+                ["/bin/bash", str(sign_wrapper)],
+                text=True,
+                capture_output=True,
+                env=os.environ | {
+                    "PATH": str(stub_dir),
+                    "FIXTURE_SCRIPTS": str(scripts_dir),
+                    "SIGNER_CALLED": str(signer_called),
+                },
+                cwd=tmp_path,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("kwallet-query was not found", result.stderr)
+        self.assertFalse(signer_called.exists())
+
+    def test_kwallet_signer_rejects_empty_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            repo = tmp_path / "checkout"
+            scripts_dir = repo / "scripts"
+            scripts_dir.mkdir(parents=True)
+            sign_wrapper = scripts_dir / "sign-xpi-kwallet.sh"
+            sign_wrapper.write_bytes((ROOT / "scripts/sign-xpi-kwallet.sh").read_bytes())
+            signer_called = tmp_path / "signer-called"
+            (scripts_dir / "sign-xpi.sh").write_text(
+                "#!/bin/bash\ntouch \"$SIGNER_CALLED\"\n", encoding="utf-8"
+            )
+            (scripts_dir / "sign-xpi.sh").chmod(0o755)
+            stub_dir = tmp_path / "bin"
+            self._install_kwallet_stub(stub_dir)
+            values_dir = tmp_path / "wallet-values"
+            values_dir.mkdir()
+            (values_dir / "AMO_JWT_ISSUER").write_text("fixture-issuer", encoding="utf-8")
+            (values_dir / "AMO_JWT_SECRET").write_text("", encoding="utf-8")
+            result = subprocess.run(
+                ["/bin/bash", str(sign_wrapper)],
+                text=True,
+                capture_output=True,
+                env=os.environ | {
+                    "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+                    "KWALLET_CALLS": str(tmp_path / "wallet-calls.jsonl"),
+                    "KWALLET_VALUES": str(values_dir),
+                    "SIGNER_CALLED": str(signer_called),
+                },
+                cwd=tmp_path,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AMO_JWT_SECRET", result.stderr)
+        self.assertFalse(signer_called.exists())
+        self.assertNotIn("fixture-issuer", result.stdout + result.stderr)
+
+    def test_kwallet_signer_fails_closed_when_wallet_is_locked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            repo = tmp_path / "checkout"
+            scripts_dir = repo / "scripts"
+            scripts_dir.mkdir(parents=True)
+            sign_wrapper = scripts_dir / "sign-xpi-kwallet.sh"
+            sign_wrapper.write_bytes((ROOT / "scripts/sign-xpi-kwallet.sh").read_bytes())
+            signer_called = tmp_path / "signer-called"
+            (scripts_dir / "sign-xpi.sh").write_text(
+                "#!/bin/bash\ntouch \"$SIGNER_CALLED\"\n", encoding="utf-8"
+            )
+            (scripts_dir / "sign-xpi.sh").chmod(0o755)
+            stub_dir = tmp_path / "bin"
+            self._install_kwallet_stub(stub_dir)
+            values_dir = tmp_path / "wallet-values"
+            values_dir.mkdir()
+            (values_dir / "AMO_JWT_ISSUER").write_text("fixture-issuer", encoding="utf-8")
+            (values_dir / "AMO_JWT_SECRET").write_text("fixture-secret", encoding="utf-8")
+
+            result = subprocess.run(
+                ["/bin/bash", str(sign_wrapper)],
+                text=True,
+                capture_output=True,
+                env=os.environ | {
+                    "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+                    "KWALLET_CALLS": str(tmp_path / "wallet-calls.jsonl"),
+                    "KWALLET_VALUES": str(values_dir),
+                    "KWALLET_ERROR": "KWallet is locked",
+                    "KWALLET_EXIT_CODE": "2",
+                    "SIGNER_CALLED": str(signer_called),
+                },
+                cwd=tmp_path,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("KWallet Manager", result.stderr)
+        self.assertFalse(signer_called.exists())
+        self.assertNotIn("KWallet is locked", result.stdout + result.stderr)
+        self.assertNotIn("fixture-secret", result.stdout + result.stderr)
+
+    def test_kwallet_signer_propagates_signer_exit_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            repo = tmp_path / "checkout"
+            scripts_dir = repo / "scripts"
+            scripts_dir.mkdir(parents=True)
+            sign_wrapper = scripts_dir / "sign-xpi-kwallet.sh"
+            sign_wrapper.write_bytes((ROOT / "scripts/sign-xpi-kwallet.sh").read_bytes())
+            (scripts_dir / "sign-xpi.sh").write_text("#!/bin/bash\nexit 23\n", encoding="utf-8")
+            (scripts_dir / "sign-xpi.sh").chmod(0o755)
+            stub_dir = tmp_path / "bin"
+            self._install_kwallet_stub(stub_dir)
+            values_dir = tmp_path / "wallet-values"
+            values_dir.mkdir()
+            (values_dir / "AMO_JWT_ISSUER").write_text("fixture-issuer", encoding="utf-8")
+            (values_dir / "AMO_JWT_SECRET").write_text("fixture-secret", encoding="utf-8")
+            result = subprocess.run(
+                ["/bin/bash", str(sign_wrapper)],
+                text=True,
+                capture_output=True,
+                env=os.environ | {
+                    "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+                    "KWALLET_CALLS": str(tmp_path / "wallet-calls.jsonl"),
+                    "KWALLET_VALUES": str(values_dir),
+                },
+                cwd=tmp_path,
+            )
+
+        self.assertEqual(result.returncode, 23)
         self.assertNotIn("fixture-secret", result.stdout + result.stderr)
 
 
