@@ -22,13 +22,18 @@ is **Huginn Downloader**.
 
 ![Watch-page download pill](docs/screenshots/watch-page-pill.png)
 
-Download options for audio, video and cut integrate seamlessly into youtube ui. This song is an official audio upload (as can be verified by the description) for which the automatic tag extraction was optimized. 
+The watch-page pill starts audio, video, or cut downloads without leaving
+YouTube. The example is an official audio upload; its description shows the
+standard metadata format used by automatic tagging.
 
 ![Right-click context menu](docs/screenshots/context-menu.png)
 
-Youtube Downloader also adds three options to the context menu. You can also set custom keyboard shortcuts (for download audio, download video, cut) to run Youtube Downloader on whatever link has been copied to the clipboard.
+Huginn adds Audio, Video, and Cut Audio actions to Firefox's context menu.
+Custom keyboard shortcuts can run the local helper with the selected, active
+media, or clipboard URL.
 
-Despite the name Youtube Downloader (as the backend yt-dlp) supports a wide array of media sources (dailymotion, vimeo, bbc, ard, zdf, ...).
+Although the watch-page pill is YouTube-specific, the context menu and local
+helper also work with other media sites supported by `yt-dlp`.
 
 Four touchpoints (three to start a download, plus popup settings):
 
