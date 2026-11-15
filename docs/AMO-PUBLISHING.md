@@ -116,7 +116,7 @@ file themselves and cannot discover it by searching AMO.
     create the draft for that existing tag. For example:
 
     ```sh
-    VERSION=2.5.1
+    VERSION=2.5.2
     TAG="v$VERSION"
     git tag -a "$TAG" -m "$TAG"
     git push origin "$TAG"
@@ -137,8 +137,8 @@ file themselves and cannot discover it by searching AMO.
     manually dispatch it with `upload_to_draft=true` and the release tag:
 
     ```sh
-    gh workflow run release-linux-packages.yml --ref v2.5.1 \
-      -f upload_to_draft=true -f release_tag=v2.5.1
+    gh workflow run release-linux-packages.yml --ref v2.5.2 \
+      -f upload_to_draft=true -f release_tag=v2.5.2
     ```
 
     Verify all assets and their displayed SHA-256 digests, then publish the

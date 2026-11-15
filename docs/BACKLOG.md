@@ -5,10 +5,7 @@
 - Removed the remote `feature/youtube-downloader-sdd` branch after confirming its PR (#1) was merged and it had no unique commits versus `main`.
 - Replaced the raven artwork with the maintainer-selected generated logo. Added an identically cropped transparent SVG, lossless WebP, and lossless AVIF in `docs/logo/`, embedded `docs/logo/huginn-logo.webp` at the top of `README.md`, and wired `extension/icons/huginn-logo.svg` directly into the toolbar and context-menu root.
 - Documented in `README.md` that downloads launch independent sessions and can run in parallel without waiting for an earlier download to finish.
-
-## Next build cycle
-
-- After the maintainer provides three updated screenshots, replace `docs/screenshots/watch-page-pill.png` and `docs/screenshots/context-menu.png`, and add a screenshot of the popup opened from the Firefox toolbar.
+- Replaced `docs/screenshots/context-menu.png` with the rebranded Huginn context-menu capture and added `docs/screenshots/toolbar-popup.png` to `README.md`.
 
 ## Companion distribution
 

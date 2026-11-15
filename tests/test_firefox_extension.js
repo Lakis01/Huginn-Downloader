@@ -74,6 +74,12 @@ function testReadmeBrandAndSetupGuidance() {
   const normalizedReadme = readme.toLowerCase().replace(/\s+/g, ' ');
   assert.ok(readme.startsWith('# Huginn Downloader'), 'README uses the visible project brand');
   assert.ok(readme.includes('docs/logo/huginn-logo.webp'), 'README displays the transparent WebP logo on GitHub');
+  for (const shot of ['docs/screenshots/watch-page-pill.png', 'docs/screenshots/context-menu.png', 'docs/screenshots/toolbar-popup.png']) {
+    assert.ok(readme.includes(shot), `README embeds ${shot}`);
+    assert.ok(fs.existsSync(path.join(ROOT, shot)), `${shot} exists on disk`);
+  }
+  assert.ok(!readme.includes('predates the v2.5.1 rebrand'), 'stale pre-rebrand screenshot disclaimer is removed');
+  assert.ok(readme.includes('huginn-companion_2.5.2_all.deb'), 'README points Linux package examples to 2.5.2');
   assert.ok(
     normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
     'README explains that multiple downloads can run in parallel without waiting'
