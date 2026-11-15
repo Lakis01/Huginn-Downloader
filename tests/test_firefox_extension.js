@@ -38,7 +38,17 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.1', 'manifest version is 2.5.1');
+  assert.equal(manifest.version, '2.5.2', 'manifest version is 2.5.2');
+  assert.deepEqual(manifest.browser_action.default_icon, {
+    16: 'icons/huginn-logo.svg',
+    32: 'icons/huginn-logo.svg',
+  });
+  assert.deepEqual(manifest.icons, {
+    16: 'icons/huginn-logo.svg',
+    32: 'icons/huginn-logo.svg',
+    48: 'icons/huginn-logo.svg',
+    96: 'icons/huginn-logo.svg',
+  });
   for (const perm of ['nativeMessaging', 'menus', 'activeTab']) {
     assert.ok(manifest.permissions.includes(perm), `permissions include ${perm}`);
   }
@@ -78,14 +88,15 @@ function testReadmeBrandAndSetupGuidance() {
 
 // --- icons ---
 function testIcons() {
-  for (const name of ['plugin.svg', 'audio.svg', 'video.svg', 'cut.svg']) {
+  assert.ok(!fs.existsSync(path.join(ICONS, 'plugin.svg')), 'simplified plugin.svg is removed');
+  for (const name of ['huginn-logo.svg', 'audio.svg', 'video.svg', 'cut.svg']) {
     const raw = readFile(`extension/icons/${name}`);
     assert.ok(raw.includes('<svg'), `${name} has an svg root`);
     assertAsciiNoEmoji(`extension/icons/${name}`, raw);
   }
-  const plugin = readFile('extension/icons/plugin.svg');
-  assert.match(plugin, /rounded|rx=/i, 'plugin badge is rounded');
-  assert.ok(plugin.includes('<title>Huginn Downloader raven</title>'), 'plugin badge is named for the raven brand');
+  const logo = readFile('extension/icons/huginn-logo.svg');
+  assert.equal(logo, readFile('docs/logo/huginn-logo.svg'), 'toolbar icon matches docs/logo/huginn-logo.svg');
+  assert.match(logo, /<title[^>]*>Huginn Downloader raven<\/title>/, 'toolbar icon is named for the raven brand');
   const badgeFills = { 'audio.svg': '#0b6bcb', 'video.svg': '#7c3aed', 'cut.svg': '#b45309' };
   for (const [name, fill] of Object.entries(badgeFills)) {
     const raw = readFile(`extension/icons/${name}`);
@@ -117,7 +128,7 @@ function testBackgroundStatic() {
   assert.ok(src.includes('"Audio"') || src.includes("'Audio'"), 'audio title');
   assert.ok(src.includes('"Video"') || src.includes("'Video'"), 'video title');
   assert.ok(src.includes('Cut Audio'), 'cut title');
-  assert.ok(src.includes('icons/plugin.svg'), 'root uses plugin icon');
+  assert.ok(src.includes('icons/huginn-logo.svg'), 'root uses huginn-logo.svg icon');
   assert.ok(src.includes('icons/audio.svg'), 'audio item uses audio icon');
   assert.ok(src.includes('icons/video.svg'), 'video item uses video icon');
   assert.ok(src.includes('icons/cut.svg'), 'cut item uses cut icon');
@@ -214,7 +225,7 @@ async function testBackgroundBehavior() {
   await new Promise((resolve) => setTimeout(resolve, 0));
   const byId = new Map(created.map((item) => [item.id, item]));
   assert.equal(byId.get('ytdl-root').title, 'Huginn Downloader');
-  assert.equal(JSON.stringify(byId.get('ytdl-root').icons), JSON.stringify({ 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' }));
+  assert.equal(JSON.stringify(byId.get('ytdl-root').icons), JSON.stringify({ 16: 'icons/huginn-logo.svg', 32: 'icons/huginn-logo.svg' }));
   assert.equal(byId.get('ytdl-audio').parentId, 'ytdl-root');
   assert.equal(byId.get('ytdl-audio').title, 'Audio');
   assert.equal(byId.get('ytdl-video').title, 'Video');
@@ -1381,6 +1392,9 @@ function testBuildScript() {
     fs.utimesSync(source, original.atimeMs / 1000, original.mtimeMs / 1000);
   }
   assert.equal(touchedDigest, firstDigest, 'XPI bytes are independent of source file mtimes');
+  const names = execFileSync('python3', ['-c', 'import sys, zipfile; print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))', archive], { encoding: 'utf8' }).trim().split('\n');
+  assert.ok(names.includes('icons/huginn-logo.svg'), 'XPI contains icons/huginn-logo.svg');
+  assert.ok(!names.includes('icons/plugin.svg'), 'XPI omits removed icons/plugin.svg');
 }
 
 async function main() {

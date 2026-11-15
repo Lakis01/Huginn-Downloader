@@ -157,7 +157,7 @@ async function setupMenus() {
       id: 'ytdl-root',
       title: 'Huginn Downloader',
       contexts: MENU_CONTEXTS.slice(),
-      icons: { 16: 'icons/plugin.svg', 32: 'icons/plugin.svg' },
+      icons: { 16: 'icons/huginn-logo.svg', 32: 'icons/huginn-logo.svg' },
     },
     {
       id: 'ytdl-audio',

@@ -15,7 +15,7 @@ REQUIRED = [
     "popup.html",
     "popup.css",
     "popup.js",
-    "icons/plugin.svg",
+    "icons/huginn-logo.svg",
     "icons/audio.svg",
     "icons/video.svg",
     "icons/cut.svg",
