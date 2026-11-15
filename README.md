@@ -1,5 +1,9 @@
 # Huginn Downloader
 
+<p align="center">
+  <img src="docs/logo/huginn-logo.webp" alt="Huginn Downloader raven logo" width="160">
+</p>
+
 Huginn Downloader is a Firefox extension and a separate local companion. Both
 the Firefox extension and the local companion are required: the extension
 provides the settings popup, YouTube watch-page controls, and browser context
@@ -635,8 +639,8 @@ Run these checks from the repository root. Counts should be updated with the
 suite if tests are added or removed:
 
 ```sh
-python3 -m unittest discover -s tests -v  # 168 Python tests (includes package layout/release tests)
-bash tests/test_shortcut.sh               # 47 launcher/installer checks
+python3 -m unittest discover -s tests -v  # 188 Python tests (includes package layout/release tests)
+bash tests/test_shortcut.sh               # 49 launcher/installer checks
 node tests/test_firefox_extension.js
 bash scripts/build-xpi.sh
 bash scripts/sign-xpi.sh                  # requires AMO_JWT_ISSUER/AMO_JWT_SECRET
