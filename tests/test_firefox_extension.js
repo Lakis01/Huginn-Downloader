@@ -73,6 +73,11 @@ function testReadmeBrandAndSetupGuidance() {
   const readme = readFile('README.md');
   const normalizedReadme = readme.toLowerCase().replace(/\s+/g, ' ');
   assert.ok(readme.startsWith('# Huginn Downloader'), 'README uses the visible project brand');
+  assert.ok(readme.includes('docs/logo/huginn-logo.webp'), 'README displays the transparent WebP logo on GitHub');
+  assert.ok(
+    normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
+    'README explains that multiple downloads can run in parallel without waiting'
+  );
   assert.ok(readme.includes('Pin Huginn Downloader to the toolbar'), 'README tells users to pin the extension');
   assert.ok(normalizedReadme.includes('both the firefox extension and the local companion'), 'README explains both parts are required');
   assert.ok(readme.includes('CachyOS') && readme.includes('KDE'), 'README lists CachyOS + KDE testing');

@@ -12,7 +12,10 @@ menu; the companion connects Firefox to the local
 the extension, and the extension sends nothing to a project-owned server.
 
 `yt-dlp` and FFmpeg run locally on your computer: downloads go directly from
-the source to your machine, without an upload queue or ads. Huginn adds YouTube
+the source to your machine, without an upload queue or ads. Each action starts
+an independent `yt-dlp` session, so you can run multiple audio, video, or cut
+downloads in parallel without waiting for one download to finish before
+starting the next. Huginn adds YouTube
 watch-page controls, a right-click menu, and system keyboard shortcuts, with
 choices for native Opus/M4A, forced Opus, MP3
 (`V0`/`V2`/`V5`/`320k`), Ogg, FLAC, channels, and cover art. Speed depends on
