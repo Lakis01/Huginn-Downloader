@@ -1481,29 +1481,47 @@ function testContentPlaylistCardsAndWatchPrompt() {
     fx.document.body.appendChild(panel);
 
     const buttons = fx.document.querySelector('[data-ytdl-controls]').querySelectorAll('button');
-    // Click Audio -> opens prompt instead of dispatching immediately.
+    // Click Audio -> opens prompt instead of dispatching immediately, and hides Cut.
     buttons[0].dispatchEvent({ type: 'click', target: buttons[0], bubbles: true });
     assert.equal(fx.sentMessages.length, 0, 'playlist watch click prompts before downloading');
+    assert.equal(buttons[2].hidden, true, 'Cut button is hidden while playlist selector is open');
 
     const dialog = fx.document.querySelector('[data-ytdl-playlist-dialog="true"]');
     assert.ok(dialog, 'playlist prompt dialog mounted');
+    const panelBar = panel.querySelector('[data-ytdl-panel-bar="true"]');
+    assert.ok(panelBar, 'side playlist panel mounts batch control bar');
+    const panelDlBtn = panelBar.querySelector('[data-ytdl-panel-download="true"]');
+    assert.equal(panelDlBtn.textContent, 'Download all 5 (audio)', 'side panel button shows dynamic item count');
     const sideChecks = fx.document.querySelectorAll('[data-ytdl-side-checkbox="true"]');
     assert.equal(sideChecks.length, 5, 'graphical checkboxes mounted onto side playlist panel items');
     assert.ok(sideChecks.every((box) => box.checked === true), 'all side checkboxes start checked');
 
-    // "This video only" dispatches playlist: false and closes the dialog.
+    // Panel bar "Deselect all" and "Select all" toggle all checkboxes and label count.
+    const panelNoneBtn = panelBar.querySelector('[data-ytdl-panel-select="none"]');
+    const panelAllBtn = panelBar.querySelector('[data-ytdl-panel-select="all"]');
+    assert.equal(panelNoneBtn.textContent, 'Deselect all');
+    assert.equal(panelAllBtn.textContent, 'Select all');
+    panelNoneBtn.dispatchEvent({ type: 'click', target: panelNoneBtn, bubbles: true });
+    assert.ok(sideChecks.every((box) => box.checked === false), 'Deselect all unchecks all side boxes');
+    panelAllBtn.dispatchEvent({ type: 'click', target: panelAllBtn, bubbles: true });
+    assert.ok(sideChecks.every((box) => box.checked === true), 'Select all re-checks all side boxes');
+
+    // "This video only" dispatches playlist: false, closes the dialog, and restores Cut.
     const singleBtn = dialog.querySelector('[data-ytdl-scope="single"]');
     singleBtn.dispatchEvent({ type: 'click', target: singleBtn, bubbles: true });
     assert.equal(fx.sentMessages.length, 1);
     assert.equal(fx.sentMessages[0].mode, 'audio');
     assert.equal(fx.sentMessages[0].playlist, false);
     assert.equal(fx.document.querySelector('[data-ytdl-playlist-dialog]'), null, 'dialog closes after single selection');
+    assert.equal(fx.document.querySelector('[data-ytdl-panel-bar]'), null, 'side panel toolbar removed on close');
     assert.equal(fx.document.querySelectorAll('[data-ytdl-side-checkbox]').length, 0, 'side checkboxes removed on close');
+    assert.equal(buttons[2].hidden, false, 'Cut button is restored when playlist selector closes');
 
     // Re-open for Video, uncheck item 3 & 5 via side checkboxes -> input becomes "1-2,4".
     buttons[1].dispatchEvent({ type: 'click', target: buttons[1], bubbles: true });
     const dialog2 = fx.document.querySelector('[data-ytdl-playlist-dialog="true"]');
     const sideChecks2 = fx.document.querySelectorAll('[data-ytdl-side-checkbox="true"]');
+    const panelDlBtn2 = panel.querySelector('[data-ytdl-panel-download="true"]');
     sideChecks2[2].checked = false;
     sideChecks2[2].dispatchEvent({ type: 'change', target: sideChecks2[2], bubbles: true });
     sideChecks2[4].checked = false;
@@ -1511,6 +1529,7 @@ function testContentPlaylistCardsAndWatchPrompt() {
 
     const itemsInput = dialog2.querySelector('[data-ytdl-playlist-items="true"]');
     assert.equal(itemsInput.value, '1-2,4', 'side checkboxes sync range text in yt-dlp syntax');
+    assert.equal(panelDlBtn2.textContent, 'Download 3 selected (video)', 'panel download label reflects checked subset');
 
     // Typing "1-3, 5" in input syncs back to side checkboxes.
     itemsInput.value = '1-3, 5';
@@ -1520,15 +1539,106 @@ function testContentPlaylistCardsAndWatchPrompt() {
       [true, true, true, false, true],
       'yt-dlp range input updates side-panel checkboxes',
     );
+    assert.equal(panelDlBtn2.textContent, 'Download 4 selected (video)');
 
-    // Clicking "Download playlist" dispatches playlist: true and normalized playlistItems.
-    const playlistBtn = dialog2.querySelector('[data-ytdl-scope="playlist"]');
-    playlistBtn.dispatchEvent({ type: 'click', target: playlistBtn, bubbles: true });
+    // Clicking side panel download button dispatches playlist: true and normalized playlistItems.
+    panelDlBtn2.dispatchEvent({ type: 'click', target: panelDlBtn2, bubbles: true });
     assert.equal(fx.sentMessages.length, 2);
     assert.equal(fx.sentMessages[1].mode, 'video');
     assert.equal(fx.sentMessages[1].playlist, true);
     assert.equal(fx.sentMessages[1].playlistItems, '1-3,5');
     assert.equal(fx.document.querySelector('[data-ytdl-playlist-dialog]'), null, 'dialog closes after playlist launch');
+    assert.equal(buttons[2].hidden, false, 'Cut button is restored after playlist launch');
+  }
+
+  // Hover preview over playlist card preserves underlying playlist URL + topVideoUrl and supports choice modal.
+  {
+    const fx = createContentFixture({ href: 'https://www.youtube.com/watch?v=v1&list=PLabc' });
+    const responder = fx.messageListeners[0];
+    const panel = fx.document.createElement('ytd-playlist-panel-renderer');
+    const panelRow = fx.document.createElement('ytd-playlist-panel-video-renderer');
+    const rowLink = fx.document.createElement('a');
+    rowLink.setAttribute('href', '/watch?v=v4&list=PLabc&index=4');
+    panelRow.appendChild(rowLink);
+    panel.appendChild(panelRow);
+    fx.document.body.appendChild(panel);
+
+    const previewOverlay = fx.document.createElement('ytd-video-preview');
+    const prevLink = fx.document.createElement('a');
+    prevLink.setAttribute('href', '/watch?v=toppreview1');
+    previewOverlay.appendChild(prevLink);
+    const underlyingPlaylist = fx.document.createElement('ytd-playlist-renderer');
+    const plLink = fx.document.createElement('a');
+    plLink.setAttribute('href', '/playlist?list=PLhover789');
+    underlyingPlaylist.appendChild(plLink);
+    fx.document.body.appendChild(underlyingPlaylist);
+    fx.document.body.appendChild(previewOverlay);
+
+    fx.setHitStackArr([previewOverlay, underlyingPlaylist]);
+    previewOverlay.dispatchEvent({ type: 'contextmenu', target: previewOverlay, bubbles: true, clientX: 20, clientY: 25 });
+    let ctx = null;
+    responder({ type: 'ytdl-get-context-url' }, {}, (r) => { ctx = r; });
+    assert.equal(ctx.url, 'https://www.youtube.com/playlist?list=PLhover789');
+    assert.equal(ctx.isPlaylist, true);
+    assert.equal(ctx.playlistId, 'PLhover789');
+    assert.equal(ctx.topVideoUrl, 'https://www.youtube.com/watch?v=toppreview1');
+
+    // Single row inside side panel stays non-playlist single-track target.
+    fx.setHitStackArr([panelRow]);
+    panelRow.dispatchEvent({ type: 'contextmenu', target: panelRow, bubbles: true, clientX: 22, clientY: 28 });
+    let rowCtx = null;
+    responder({ type: 'ytdl-get-context-url' }, {}, (r) => { rowCtx = r; });
+    assert.equal(rowCtx.url, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
+    assert.ok(!rowCtx.isPlaylist, 'individual playlist panel row stays single-track target');
+
+    // Choice modal: "all", "top", and "select" (graphical selection on matching playlist).
+    let modalReply = null;
+    responder({
+      type: 'ytdl-prompt-playlist-choice',
+      mode: 'audio',
+      url: 'https://www.youtube.com/playlist?list=PLabc',
+      playlistUrl: 'https://www.youtube.com/playlist?list=PLabc',
+      topVideoUrl: 'https://www.youtube.com/watch?v=topA',
+      playlistId: 'PLabc',
+    }, {}, (r) => { modalReply = r; });
+    assert.equal(modalReply && modalReply.shown, true);
+    const modal = fx.document.querySelector('[data-ytdl-context-modal="true"]');
+    assert.ok(modal, 'context playlist choice modal rendered');
+    const allBtn = modal.querySelector('[data-ytdl-context-action="all"]');
+    allBtn.dispatchEvent({ type: 'click', target: allBtn, bubbles: true });
+    assert.equal(fx.sentMessages.length, 1);
+    assert.equal(fx.sentMessages[0].playlist, true);
+    assert.equal(fx.sentMessages[0].url, 'https://www.youtube.com/playlist?list=PLabc');
+
+    responder({
+      type: 'ytdl-prompt-playlist-choice',
+      mode: 'video',
+      url: 'https://www.youtube.com/playlist?list=PLabc',
+      playlistUrl: 'https://www.youtube.com/playlist?list=PLabc',
+      topVideoUrl: 'https://www.youtube.com/watch?v=topA',
+      playlistId: 'PLabc',
+    }, {}, () => {});
+    const modal2 = fx.document.querySelector('[data-ytdl-context-modal="true"]');
+    const topBtn = modal2.querySelector('[data-ytdl-context-action="top"]');
+    topBtn.dispatchEvent({ type: 'click', target: topBtn, bubbles: true });
+    assert.equal(fx.sentMessages.length, 2);
+    assert.equal(fx.sentMessages[1].mode, 'video');
+    assert.equal(fx.sentMessages[1].playlist, false);
+    assert.equal(fx.sentMessages[1].url, 'https://www.youtube.com/watch?v=topA');
+
+    responder({
+      type: 'ytdl-prompt-playlist-choice',
+      mode: 'audio',
+      url: 'https://www.youtube.com/playlist?list=PLabc',
+      playlistUrl: 'https://www.youtube.com/playlist?list=PLabc',
+      topVideoUrl: 'https://www.youtube.com/watch?v=v1',
+      playlistId: 'PLabc',
+    }, {}, () => {});
+    const modal3 = fx.document.querySelector('[data-ytdl-context-modal="true"]');
+    const selectBtn = modal3.querySelector('[data-ytdl-context-action="select"]');
+    selectBtn.dispatchEvent({ type: 'click', target: selectBtn, bubbles: true });
+    assert.equal(fx.document.querySelector('[data-ytdl-context-modal]'), null, 'choice modal closes on graphical select');
+    assert.ok(fx.document.querySelector('[data-ytdl-playlist-dialog="true"]'), 'graphical playlist dialog opens cleanly');
   }
 }
 
@@ -1545,6 +1655,52 @@ async function testBackgroundPlaylistMessageRelay() {
   assert.equal(calls.nativeMessages.length, 1);
   assert.equal(calls.nativeMessages[0].msg.playlist, true);
   assert.equal(calls.nativeMessages[0].msg.playlist_items, '1-3,5');
+
+  // Batch cut requests are stripped to single-track only.
+  await handlers.message({
+    type: 'ytdl-trigger-download',
+    mode: 'cut',
+    url: 'https://www.youtube.com/watch?v=v1&list=PLabc',
+    playlist: true,
+    playlistItems: '1-3',
+  });
+  assert.equal(calls.nativeMessages.length, 2);
+  assert.equal(calls.nativeMessages[1].msg.mode, 'cut');
+  assert.equal(calls.nativeMessages[1].msg.playlist, false);
+  assert.equal('playlist_items' in calls.nativeMessages[1].msg, false);
+}
+
+async function testBackgroundPlaylistContextPromptAndCutGuard() {
+  const { handlers, calls, setTabMessageResponse } = runBackgroundFixture();
+  setTabMessageResponse({
+    url: 'https://www.youtube.com/playlist?list=PLctx1',
+    isPlaylist: true,
+    playlistId: 'PLctx1',
+    playlistUrl: 'https://www.youtube.com/playlist?list=PLctx1',
+    topVideoUrl: 'https://www.youtube.com/watch?v=topctx1&list=PLctx1',
+    shown: true,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  await handlers.clicked(
+    { menuItemId: 'ytdl-audio', pageUrl: 'https://www.youtube.com/' },
+    { id: 19, url: 'https://www.youtube.com/' },
+  );
+  assert.equal(calls.nativeMessages.length, 0, 'right-click audio on playlist prompts before downloading');
+  assert.equal(calls.sentTabMessages.length, 2);
+  assert.equal(calls.sentTabMessages[1].tabId, 19);
+  assert.equal(calls.sentTabMessages[1].msg.type, 'ytdl-prompt-playlist-choice');
+  assert.equal(calls.sentTabMessages[1].msg.mode, 'audio');
+  assert.equal(calls.sentTabMessages[1].msg.playlistId, 'PLctx1');
+
+  await handlers.clicked(
+    { menuItemId: 'ytdl-cut', pageUrl: 'https://www.youtube.com/' },
+    { id: 19, url: 'https://www.youtube.com/' },
+  );
+  assert.equal(calls.nativeMessages.length, 1, 'right-click cut on playlist downloads single track directly');
+  assert.equal(calls.nativeMessages[0].msg.mode, 'cut');
+  assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/watch?v=topctx1&list=PLctx1');
+  assert.equal(calls.nativeMessages[0].msg.playlist, false);
 }
 
 async function testChromiumBuildAndBackground() {
@@ -1640,6 +1796,7 @@ async function main() {
   await testBackgroundRemoveAllOrdering();
   await testBackgroundSrcAndFrameFallbacks();
   await testBackgroundPlaylistMessageRelay();
+  await testBackgroundPlaylistContextPromptAndCutGuard();
   testContentCss();
   testContentStatic();
   testContentBehavior();

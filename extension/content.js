@@ -10,6 +10,14 @@
     'ytd-grid-playlist-renderer',
     'ytd-compact-playlist-renderer',
   ].join(', ');
+  const PREVIEW_CARD_SELECTOR = [
+    'ytd-video-preview',
+    '#video-preview',
+  ].join(', ');
+  const PLAYLIST_ITEM_SELECTOR = [
+    'ytd-playlist-panel-video-renderer',
+    'ytd-playlist-video-renderer',
+  ].join(', ');
   const CARD_SELECTOR = [
     'ytd-rich-item-renderer',
     'ytd-video-renderer',
@@ -58,11 +66,14 @@
   };
 
   let lastContextUrl = null;
+  let lastContextInfo = null;
   let lastPointerUrl = null;
+  let lastPointerInfo = null;
   let lastPointerAt = 0;
   let lastPointerDownAt = 0;
   let refreshTimer = null;
   let activePromptUrl = null;
+  const PENDING_SELECT_KEY = 'ytdl_pending_playlist_select';
 
   function ext() {
     if (typeof browser !== 'undefined' && browser) return browser;
@@ -206,25 +217,7 @@
   }
 
   function triggerDownload(mode, options) {
-    const api = ext();
-    if (!api || !api.runtime) return;
-    const message = {
-      type: 'ytdl-trigger-download',
-      mode,
-      url: pageLocation().href,
-    };
-    if (options && typeof options.playlist === 'boolean') {
-      message.playlist = options.playlist;
-    }
-    if (options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
-      message.playlistItems = options.playlistItems.trim();
-    }
-    try {
-      const result = api.runtime.sendMessage(message);
-      if (result && typeof result.catch === 'function') result.catch(() => {});
-    } catch (_error) {
-      // Background may be unreachable; the menu path still applies.
-    }
+    dispatchTriggerDownload(mode, pageLocation().href, options);
   }
 
   function markLaunching(button) {
@@ -235,10 +228,25 @@
     else reset();
   }
 
+  function setCutButtonsHidden(isHidden) {
+    for (const cutBtn of document.querySelectorAll('[data-ytdl-mode="cut"]')) {
+      cutBtn.hidden = Boolean(isHidden);
+      if (isHidden) {
+        cutBtn.setAttribute('hidden', '');
+      } else {
+        cutBtn.removeAttribute('hidden');
+      }
+    }
+  }
+
   function closePlaylistPrompt() {
     activePromptUrl = null;
+    setCutButtonsHidden(false);
     for (const dialog of document.querySelectorAll('[data-ytdl-playlist-dialog]')) {
       dialog.remove();
+    }
+    for (const bar of document.querySelectorAll('[data-ytdl-panel-bar]')) {
+      bar.remove();
     }
     for (const check of document.querySelectorAll('[data-ytdl-side-check]')) {
       check.remove();
@@ -250,7 +258,10 @@
   }
 
   function collectPlaylistPanelItems() {
-    const renderers = Array.from(document.querySelectorAll('ytd-playlist-panel-video-renderer'));
+    let renderers = Array.from(document.querySelectorAll('ytd-playlist-panel-video-renderer'));
+    if (renderers.length === 0) {
+      renderers = Array.from(document.querySelectorAll('ytd-playlist-video-renderer'));
+    }
     const items = [];
     renderers.forEach((renderer, idx) => {
       let itemIndex = idx + 1;
@@ -288,24 +299,32 @@
 
     const metadata = document.querySelector('ytd-watch-metadata');
     const topRow = metadata && metadata.querySelector('#top-row');
-    if (!metadata || !topRow) {
+    const panelItems = collectPlaylistPanelItems();
+    const canAttachWatchDialog = Boolean(metadata && topRow);
+    if (!canAttachWatchDialog && panelItems.length === 0) {
       markLaunching(triggerButton);
       triggerDownload(mode);
       return;
     }
 
     activePromptUrl = pageLocation().href;
-    const panelItems = collectPlaylistPanelItems();
+    setCutButtonsHidden(true);
+
     const maxIndex = panelItems.reduce((acc, item) => Math.max(acc, item.itemIndex), 0);
     const allIndices = Array.from(new Set(panelItems.map((item) => item.itemIndex))).sort((a, b) => a - b);
 
     const sideCheckboxes = [];
     const dialogCheckboxes = [];
     let emptySelection = false;
+    let panelDownloadBtn = null;
+    let footerSubmitBtn = null;
 
     const dialog = document.createElement('div');
     dialog.setAttribute('data-ytdl-playlist-dialog', 'true');
     dialog.setAttribute('data-ytdl-dialog-mode', mode);
+    if (!canAttachWatchDialog) {
+      dialog.setAttribute('data-ytdl-dialog-floating', 'true');
+    }
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-label', 'Playlist download options');
 
@@ -334,9 +353,10 @@
     const playlistBtn = document.createElement('button');
     playlistBtn.setAttribute('type', 'button');
     playlistBtn.setAttribute('data-ytdl-scope', 'playlist');
-    playlistBtn.textContent = 'Download playlist';
 
-    actionsRow.appendChild(singleBtn);
+    if (canAttachWatchDialog) {
+      actionsRow.appendChild(singleBtn);
+    }
     actionsRow.appendChild(playlistBtn);
     dialog.appendChild(actionsRow);
 
@@ -360,7 +380,7 @@
     const selectNoneBtn = document.createElement('button');
     selectNoneBtn.setAttribute('type', 'button');
     selectNoneBtn.setAttribute('data-ytdl-select', 'none');
-    selectNoneBtn.textContent = 'Select none';
+    selectNoneBtn.textContent = 'Deselect all';
 
     itemsRow.appendChild(itemsLabel);
     itemsRow.appendChild(itemsInput);
@@ -385,6 +405,37 @@
       errorNote.removeAttribute('hidden');
     };
 
+    const getCheckedCount = () => {
+      const boxes = sideCheckboxes.length ? sideCheckboxes : dialogCheckboxes;
+      const seen = new Set();
+      for (const box of boxes) {
+        const idx = Number.parseInt(box.getAttribute('data-ytdl-item-index') || '', 10);
+        if (box.checked && Number.isInteger(idx)) seen.add(idx);
+      }
+      return seen.size;
+    };
+
+    const updateDownloadButtonLabels = () => {
+      const modeLabel = mode === 'audio' ? 'audio' : 'video';
+      const totalCount = allIndices.length;
+      const checkedCount = getCheckedCount();
+      let labelText;
+      if (totalCount === 0) {
+        labelText = itemsInput.value.trim()
+          ? `Download selected (${modeLabel})`
+          : `Download playlist (${modeLabel})`;
+      } else if (checkedCount === totalCount) {
+        labelText = `Download all ${totalCount} (${modeLabel})`;
+      } else if (checkedCount > 0) {
+        labelText = `Download ${checkedCount} selected (${modeLabel})`;
+      } else {
+        labelText = `Select items (${modeLabel})`;
+      }
+      playlistBtn.textContent = labelText;
+      if (footerSubmitBtn) footerSubmitBtn.textContent = labelText;
+      if (panelDownloadBtn) panelDownloadBtn.textContent = labelText;
+    };
+
     const syncInputFromCheckboxes = () => {
       const checkedIndices = [];
       const seen = new Set();
@@ -406,6 +457,7 @@
         emptySelection = false;
         itemsInput.value = formatPlaylistItemsSpec(checkedIndices);
       }
+      updateDownloadButtonLabels();
     };
 
     const setIndexChecked = (targetIdx, isChecked) => {
@@ -415,9 +467,96 @@
       }
     };
 
+    const handleSelectAll = () => {
+      emptySelection = false;
+      hideError();
+      for (const box of [...sideCheckboxes, ...dialogCheckboxes]) box.checked = true;
+      itemsInput.value = '';
+      updateDownloadButtonLabels();
+    };
+
+    const handleDeselectAll = () => {
+      emptySelection = true;
+      hideError();
+      for (const box of [...sideCheckboxes, ...dialogCheckboxes]) box.checked = false;
+      itemsInput.value = '';
+      updateDownloadButtonLabels();
+    };
+
+    const handlePlaylistSubmit = () => {
+      const parsed = parsePlaylistItemsSpec(itemsInput.value, maxIndex);
+      if (!parsed.valid) {
+        showError('Invalid yt-dlp playlist syntax. Examples: 1-5, 8, 1:5:2, -3::1');
+        return;
+      }
+      if (!itemsInput.value.trim() && emptySelection && panelItems.length > 0) {
+        showError('Select at least one playlist item or enter a yt-dlp range.');
+        return;
+      }
+      markLaunching(triggerButton);
+      triggerDownload(mode, {
+        playlist: true,
+        playlistItems: parsed.normalized || undefined,
+      });
+      closePlaylistPrompt();
+    };
+
     const listEl = document.createElement('div');
     listEl.setAttribute('data-ytdl-playlist-list', 'true');
     const seenDialogIndices = new Set();
+
+    if (panelItems.length > 0 && panelItems[0].renderer && panelItems[0].renderer.parentNode) {
+      const panelBar = document.createElement('div');
+      panelBar.setAttribute('data-ytdl-panel-bar', 'true');
+      for (const evtName of ['click', 'pointerdown', 'mousedown']) {
+        panelBar.addEventListener(evtName, stopInteractivePropagation);
+      }
+      const panelTitle = document.createElement('span');
+      panelTitle.setAttribute('data-ytdl-panel-title', 'true');
+      panelTitle.textContent = `Huginn batch (${mode}):`;
+
+      const panelSelectAllBtn = document.createElement('button');
+      panelSelectAllBtn.setAttribute('type', 'button');
+      panelSelectAllBtn.setAttribute('data-ytdl-panel-select', 'all');
+      panelSelectAllBtn.textContent = 'Select all';
+      panelSelectAllBtn.addEventListener('click', (evt) => {
+        stopInteractivePropagation(evt);
+        handleSelectAll();
+      });
+
+      const panelDeselectAllBtn = document.createElement('button');
+      panelDeselectAllBtn.setAttribute('type', 'button');
+      panelDeselectAllBtn.setAttribute('data-ytdl-panel-select', 'none');
+      panelDeselectAllBtn.textContent = 'Deselect all';
+      panelDeselectAllBtn.addEventListener('click', (evt) => {
+        stopInteractivePropagation(evt);
+        handleDeselectAll();
+      });
+
+      panelDownloadBtn = document.createElement('button');
+      panelDownloadBtn.setAttribute('type', 'button');
+      panelDownloadBtn.setAttribute('data-ytdl-panel-download', 'true');
+      panelDownloadBtn.addEventListener('click', (evt) => {
+        stopInteractivePropagation(evt);
+        handlePlaylistSubmit();
+      });
+
+      const panelCloseBtn = document.createElement('button');
+      panelCloseBtn.setAttribute('type', 'button');
+      panelCloseBtn.setAttribute('data-ytdl-panel-close', 'true');
+      panelCloseBtn.textContent = 'Cancel';
+      panelCloseBtn.addEventListener('click', (evt) => {
+        stopInteractivePropagation(evt);
+        closePlaylistPrompt();
+      });
+
+      panelBar.appendChild(panelTitle);
+      panelBar.appendChild(panelSelectAllBtn);
+      panelBar.appendChild(panelDeselectAllBtn);
+      panelBar.appendChild(panelDownloadBtn);
+      panelBar.appendChild(panelCloseBtn);
+      panelItems[0].renderer.parentNode.insertBefore(panelBar, panelItems[0].renderer);
+    }
 
     for (const item of panelItems) {
       const sideLabel = document.createElement('label');
@@ -465,32 +604,33 @@
 
     if (panelItems.length > 0) {
       dialog.appendChild(listEl);
+      const footer = document.createElement('div');
+      footer.setAttribute('data-ytdl-dialog-footer', 'true');
+      footerSubmitBtn = document.createElement('button');
+      footerSubmitBtn.setAttribute('type', 'button');
+      footerSubmitBtn.setAttribute('data-ytdl-scope', 'playlist-submit');
+      footerSubmitBtn.addEventListener('click', handlePlaylistSubmit);
+      footer.appendChild(footerSubmitBtn);
+      dialog.appendChild(footer);
     }
 
     itemsInput.addEventListener('input', () => {
       emptySelection = false;
       const parsed = parsePlaylistItemsSpec(itemsInput.value, maxIndex);
-      if (!parsed.valid) return;
+      if (!parsed.valid) {
+        updateDownloadButtonLabels();
+        return;
+      }
       hideError();
       for (const box of [...sideCheckboxes, ...dialogCheckboxes]) {
         const idx = Number.parseInt(box.getAttribute('data-ytdl-item-index') || '', 10);
         box.checked = parsed.all || parsed.indices.has(idx);
       }
+      updateDownloadButtonLabels();
     });
 
-    selectAllBtn.addEventListener('click', () => {
-      emptySelection = false;
-      hideError();
-      for (const box of [...sideCheckboxes, ...dialogCheckboxes]) box.checked = true;
-      itemsInput.value = '';
-    });
-
-    selectNoneBtn.addEventListener('click', () => {
-      emptySelection = true;
-      hideError();
-      for (const box of [...sideCheckboxes, ...dialogCheckboxes]) box.checked = false;
-      itemsInput.value = '';
-    });
+    selectAllBtn.addEventListener('click', handleSelectAll);
+    selectNoneBtn.addEventListener('click', handleDeselectAll);
 
     singleBtn.addEventListener('click', () => {
       markLaunching(triggerButton);
@@ -498,25 +638,16 @@
       closePlaylistPrompt();
     });
 
-    playlistBtn.addEventListener('click', () => {
-      const parsed = parsePlaylistItemsSpec(itemsInput.value, maxIndex);
-      if (!parsed.valid) {
-        showError('Invalid yt-dlp playlist syntax. Examples: 1-5, 8, 1:5:2, -3::1');
-        return;
-      }
-      if (!itemsInput.value.trim() && emptySelection && panelItems.length > 0) {
-        showError('Select at least one playlist item or enter a yt-dlp range.');
-        return;
-      }
-      markLaunching(triggerButton);
-      triggerDownload(mode, {
-        playlist: true,
-        playlistItems: parsed.normalized || undefined,
-      });
-      closePlaylistPrompt();
-    });
+    playlistBtn.addEventListener('click', handlePlaylistSubmit);
 
-    metadata.insertBefore(dialog, topRow.nextSibling || null);
+    updateDownloadButtonLabels();
+
+    if (canAttachWatchDialog) {
+      metadata.insertBefore(dialog, topRow.nextSibling || null);
+    } else {
+      const host = document.body || document.documentElement;
+      if (host) host.appendChild(dialog);
+    }
   }
 
   function makeGroup() {
@@ -547,18 +678,67 @@
     return group;
   }
 
-  function removeGroups() {
-    closePlaylistPrompt();
+  function findTriggerButton(mode) {
+    const controls = document.querySelector(GROUP_SELECTOR);
+    if (!controls) return null;
+    for (const btn of controls.querySelectorAll('button')) {
+      if (btn.getAttribute && btn.getAttribute('data-ytdl-mode') === mode) return btn;
+    }
+    return null;
+  }
+
+  function writePendingPlaylistSelect(mode, playlistId) {
+    try {
+      if (typeof sessionStorage === 'undefined' || !sessionStorage) return;
+      sessionStorage.setItem(
+        PENDING_SELECT_KEY,
+        JSON.stringify({ mode, playlistId: playlistId || null, createdAt: nowMs() }),
+      );
+    } catch (_error) {
+      // sessionStorage may be restricted in isolated environments.
+    }
+  }
+
+  function maybeResumePendingPlaylistSelect() {
+    if (document.querySelector('[data-ytdl-playlist-dialog]')) return;
+    try {
+      if (typeof sessionStorage === 'undefined' || !sessionStorage) return;
+      const raw = sessionStorage.getItem(PENDING_SELECT_KEY);
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      if (!pending || (pending.mode !== 'audio' && pending.mode !== 'video')) {
+        sessionStorage.removeItem(PENDING_SELECT_KEY);
+        return;
+      }
+      const now = nowMs();
+      if (pending.createdAt > 0 && now > 0 && now - pending.createdAt > 30000) {
+        sessionStorage.removeItem(PENDING_SELECT_KEY);
+        return;
+      }
+      const curList = currentPlaylistId();
+      if (pending.playlistId && curList !== pending.playlistId) return;
+      if (collectPlaylistPanelItems().length === 0) return;
+      sessionStorage.removeItem(PENDING_SELECT_KEY);
+      openPlaylistPrompt(findTriggerButton(pending.mode), pending.mode);
+    } catch (_error) {
+      // Ignore storage parsing failures.
+    }
+  }
+
+  function removeGroups(preserveActivePrompt) {
+    if (!preserveActivePrompt) closePlaylistPrompt();
     for (const group of document.querySelectorAll(GROUP_SELECTOR)) group.remove();
   }
 
   function syncControls() {
-    if (!isWatchRoute()) {
-      removeGroups();
-      return;
-    }
     if (activePromptUrl && activePromptUrl !== pageLocation().href) {
       closePlaylistPrompt();
+    }
+    if (!isWatchRoute()) {
+      const keepPrompt = Boolean(activePromptUrl && activePromptUrl === pageLocation().href);
+      removeGroups(keepPrompt);
+      maybeResumePendingPlaylistSelect();
+      return;
     }
     const metadata = document.querySelector('ytd-watch-metadata');
     const topRow = metadata && metadata.querySelector('#top-row');
@@ -575,72 +755,131 @@
       if (children[children.indexOf(mounted) + 1] !== actions) {
         topRow.insertBefore(mounted, actions);
       }
+      maybeResumePendingPlaylistSelect();
       return;
     }
     topRow.insertBefore(makeGroup(), actions);
+    maybeResumePendingPlaylistSelect();
   }
 
-  function cardLinkHref(card) {
-    const links = card.querySelectorAll('a');
-    for (const link of links) {
-      const rawHref = link.getAttribute ? link.getAttribute('href') : link.href;
-      if (!rawHref) continue;
-      try {
-        const url = new URL(rawHref, pageLocation().href);
-        const host = url.hostname || '';
-        const isYouTube = host === 'youtube.com' || host.endsWith('.youtube.com');
-        if (isYouTube && url.pathname === '/playlist' && url.searchParams.get('list')) {
-          return url.href;
-        }
-      } catch (_error) {
-        continue;
+  function extractWatchVideoId(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    try {
+      const url = new URL(value, pageLocation().href);
+      if (url.pathname === '/watch') {
+        const videoId = url.searchParams.get('v');
+        return videoId && videoId.trim() ? videoId.trim() : null;
       }
-    }
-    if (card.matches && card.matches(PLAYLIST_CARD_SELECTOR)) {
-      for (const link of links) {
-        const rawHref = link.getAttribute ? link.getAttribute('href') : link.href;
-        if (!rawHref) continue;
-        try {
-          const url = new URL(rawHref, pageLocation().href);
-          const host = url.hostname || '';
-          const isYouTube = host === 'youtube.com' || host.endsWith('.youtube.com');
-          const listId = url.searchParams.get('list');
-          if (isYouTube && url.pathname === '/watch' && listId) {
-            return `${url.origin}/playlist?list=${encodeURIComponent(listId)}`;
-          }
-        } catch (_error) {
-          continue;
-        }
-      }
-    }
-    for (const link of links) {
-      const rawHref = link.getAttribute ? link.getAttribute('href') : link.href;
-      if (!rawHref) continue;
-      try {
-        const url = new URL(rawHref, pageLocation().href);
-        const host = url.hostname || '';
-        const isYouTube = host === 'youtube.com' || host.endsWith('.youtube.com');
-        if (
-          isYouTube &&
-          (url.pathname === '/watch' ||
-            url.pathname.startsWith('/shorts/') ||
-            url.pathname === '/playlist')
-        ) {
-          return url.href;
-        }
-      } catch (_error) {
-        continue;
-      }
+    } catch (_error) {
+      return null;
     }
     return null;
   }
 
-  function captureContextHref(event) {
+  function isPreviewCard(card) {
+    return Boolean(card && card.matches && card.matches(PREVIEW_CARD_SELECTOR));
+  }
+
+  function inspectCardContext(card) {
+    const links = card.querySelectorAll('a');
+    let explicitPlaylistUrl = null;
+    let explicitListId = null;
+    let watchWithListUrl = null;
+    let watchListId = null;
+    let watchUrl = null;
+    let shortsUrl = null;
+    let origin = null;
+
+    for (const link of links) {
+      const rawHref = link.getAttribute ? link.getAttribute('href') : link.href;
+      if (!rawHref) continue;
+      try {
+        const url = new URL(rawHref, pageLocation().href);
+        const host = url.hostname || '';
+        const isYouTube = host === 'youtube.com' || host.endsWith('.youtube.com');
+        if (!isYouTube) continue;
+        if (!origin) origin = url.origin;
+        const rawList = url.searchParams.get('list');
+        const listId = rawList ? rawList.trim() : '';
+        if (url.pathname === '/playlist' && listId && !explicitPlaylistUrl) {
+          explicitPlaylistUrl = url.href;
+          explicitListId = listId;
+        } else if (url.pathname === '/watch') {
+          if (!watchUrl) watchUrl = url.href;
+          if (listId && !watchWithListUrl) {
+            watchWithListUrl = url.href;
+            watchListId = listId;
+          }
+        } else if (url.pathname.startsWith('/shorts/') && !shortsUrl) {
+          shortsUrl = url.href;
+        }
+      } catch (_error) {
+        continue;
+      }
+    }
+
+    const isItemRow = Boolean(card.matches && card.matches(PLAYLIST_ITEM_SELECTOR));
+    if (isItemRow && !explicitPlaylistUrl) {
+      const trackUrl = watchUrl || shortsUrl || null;
+      return trackUrl
+        ? { url: trackUrl, isPlaylist: false, playlistId: null, playlistUrl: null, topVideoUrl: trackUrl }
+        : null;
+    }
+
+    if (explicitPlaylistUrl) {
+      return {
+        url: explicitPlaylistUrl,
+        isPlaylist: true,
+        playlistId: explicitListId,
+        playlistUrl: explicitPlaylistUrl,
+        topVideoUrl: watchWithListUrl || watchUrl || null,
+      };
+    }
+
+    if (card.matches && card.matches(PLAYLIST_CARD_SELECTOR) && watchWithListUrl && watchListId) {
+      const playlistUrl = `${origin || 'https://www.youtube.com'}/playlist?list=${encodeURIComponent(watchListId)}`;
+      return {
+        url: playlistUrl,
+        isPlaylist: true,
+        playlistId: watchListId,
+        playlistUrl,
+        topVideoUrl: watchWithListUrl,
+      };
+    }
+
+    if (watchWithListUrl && watchListId) {
+      const isMix = watchListId.startsWith('RD');
+      const canonicalPlaylistUrl = isMix
+        ? watchWithListUrl
+        : `${origin || 'https://www.youtube.com'}/playlist?list=${encodeURIComponent(watchListId)}`;
+      return {
+        url: isPreviewCard(card) ? watchWithListUrl : canonicalPlaylistUrl,
+        isPlaylist: true,
+        playlistId: watchListId,
+        playlistUrl: canonicalPlaylistUrl,
+        topVideoUrl: watchWithListUrl,
+      };
+    }
+
+    const singleUrl = watchUrl || shortsUrl;
+    if (singleUrl) {
+      return {
+        url: singleUrl,
+        isPlaylist: false,
+        playlistId: null,
+        playlistUrl: null,
+        topVideoUrl: singleUrl,
+      };
+    }
+    return null;
+  }
+
+  function captureContextInfo(event) {
     // No card match means no context URL (null): the background then
     // falls back to the menu linkUrl/pageUrl targets instead of the
     // current page, so right-clicking a bare YouTube link never
     // downloads the page behind it.
-    let href = null;
+    let info = null;
     const cards = [];
     const addCardFor = (element) => {
       const card = element && element.closest ? element.closest(CARD_SELECTOR) : null;
@@ -656,15 +895,35 @@
       }
     }
     if (event) addCardFor(event.target);
+
+    const inspected = [];
     for (const card of cards) {
-      const found = cardLinkHref(card);
-      if (found) {
-        href = found;
-        break;
+      const found = inspectCardContext(card);
+      if (found && found.url) inspected.push({ card, info: found });
+    }
+
+    if (inspected.length > 0) {
+      const first = inspected[0];
+      if (isPreviewCard(first.card)) {
+        const underlyingPlaylist = inspected.find(
+          (entry) => !isPreviewCard(entry.card) && entry.info.isPlaylist,
+        );
+        if (underlyingPlaylist) {
+          info = {
+            ...underlyingPlaylist.info,
+            topVideoUrl: underlyingPlaylist.info.topVideoUrl || first.info.topVideoUrl || first.info.url,
+          };
+        } else {
+          info = first.info;
+        }
+      } else {
+        info = first.info;
       }
     }
-    lastContextUrl = href;
-    return href;
+
+    lastContextInfo = info;
+    lastContextUrl = info ? info.url : null;
+    return info;
   }
 
   function nowMs() {
@@ -676,52 +935,226 @@
     return 0;
   }
 
+  function closeContextModal() {
+    for (const modal of document.querySelectorAll('[data-ytdl-context-modal]')) {
+      modal.remove();
+    }
+  }
+
+  function dispatchTriggerDownload(mode, url, options) {
+    const api = ext();
+    if (!api || !api.runtime) return;
+    const message = {
+      type: 'ytdl-trigger-download',
+      mode,
+      url: url || pageLocation().href,
+    };
+    if (options && typeof options.playlist === 'boolean') {
+      message.playlist = options.playlist;
+    }
+    if (options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
+      message.playlistItems = options.playlistItems.trim();
+    }
+    try {
+      const result = api.runtime.sendMessage(message);
+      if (result && typeof result.catch === 'function') result.catch(() => {});
+    } catch (_error) {
+      // Background may be unreachable.
+    }
+  }
+
+  function resolveGraphicalSelectUrl(message) {
+    const playlistId = message && message.playlistId ? String(message.playlistId).trim() : '';
+    const topVideoUrl = message && message.topVideoUrl ? String(message.topVideoUrl) : '';
+    if (topVideoUrl && extractWatchVideoId(topVideoUrl)) {
+      try {
+        const parsed = new URL(topVideoUrl, pageLocation().href);
+        if (playlistId && !parsed.searchParams.get('list')) {
+          parsed.searchParams.set('list', playlistId);
+        }
+        return parsed.href;
+      } catch (_error) {
+        // Fall back to playlistUrl below.
+      }
+    }
+    if (message && message.playlistUrl) return message.playlistUrl;
+    if (message && message.url) return message.url;
+    return null;
+  }
+
+  function openContextPlaylistModal(message) {
+    closeContextModal();
+    const host = document.body || document.documentElement;
+    if (!host) return false;
+
+    const mode = message && message.mode === 'video' ? 'video' : 'audio';
+    const playlistUrl = (message && (message.playlistUrl || message.url)) || pageLocation().href;
+    const topVideoUrl = (message && message.topVideoUrl) || null;
+    const playlistId = (message && message.playlistId) || null;
+
+    const modal = document.createElement('div');
+    modal.setAttribute('data-ytdl-context-modal', 'true');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Playlist download options');
+
+    const card = document.createElement('div');
+    card.setAttribute('data-ytdl-context-card', 'true');
+
+    const title = document.createElement('h2');
+    title.setAttribute('data-ytdl-context-title', 'true');
+    title.textContent = `Playlist detected (${mode})`;
+
+    const subtitle = document.createElement('p');
+    subtitle.setAttribute('data-ytdl-context-desc', 'true');
+    subtitle.textContent = playlistId
+      ? `Playlist ${playlistId}: choose whether to download the entire playlist, only the top song, or select items graphically.`
+      : 'Choose whether to download the entire playlist, only the top song, or select items graphically.';
+
+    const actions = document.createElement('div');
+    actions.setAttribute('data-ytdl-context-actions', 'true');
+
+    const allBtn = document.createElement('button');
+    allBtn.setAttribute('type', 'button');
+    allBtn.setAttribute('data-ytdl-context-action', 'all');
+    allBtn.textContent = 'Download entire playlist';
+    allBtn.addEventListener('click', () => {
+      closeContextModal();
+      dispatchTriggerDownload(mode, playlistUrl, { playlist: true });
+    });
+
+    const topBtn = document.createElement('button');
+    topBtn.setAttribute('type', 'button');
+    topBtn.setAttribute('data-ytdl-context-action', 'top');
+    topBtn.textContent = 'Download top song only';
+    topBtn.addEventListener('click', () => {
+      closeContextModal();
+      if (topVideoUrl && extractWatchVideoId(topVideoUrl)) {
+        dispatchTriggerDownload(mode, topVideoUrl, { playlist: false });
+      } else {
+        dispatchTriggerDownload(mode, playlistUrl, { playlist: true, playlistItems: '1' });
+      }
+    });
+
+    const selectBtn = document.createElement('button');
+    selectBtn.setAttribute('type', 'button');
+    selectBtn.setAttribute('data-ytdl-context-action', 'select');
+    selectBtn.textContent = 'Select items graphically';
+    selectBtn.addEventListener('click', () => {
+      closeContextModal();
+      const samePlaylist = !playlistId || currentPlaylistId() === playlistId;
+      const itemsOnPage = samePlaylist ? collectPlaylistPanelItems() : [];
+      if (samePlaylist && itemsOnPage.length > 0) {
+        openPlaylistPrompt(findTriggerButton(mode), mode);
+        return;
+      }
+      const targetUrl = resolveGraphicalSelectUrl(message);
+      if (targetUrl && /^https?:\/\//i.test(targetUrl)) {
+        writePendingPlaylistSelect(mode, playlistId);
+        pageLocation().href = targetUrl;
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.setAttribute('type', 'button');
+    cancelBtn.setAttribute('data-ytdl-context-action', 'cancel');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', closeContextModal);
+
+    actions.appendChild(allBtn);
+    actions.appendChild(topBtn);
+    actions.appendChild(selectBtn);
+    actions.appendChild(cancelBtn);
+
+    card.appendChild(title);
+    card.appendChild(subtitle);
+    card.appendChild(actions);
+    modal.appendChild(card);
+
+    modal.addEventListener('click', (evt) => {
+      if (evt && evt.target === modal) closeContextModal();
+    });
+
+    host.appendChild(modal);
+    return true;
+  }
+
   function handlePointerDown(event) {
     if (!event || event.button !== 2) return;
     // Start of a new right-click gesture: record even when unmatched
     // so a bare link or empty space resets any prior gesture's URL.
-    const href = captureContextHref(event);
+    const info = captureContextInfo(event);
     const now = nowMs();
-    lastPointerUrl = href;
+    lastPointerInfo = info;
+    lastPointerUrl = info ? info.url : null;
     lastPointerAt = now;
     lastPointerDownAt = now;
-    lastContextUrl = href;
+    lastContextInfo = info;
+    lastContextUrl = lastPointerUrl;
   }
 
   function handleMouseDown(event) {
     if (!event || event.button !== 2) return;
-    const href = captureContextHref(event);
+    const info = captureContextInfo(event);
     const now = nowMs();
-    if (href === null && lastPointerUrl && now - lastPointerDownAt < 80) {
+    if (!info && lastPointerInfo && now - lastPointerDownAt < 80) {
       // The preview vanished between pointerdown and mousedown for
       // this same gesture: keep the pointerdown URL instead of wiping it.
-      lastContextUrl = lastPointerUrl;
+      lastContextInfo = lastPointerInfo;
+      lastContextUrl = lastPointerInfo.url;
       return;
     }
-    lastPointerUrl = href;
+    lastPointerInfo = info;
+    lastPointerUrl = info ? info.url : null;
     lastPointerAt = now;
-    lastContextUrl = href;
+    lastContextInfo = info;
+    lastContextUrl = lastPointerUrl;
   }
 
   function handleContextMenu(event) {
-    let href = captureContextHref(event);
-    if (href === null && nowMs() - lastPointerAt < 500) {
+    let info = captureContextInfo(event);
+    if (!info && nowMs() - lastPointerAt < 500) {
       // YouTube may tear down or morph the hover-autoplay preview
       // between pointerdown and contextmenu: reuse this gesture's
       // pointerdown URL (null when the gesture started on empty
       // space or a non-card link, so nothing stale can leak).
-      href = lastPointerUrl;
+      info = lastPointerInfo;
     }
-    lastContextUrl = href;
+    lastContextInfo = info;
+    lastContextUrl = info ? info.url : null;
+    lastPointerInfo = null;
     lastPointerUrl = null;
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
     if (message && message.type === 'ytdl-get-context-url') {
-      if (typeof sendResponse === 'function') sendResponse({ url: lastContextUrl });
+      if (typeof sendResponse === 'function') {
+        if (lastContextInfo && lastContextInfo.isPlaylist) {
+          sendResponse({
+            url: lastContextInfo.url,
+            isPlaylist: true,
+            playlistId: lastContextInfo.playlistId || null,
+            playlistUrl: lastContextInfo.playlistUrl || lastContextInfo.url,
+            topVideoUrl: lastContextInfo.topVideoUrl || null,
+          });
+        } else {
+          sendResponse({ url: lastContextUrl });
+        }
+      }
+      return true;
+    }
+    if (message && message.type === 'ytdl-prompt-playlist-choice') {
+      const shown = openContextPlaylistModal(message);
+      if (typeof sendResponse === 'function') sendResponse({ shown });
       return true;
     }
     return undefined;
+  }
+
+  function handleKeyDown(event) {
+    if (event && event.key === 'Escape') {
+      closeContextModal();
+    }
   }
 
   function scheduleSync() {
@@ -739,6 +1172,7 @@
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('mousedown', handleMouseDown, true);
     document.addEventListener('contextmenu', handleContextMenu, true);
+    document.addEventListener('keydown', handleKeyDown, true);
     const api = ext();
     if (api && api.runtime && api.runtime.onMessage) {
       api.runtime.onMessage.addListener(handleRuntimeMessage);

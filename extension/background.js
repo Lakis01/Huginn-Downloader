@@ -35,23 +35,49 @@ function menusApi() {
   return api.menus || api.contextMenus || null;
 }
 
-function isYouTubeUrl(value) {
-  if (typeof value !== 'string' || !value) return false;
+function parseYouTubeUrl(value) {
+  if (typeof value !== 'string' || !value) return null;
   let candidate = value;
   if (candidate.startsWith('blob:')) candidate = candidate.slice(5);
   try {
     const url = new URL(candidate);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     const host = url.hostname.toLowerCase();
-    return (
+    const isYouTube =
       host === 'youtube.com' ||
       host.endsWith('.youtube.com') ||
       host === 'youtu.be' ||
-      host.endsWith('.youtu.be')
-    );
+      host.endsWith('.youtu.be');
+    return isYouTube ? url : null;
   } catch (_error) {
-    return false;
+    return null;
   }
+}
+
+function isYouTubeUrl(value) {
+  return Boolean(parseYouTubeUrl(value));
+}
+
+function extractPlaylistId(value) {
+  const url = parseYouTubeUrl(value);
+  if (!url) return null;
+  const raw = url.searchParams.get('list');
+  return raw && raw.trim() ? raw.trim() : null;
+}
+
+function isYouTubePlaylistUrl(value) {
+  const url = parseYouTubeUrl(value);
+  if (!url) return false;
+  if (url.pathname === '/playlist') return Boolean(extractPlaylistId(value));
+  return Boolean(extractPlaylistId(value));
+}
+
+function extractWatchVideoUrl(value) {
+  const url = parseYouTubeUrl(value);
+  if (!url) return null;
+  if (url.pathname === '/watch' && url.searchParams.get('v')) return url.href;
+  if (url.pathname.startsWith('/shorts/')) return url.href;
+  return null;
 }
 
 function dedupeUrls(values) {
@@ -77,17 +103,39 @@ function isHttpUrl(value) {
   }
 }
 
-async function queryContextUrl(tabId) {
+async function queryContextInfo(tabId) {
   const api = ext();
   if (!api || !tabId) return null;
   try {
     const response = await api.tabs.sendMessage(tabId, { type: 'ytdl-get-context-url' });
-    if (response && typeof response.url === 'string' && response.url) return response.url;
+    if (response && typeof response.url === 'string' && response.url) {
+      return {
+        url: response.url,
+        isPlaylist: Boolean(response.isPlaylist),
+        playlistId: typeof response.playlistId === 'string' ? response.playlistId : null,
+        playlistUrl: typeof response.playlistUrl === 'string' ? response.playlistUrl : null,
+        topVideoUrl: typeof response.topVideoUrl === 'string' ? response.topVideoUrl : null,
+      };
+    }
   } catch (_error) {
     // Content script is not loaded here (for example a non-YouTube
     // page), so fall back to the menu target URLs below.
   }
   return null;
+}
+
+async function promptPlaylistChoice(tabId, payload) {
+  const api = ext();
+  if (!api || !tabId) return false;
+  try {
+    const response = await api.tabs.sendMessage(tabId, {
+      type: 'ytdl-prompt-playlist-choice',
+      ...payload,
+    });
+    return Boolean(response && response.shown);
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function openOnboarding() {
@@ -108,10 +156,12 @@ async function sendDownload(mode, primaryUrl, fallbacks, options) {
     url,
     fallbacks: candidates.slice(1),
   };
-  if (options && typeof options.playlist === 'boolean') {
+  if (mode !== 'cut' && options && typeof options.playlist === 'boolean') {
     payload.playlist = options.playlist;
+  } else if (mode === 'cut' && options && options.playlist === false) {
+    payload.playlist = false;
   }
-  if (options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
+  if (mode !== 'cut' && options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
     payload.playlist_items = options.playlistItems.trim();
   }
   try {
@@ -130,7 +180,8 @@ async function handleMenuClick(info, tab) {
   const mode = MENU_MODES[info.menuItemId];
   if (!mode) return;
   const tabId = tab && tab.id;
-  const contextUrl = await queryContextUrl(tabId);
+  const contextInfo = await queryContextInfo(tabId);
+  const contextUrl = contextInfo ? contextInfo.url : null;
   // Menu target fallback order: hovered YouTube card, link, usable
   // image/audio/video source, frame, page, then the active tab. A srcUrl
   // is only usable over plain HTTP(S): hover-autoplay previews expose
@@ -141,6 +192,36 @@ async function handleMenuClick(info, tab) {
   const fallbacks = dedupeUrls([info.linkUrl, srcUrl, info.frameUrl, info.pageUrl, tab && tab.url].filter(Boolean)).filter(
     (candidate) => candidate !== primaryUrl,
   );
+
+  const playlistId = (contextInfo && contextInfo.playlistId) || extractPlaylistId(primaryUrl);
+  const isPlaylistTarget = Boolean((contextInfo && contextInfo.isPlaylist) || isYouTubePlaylistUrl(primaryUrl));
+  const playlistUrl =
+    (contextInfo && contextInfo.playlistUrl) ||
+    (playlistId && !playlistId.startsWith('RD')
+      ? `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`
+      : primaryUrl);
+  const topVideoUrl =
+    (contextInfo && contextInfo.topVideoUrl) ||
+    extractWatchVideoUrl(info.linkUrl) ||
+    extractWatchVideoUrl(primaryUrl) ||
+    null;
+
+  if (mode === 'cut' && isPlaylistTarget) {
+    await sendDownload(mode, topVideoUrl || primaryUrl, fallbacks, { playlist: false });
+    return;
+  }
+
+  if ((mode === 'audio' || mode === 'video') && isPlaylistTarget && tabId) {
+    const shown = await promptPlaylistChoice(tabId, {
+      mode,
+      url: primaryUrl,
+      playlistUrl,
+      topVideoUrl,
+      playlistId,
+    });
+    if (shown) return;
+  }
+
   await sendDownload(mode, primaryUrl, fallbacks);
 }
 
@@ -149,8 +230,8 @@ function handlePillMessage(message, _sender, sendResponse) {
   const mode = message.mode;
   if (mode !== 'audio' && mode !== 'video' && mode !== 'cut') return undefined;
   const result = sendDownload(mode, message.url || null, message.fallbacks || [], {
-    playlist: message.playlist,
-    playlistItems: message.playlistItems,
+    playlist: mode === 'cut' ? false : message.playlist,
+    playlistItems: mode === 'cut' ? undefined : message.playlistItems,
   });
   if (typeof sendResponse === 'function' && (typeof browser === 'undefined' || !browser)) {
     Promise.resolve(result).then(sendResponse, () => sendResponse({ ok: false }));

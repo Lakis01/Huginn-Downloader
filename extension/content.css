@@ -242,3 +242,200 @@ html[dark] [data-ytdl-side-check] input,
 html[dark] [data-ytdl-dialog-item] input {
   accent-color: #3ea6ff;
 }
+
+[data-ytdl-controls] button[hidden],
+[data-ytdl-playlist-dialog] [hidden] {
+  display: none;
+}
+
+[data-ytdl-playlist-dialog][data-ytdl-dialog-floating="true"] {
+  position: fixed;
+  top: 72px;
+  right: 24px;
+  z-index: 9998;
+  width: min(520px, calc(100vw - 32px));
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+}
+
+html[dark] [data-ytdl-playlist-dialog][data-ytdl-dialog-floating="true"] {
+  background: #212121;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+}
+
+[data-ytdl-dialog-footer] {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+[data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist-submit"] {
+  background: #065fd4;
+  color: #ffffff;
+}
+
+[data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist-submit"]:hover {
+  background: #0553ba;
+}
+
+html[dark] [data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist-submit"] {
+  background: #3ea6ff;
+  color: #0f0f0f;
+}
+
+html[dark] [data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist-submit"]:hover {
+  background: #65b8ff;
+}
+
+[data-ytdl-panel-bar] {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  background: rgba(242, 242, 242, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: #0f0f0f;
+  font: 400 12px/16px Roboto, Arial, sans-serif;
+}
+
+html[dark] [data-ytdl-panel-bar] {
+  background: rgba(39, 39, 39, 0.96);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f1f1f1;
+}
+
+[data-ytdl-panel-title] {
+  font-weight: 500;
+  margin-right: auto;
+}
+
+[data-ytdl-panel-bar] button {
+  appearance: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+  font: 500 12px/16px Roboto, Arial, sans-serif;
+  cursor: pointer;
+}
+
+html[dark] [data-ytdl-panel-bar] button {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+[data-ytdl-panel-bar] button:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+html[dark] [data-ytdl-panel-bar] button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+[data-ytdl-panel-bar] button[data-ytdl-panel-download] {
+  background: #065fd4;
+  color: #ffffff;
+}
+
+[data-ytdl-panel-bar] button[data-ytdl-panel-download]:hover {
+  background: #0553ba;
+}
+
+html[dark] [data-ytdl-panel-bar] button[data-ytdl-panel-download] {
+  background: #3ea6ff;
+  color: #0f0f0f;
+}
+
+html[dark] [data-ytdl-panel-bar] button[data-ytdl-panel-download]:hover {
+  background: #65b8ff;
+}
+
+[data-ytdl-context-modal] {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+[data-ytdl-context-card] {
+  width: min(440px, 100%);
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #0f0f0f;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  font: 400 13px/18px Roboto, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+html[dark] [data-ytdl-context-card] {
+  background: #212121;
+  color: #f1f1f1;
+}
+
+[data-ytdl-context-title] {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+[data-ytdl-context-desc] {
+  margin: 0;
+  opacity: 0.85;
+}
+
+[data-ytdl-context-actions] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-ytdl-context-actions] button {
+  appearance: none;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+  font: 500 13px/18px Roboto, Arial, sans-serif;
+  cursor: pointer;
+  text-align: center;
+}
+
+html[dark] [data-ytdl-context-actions] button {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+[data-ytdl-context-actions] button[data-ytdl-context-action="all"] {
+  background: #0f0f0f;
+  color: #ffffff;
+}
+
+html[dark] [data-ytdl-context-actions] button[data-ytdl-context-action="all"] {
+  background: #f1f1f1;
+  color: #0f0f0f;
+}
+
+[data-ytdl-context-actions] button[data-ytdl-context-action="select"] {
+  background: #065fd4;
+  color: #ffffff;
+}
+
+html[dark] [data-ytdl-context-actions] button[data-ytdl-context-action="select"] {
+  background: #3ea6ff;
+  color: #0f0f0f;
+}

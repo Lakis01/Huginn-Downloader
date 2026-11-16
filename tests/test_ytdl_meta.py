@@ -3410,3 +3410,100 @@ class V24AudioPipelineTests(unittest.TestCase):
             self.assertEqual(Path(result), Path(tmp) / "Track_cut_10_50.mp3")
             self.assertTrue(Path(result).is_file())
             self.assertFalse(long_dir.exists())  # 40-second segment, not 9999-second source.
+
+    def test_format_pacman_bar_and_rewrite_batch_progress_text(self):
+        wrapper = _load_wrapper(self)
+        bar = wrapper.format_pacman_bar(3, 12, 50.0, "50.0% of 10.0MiB ETA 00:02", width=24)
+        self.assertEqual(
+            bar,
+            "( 3/12) [#####-------------------]  21% | 50.0% of 10.0MiB ETA 00:02",
+        )
+        unknown_bar = wrapper.format_pacman_bar(2, "?", 25.0, "25.0% of ~5.0MiB", width=8)
+        self.assertEqual(unknown_bar, "(2/?) [##------]  25% | 25.0% of ~5.0MiB")
+
+        sample = "\r[batch 2/4]  50.0% of 8.00MiB at 2.00MiB/s ETA 00:02\nplain status line\n"
+        rewritten = wrapper._rewrite_batch_progress_text(sample)
+        self.assertIn("(2/4) [#########---------------]  38% | 50.0% of 8.00MiB at 2.00MiB/s ETA 00:02", rewritten)
+        self.assertIn("plain status line", rewritten)
+
+    def test_tty_batch_progress_rewrites_split_chunks_via_stdout(self):
+        wrapper = _load_wrapper(self)
+        chunks = [
+            b"\r[batch 1/2]  50.",
+            b"0% of 4.00MiB ETA 00:02\r[batch 2/2] 100% of 4.00MiB\n",
+        ]
+
+        class TTY(io.StringIO):
+            def isatty(self):
+                return True
+
+        terminal = TTY()
+
+        class Pipe:
+            def __init__(self, items):
+                self._items = iter(items)
+
+            def read1(self, _size):
+                return next(self._items, b"")
+
+            def close(self):
+                pass
+
+        class Process:
+            def __init__(self):
+                self.stdout = Pipe(chunks)
+                self.stderr = None
+
+            def wait(self):
+                return 0
+
+        with mock.patch.object(wrapper.sys, "stderr", terminal), \
+             mock.patch.object(wrapper.subprocess, "Popen", return_value=Process()) as popen:
+            wrapper._run_yt_dlp_command([
+                "yt-dlp",
+                "--progress",
+                "--progress-template",
+                wrapper._BATCH_PROGRESS_TEMPLATE,
+                "https://www.youtube.com/playlist?list=PL1",
+            ])
+
+        out = terminal.getvalue()
+        self.assertIn("(1/2) [######------------------]  25% | 50.0% of 4.00MiB ETA 00:02", out)
+        self.assertIn("(2/2) [########################] 100% | 100% of 4.00MiB", out)
+        self.assertEqual(popen.call_args.kwargs["stderr"], wrapper.subprocess.STDOUT)
+
+    def test_download_audio_batch_passes_progress_template_and_prints_finalization_bars(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            t1 = Path(tmp) / "t1.opus"
+            t2 = Path(tmp) / "t2.opus"
+            t1.write_bytes(b"a")
+            t2.write_bytes(b"b")
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                for idx, val in enumerate(command[:-2]):
+                    if val == "--print-to-file" and command[idx + 1] == "after_move:filepath":
+                        Path(command[idx + 2]).write_text(f"{t1}\n{t2}\n", encoding="utf-8")
+                    if val == "--print-to-file" and command[idx + 1] == "after_move:duration":
+                        Path(command[idx + 2]).write_text("120\n180\n", encoding="utf-8")
+                return SimpleNamespace(returncode=0)
+
+            stdout_capture = io.StringIO()
+            with mock.patch.object(wrapper, "effective_download_dir", return_value=None), \
+                 mock.patch.object(wrapper, "_ensure_audio_properties", side_effect=lambda p, *_a, **_k: p), \
+                 mock.patch.object(wrapper, "finalize_audio_download", side_effect=lambda p, *_a, **_k: p), \
+                 mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run), \
+                 mock.patch.object(wrapper.sys, "stdout", stdout_capture):
+                wrapper.download_audio(
+                    "https://www.youtube.com/playlist?list=PLbatch",
+                    {"auto_tag": False, "rsgain": False, "embed_thumbnail": False, "channel_mode": "stereo"},
+                    playlist=True,
+                )
+
+        self.assertIn("--progress-template", commands[0])
+        self.assertIn(wrapper._BATCH_PROGRESS_TEMPLATE, commands[0])
+        out = stdout_capture.getvalue()
+        self.assertIn("(1/2) [############------------]  50% | Finalizing track 1/2: t1.opus", out)
+        self.assertIn("(2/2) [########################] 100% | Finalizing track 2/2: t2.opus", out)

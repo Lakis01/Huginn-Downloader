@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -909,6 +910,97 @@ def _run_with_auth_retry(command):
             raise _YtDlpError(_yt_dlp_error_text(error)) from None
 
 
+_BATCH_PROGRESS_TEMPLATE = (
+    "download:[batch %(info.playlist_autonumber,info.playlist_index|1)s/"
+    "%(info.n_entries,info.playlist_count|?)s] %(progress._default_template)s"
+)
+_BATCH_LINE_RE = re.compile(r"^\[batch\s+(\d+)/(\d+|\?)\]\s*(.*)$")
+_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)%")
+
+
+def format_pacman_bar(index, total, item_percent=None, detail="", width=24):
+    """Render a pacman-style overall batch progress bar."""
+    try:
+        idx_val = max(1, int(index))
+    except (TypeError, ValueError):
+        idx_val = 1
+
+    total_int = None
+    if total not in (None, "", "?"):
+        try:
+            parsed_total = int(total)
+        except (TypeError, ValueError):
+            parsed_total = 0
+        if parsed_total > 0:
+            total_int = parsed_total
+
+    pct_item = None
+    if item_percent is not None:
+        try:
+            pct_item = max(0.0, min(100.0, float(item_percent)))
+        except (TypeError, ValueError):
+            pct_item = None
+
+    if total_int is not None:
+        clamped_idx = min(idx_val, total_int)
+        item_fraction = (pct_item / 100.0) if pct_item is not None else 0.0
+        overall = max(
+            0.0,
+            min(100.0, (((clamped_idx - 1) + item_fraction) / total_int) * 100.0),
+        )
+        filled = max(0, min(width, int(round(width * (overall / 100.0)))))
+        counter = f"({clamped_idx:>{len(str(total_int))}}/{total_int})"
+        pct_label = f"{overall:3.0f}%"
+    else:
+        overall = pct_item
+        filled = (
+            max(0, min(width, int(round(width * (overall / 100.0)))))
+            if overall is not None
+            else 0
+        )
+        counter = f"({idx_val}/?)"
+        pct_label = f"{overall:3.0f}%" if overall is not None else "  ?%"
+
+    bar = "#" * filled + "-" * (width - filled)
+    base = f"{counter} [{bar}] {pct_label}"
+    clean_detail = detail.strip() if detail else ""
+    return f"{base} | {clean_detail}" if clean_detail else base
+
+
+def _rewrite_batch_progress_text(text):
+    """Convert yt-dlp [batch X/Y] progress lines into pacman-style bars."""
+    if "[batch " not in text:
+        return text
+    parts = re.split(r"([\r\n]+)", text)
+    for i in range(0, len(parts), 2):
+        line = parts[i]
+        match = _BATCH_LINE_RE.match(line)
+        if not match:
+            continue
+        idx_str, total_str, detail = match.groups()
+        pct_match = _PERCENT_RE.search(detail)
+        if pct_match:
+            item_pct = float(pct_match.group(1))
+        elif "Download completed" in detail:
+            item_pct = 100.0
+        else:
+            item_pct = None
+        total_arg = int(total_str) if total_str.isdigit() else total_str
+        parts[i] = format_pacman_bar(int(idx_str), total_arg, item_pct, detail)
+    return "".join(parts)
+
+
+def _write_stream_text(text, output_stream, binary_stream, encoding):
+    if not text:
+        return
+    if binary_stream is not None:
+        binary_stream.write(text.encode(encoding, errors="replace"))
+        binary_stream.flush()
+    else:
+        output_stream.write(text)
+        output_stream.flush()
+
+
 def _run_yt_dlp_command(command):
     """Run yt-dlp, forwarding live output when it should be visible to the user."""
     try:
@@ -921,24 +1013,45 @@ def _run_yt_dlp_command(command):
             command, check=True, text=True, stdout=None, stderr=subprocess.PIPE
         )
 
-    process = subprocess.Popen(command, stdout=None, stderr=subprocess.PIPE)
-    stderr_pipe = process.stderr
+    is_batch_progress = "--progress-template" in command
+    if is_batch_progress:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+        output_pipe = process.stdout or process.stderr
+    else:
+        process = subprocess.Popen(command, stdout=None, stderr=subprocess.PIPE)
+        output_pipe = process.stderr
+
     captured = bytearray()
     encoding = getattr(sys.stderr, "encoding", None) or "utf-8"
     decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
     output_stream = sys.stderr
     binary_stream = getattr(output_stream, "buffer", None)
     capture_limit = 64 * 1024
+    pending_text = ""
 
     try:
         while True:
-            chunk = stderr_pipe.read1(4096)
+            chunk = output_pipe.read1(4096)
             if not chunk:
                 break
             captured.extend(chunk)
             if len(captured) > capture_limit:
                 del captured[:-capture_limit]
-            if binary_stream is not None:
+            if is_batch_progress:
+                pending_text += decoder.decode(chunk)
+                split_idx = max(pending_text.rfind("\r"), pending_text.rfind("\n"))
+                if split_idx >= 0:
+                    ready = pending_text[: split_idx + 1]
+                    pending_text = pending_text[split_idx + 1 :]
+                    _write_stream_text(
+                        _rewrite_batch_progress_text(ready),
+                        output_stream,
+                        binary_stream,
+                        encoding,
+                    )
+            elif binary_stream is not None:
                 binary_stream.write(chunk)
                 binary_stream.flush()
             else:
@@ -946,7 +1059,16 @@ def _run_yt_dlp_command(command):
                 if text:
                     output_stream.write(text)
                     output_stream.flush()
-        if binary_stream is None:
+        if is_batch_progress:
+            pending_text += decoder.decode(b"", final=True)
+            if pending_text:
+                _write_stream_text(
+                    _rewrite_batch_progress_text(pending_text),
+                    output_stream,
+                    binary_stream,
+                    encoding,
+                )
+        elif binary_stream is None:
             final_text = decoder.decode(b"", final=True)
             if final_text:
                 output_stream.write(final_text)
@@ -966,7 +1088,7 @@ def _run_yt_dlp_command(command):
             process.wait()
         raise
     finally:
-        stderr_pipe.close()
+        output_pipe.close()
 
     returncode = process.wait()
     if returncode:
@@ -1061,6 +1183,11 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
             playlist_args.extend(["--playlist-items", str(playlist_items)])
     else:
         playlist_args = ["--no-playlist"]
+    progress_args = (
+        ["--progress", "--progress-template", _BATCH_PROGRESS_TEMPLATE]
+        if use_playlist
+        else ["--progress"]
+    )
     print(f"[1/2] Downloading audio from {url}...")
     print_path = _new_print_to_file()
     duration_path = _new_print_to_file()
@@ -1091,7 +1218,7 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
             *_audio_format_args(cfg),
             *_yt_dlp_output_args(cfg),
             *playlist_args,
-            "--progress",
+            *progress_args,
             "-o", "%(title)s.%(ext)s",
             "--print-to-file", "after_move:filepath", print_path,
             "--print-to-file", "after_move:duration", duration_path,
@@ -1100,6 +1227,7 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
         _run_with_auth_retry(command)
         filepaths = _read_all_print_to_file(print_path)
         durations = _read_all_durations_print_to_file(duration_path)
+        total_tracks = len(filepaths)
         final_path = None
         for index, filepath in enumerate(filepaths):
             original_filepath = filepath
@@ -1118,6 +1246,17 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
                 duration,
                 refresh_auto_tag=config_was_live,
             )
+            if total_tracks > 1:
+                track_label = Path(final_path or filepath).name
+                print(
+                    format_pacman_bar(
+                        index + 1,
+                        total_tracks,
+                        100.0,
+                        f"Finalizing track {index + 1}/{total_tracks}: {track_label}",
+                    ),
+                    flush=True,
+                )
         return final_path
     finally:
         _remove_temp_file(print_path)
@@ -1140,6 +1279,16 @@ def download_video(url, config=None, *, playlist=None, playlist_items=None):
         playlist_args.append("--yes-playlist")
         if playlist_items:
             playlist_args.extend(["--playlist-items", str(playlist_items)])
+    is_batch_video = (
+        playlist is True
+        or bool(playlist_items)
+        or (playlist is None and is_playlist_url(url))
+    )
+    progress_args = (
+        ["--progress", "--progress-template", _BATCH_PROGRESS_TEMPLATE]
+        if is_batch_video
+        else ["--progress"]
+    )
     command = [
         "yt-dlp",
         *extras,
@@ -1150,7 +1299,7 @@ def download_video(url, config=None, *, playlist=None, playlist_items=None):
         "--embed-metadata",
         *_yt_dlp_output_args(cfg),
         *playlist_args,
-        "--progress",
+        *progress_args,
         "--print",
         "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
         "-o", "%(title)s.%(ext)s",

@@ -51,14 +51,25 @@ Four touchpoints (three to start a download, plus popup settings):
    YouTube's Like/Dislike controls on watch pages. Click **Audio** for the best
    native audio stream, **Video** for best video+audio, or **Cut** to pick start
    / end timestamps and encoding settings interactively in your terminal.
+   When watching a playlist (`?list=...`), clicking **Audio** or **Video** asks
+   whether to download **This video only** or the **playlist**, lets you check
+   individual tracks directly in the side playlist panel with **Select all**,
+   **Deselect all**, and a **Download** button in both the panel toolbar and
+   dialog, and accepts `yt-dlp` `--playlist-items` ranges (`1-5, 8, 1:10:2`)
+   synced two-way with the checkboxes (**Cut** stays single-track only and is
+   hidden during batch selection).
 2. **Right-click `Huginn Downloader` ▸ `Audio` / `Video` / `Cut Audio`
    submenu** (context menu) — available broadly on pages, frames, links,
    images, video/audio elements, and text selections, not just YouTube. On
-   YouTube it works on cards in feeds and search results: if hover-autoplay
-   covers a card, right-click the card itself; only the video element's own
-   menu may show the browser defaults. Any safe HTTP(S) URL is accepted and
-   handed to the local companion, so the menu works on any media site
-   `yt-dlp` supports.
+   YouTube it works on cards in feeds and search results even when a
+   hover-autoplay overlay covers a card. Right-clicking a playlist card or
+   playlist URL with **Audio** or **Video** asks whether you want to **Download
+   entire playlist**, **Download top song only**, or **Select items
+   graphically** (opening the side/list checkboxes directly). Any safe HTTP(S)
+   URL is accepted and handed to the local companion, so the menu works on any
+   media site `yt-dlp` supports. Batch downloads render a live `pacman`-style
+   overall item counter and percentage progress bar in the terminal during
+   download and multi-track audio finalization.
  3. **Extension popup** — click the toolbar icon to manage audio/video folders,
      formats, tagging, artwork, ReplayGain, channels, and long-audio routing.
 4. **Global keyboard shortcuts & CLI** — assign system-wide hotkeys (for
@@ -73,15 +84,24 @@ Four touchpoints (three to start a download, plus popup settings):
 
 > **Pin Huginn Downloader to the toolbar** for one-click access to its popup.
 > The popup is where you choose download folders and formats and manage tagging,
-> cover art, ReplayGain, channels, and other settings. Click Firefox's
+> cover art, ReplayGain, channels, and other settings. Click your browser's
 > **Extensions** puzzle-piece, find **Huginn Downloader**, then choose **Pin to
 > Toolbar** from its menu.
 
 ## Tested desktop environments
 
-- CachyOS with KDE Plasma
-- LMDE 7 with Cinnamon
+Tested directly on **Firefox** and **Chromium** across:
+
+- Arch Linux (CachyOS) with KDE Plasma
 - Debian 13 with GNOME
+- LMDE 7 with Cinnamon
+
+Other compatible browsers supported by the extension build and Native Messaging
+setup (should work identically, though not individually tested on every
+release):
+
+- **Gecko / Firefox family:** Firefox, LibreWolf, Zen Browser, Floorp, Waterfox
+- **Chromium family (Manifest V3):** Chromium, Ungoogled Chromium, Brave, Vivaldi, Google Chrome, Microsoft Edge
 
 ## Why prefer official audio uploads ("Art Tracks")
 
@@ -278,7 +298,9 @@ for the optional `rsgain`.
 
 ## Install the extension
 
-Install the **signed** XPI from the latest GitHub Release using Firefox's
+### Firefox & Gecko browsers (Firefox, LibreWolf, Zen Browser, Floorp, Waterfox)
+
+Install the **signed** XPI from the latest GitHub Release using your browser's
 **Add-ons and themes → gear → Install Add-on From File…** action, or install
 the Listed version from AMO if the store listing is available. An unsigned
 local build is for development and cannot be permanently installed in normal
@@ -287,6 +309,22 @@ temporarily load it from `about:debugging`. Maintainers sign releases with
 `./scripts/sign-xpi.sh` (see [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md));
 the signed artifact is
 `dist/huginn-signed.xpi`.
+
+### Chromium, Brave, Vivaldi, Chrome & Edge (Manifest V3)
+
+1. Download and extract `huginn-chromium-*.zip` from the latest GitHub Release
+   (or build `dist/huginn-chromium` locally with `./scripts/build-chromium.sh`).
+2. Open the extensions page for your browser (`chrome://extensions`,
+   `brave://extensions`, `vivaldi://extensions`, or `edge://extensions`) and
+   toggle **Developer mode** on.
+3. Click **Load unpacked** and select the extracted folder that contains
+   `manifest.json` (for example `dist/huginn-chromium`). Keep that folder on
+   disk.
+4. Make sure you also install the local companion (`./install.sh --install --yes`
+   or the distro package) so Native Messaging manifests are registered for
+   Firefox-family and Chromium-family browsers (`Chromium`, `Chrome`, `Brave`,
+   `Vivaldi`, and `Edge`). When updating an unpacked build, pull/extract the
+   new files and click the refresh/reload icon on the extension card.
 
 On KDE, enter AMO credentials directly in **KWallet Manager** once:
 
