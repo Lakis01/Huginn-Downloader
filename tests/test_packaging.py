@@ -49,6 +49,26 @@ class LinuxPackageStagingTests(unittest.TestCase):
                 manifest["allowed_extensions"],
                 ["firefox-youtube-downloader@lakis01.github.io"],
             )
+            librewolf_manifest = json.loads(
+                (stage / "usr/lib64/librewolf/native-messaging-hosts/firefox_youtube_downloader.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(librewolf_manifest, manifest)
+            for chromium_dir in (
+                "etc/chromium/native-messaging-hosts",
+                "etc/opt/chrome/native-messaging-hosts",
+                "etc/brave/native-messaging-hosts",
+                "etc/vivaldi/native-messaging-hosts",
+                "etc/opt/edge/native-messaging-hosts",
+            ):
+                cr_manifest = json.loads(
+                    (stage / chromium_dir / "firefox_youtube_downloader.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(cr_manifest["name"], "firefox_youtube_downloader")
+                self.assertEqual(cr_manifest["path"], "/usr/lib/firefox-youtube-downloader/yt-dlp-native-host.py")
+                self.assertEqual(
+                    cr_manifest["allowed_origins"],
+                    ["chrome-extension://hlekndcccbgmhlablldcddddmknkjomg/"],
+                )
             desktop_dir = stage / "usr/share/applications"
             desktop_files = sorted(desktop_dir.glob("*.desktop"))
             self.assertEqual(len(desktop_files), 3)
@@ -343,3 +363,39 @@ class ReleaseAssetUploadTests(unittest.TestCase):
             )
             self.assertNotEqual(missing_xpi.returncode, 0)
             self.assertNotIn("release upload", log.read_text(encoding="utf-8"))
+
+
+class BumpVersionTests(unittest.TestCase):
+    def test_bump_version_updates_manifest_host_tests_and_readme_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            for rel in (
+                "extension/manifest.json",
+                "bin/yt-dlp-native-host.py",
+                "tests/test_firefox_extension.js",
+                "tests/test_native_host.py",
+                "README.md",
+            ):
+                dst = tmp_root / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / rel, dst)
+
+            old_version = json.loads((tmp_root / "extension/manifest.json").read_text(encoding="utf-8"))["version"]
+            major, minor, patch = (int(x) for x in old_version.split("."))
+            expected = f"{major}.{minor}.{patch + 1}"
+
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/bump_version.py"), "--root", str(tmp_root), "--patch"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(result.stdout.strip(), expected)
+            self.assertEqual(
+                json.loads((tmp_root / "extension/manifest.json").read_text(encoding="utf-8"))["version"],
+                expected,
+            )
+            self.assertIn(f'VERSION = "{expected}"', (tmp_root / "bin/yt-dlp-native-host.py").read_text(encoding="utf-8"))
+            self.assertIn(f"huginn-companion_{expected}_all.deb", (tmp_root / "README.md").read_text(encoding="utf-8"))
+            self.assertIn(f"manifest.version, '{expected}'", (tmp_root / "tests/test_firefox_extension.js").read_text(encoding="utf-8"))
+            self.assertIn(f'HOST.VERSION, "{expected}"', (tmp_root / "tests/test_native_host.py").read_text(encoding="utf-8"))

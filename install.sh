@@ -176,10 +176,21 @@ fi
 
 CONFIG_DEST=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import config_path; print(config_path())')
 XDG_CONFIG_HOME_RESOLVED=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import config_path; print(config_path().parents[1])')
+CHROMIUM_ORIGIN="chrome-extension://hlekndcccbgmhlablldcddddmknkjomg/"
 if $IS_MACOS; then
     HOME_NATIVE_MANIFEST="$TARGET_HOME/Library/Application Support/Mozilla/NativeMessagingHosts/firefox_youtube_downloader.json"
     XDG_NATIVE_MANIFEST=
     NATIVE_MANIFESTS_SAME=true
+    EXTRA_GECKO_MANIFESTS=(
+        "$TARGET_HOME/Library/Application Support/LibreWolf/NativeMessagingHosts/firefox_youtube_downloader.json"
+    )
+    CHROMIUM_MANIFESTS=(
+        "$TARGET_HOME/Library/Application Support/Chromium/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$TARGET_HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$TARGET_HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$TARGET_HOME/Library/Application Support/Vivaldi/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$TARGET_HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts/firefox_youtube_downloader.json"
+    )
 else
     HOME_NATIVE_MANIFEST="$TARGET_HOME/.mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
     XDG_NATIVE_MANIFEST="$XDG_CONFIG_HOME_RESOLVED/mozilla/native-messaging-hosts/firefox_youtube_downloader.json"
@@ -188,7 +199,17 @@ from pathlib import Path
 import sys
 print("true" if Path(sys.argv[1]).resolve() == Path(sys.argv[2]).resolve() else "false")
 PY
-)
+    )
+    EXTRA_GECKO_MANIFESTS=(
+        "$TARGET_HOME/.librewolf/native-messaging-hosts/firefox_youtube_downloader.json"
+    )
+    CHROMIUM_MANIFESTS=(
+        "$XDG_CONFIG_HOME_RESOLVED/chromium/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$XDG_CONFIG_HOME_RESOLVED/google-chrome/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$XDG_CONFIG_HOME_RESOLVED/BraveSoftware/Brave-Browser/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$XDG_CONFIG_HOME_RESOLVED/vivaldi/NativeMessagingHosts/firefox_youtube_downloader.json"
+        "$XDG_CONFIG_HOME_RESOLVED/microsoft-edge/NativeMessagingHosts/firefox_youtube_downloader.json"
+    )
 fi
 YTDLP_CONFIG_EXISTS=$(PYTHONPATH="$BIN_SOURCE" HOME="$TARGET_HOME" python3 -c 'from ytdl_config import ytdlp_config_exists; print("true" if ytdlp_config_exists() else "false")')
 PLUGIN_CONFIG_EXISTS=false
@@ -208,6 +229,9 @@ if ! $INSTALL; then
     if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
         printf '  Write native-messaging manifest: %s\n' "$XDG_NATIVE_MANIFEST"
     fi
+    for extra_manifest in "${EXTRA_GECKO_MANIFESTS[@]}" "${CHROMIUM_MANIFESTS[@]}"; do
+        printf '  Write browser native-messaging manifest: %s\n' "$extra_manifest"
+    done
     printf '  Build %s\n' "$XPI_TARGET"
     printf '  Config: %s\n' "$CONFIG_DEST"
     if $PLUGIN_CONFIG_EXISTS; then
@@ -247,6 +271,9 @@ check_destination "$HOME_NATIVE_MANIFEST"
 if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     check_destination "$XDG_NATIVE_MANIFEST"
 fi
+for extra_manifest in "${EXTRA_GECKO_MANIFESTS[@]}" "${CHROMIUM_MANIFESTS[@]}"; do
+    check_destination "$extra_manifest"
+done
 check_destination "$CONFIG_DEST"
 check_destination "$XPI_TARGET"
 
@@ -412,6 +439,17 @@ else
 fi
 
 "$ROOT/scripts/build-xpi.sh"
+if [[ -x $ROOT/scripts/build-chromium.sh ]]; then
+    "$ROOT/scripts/build-chromium.sh"
+fi
+
+register_browser_manifest() {
+    local source=$1 destination=$2
+    mkdir -p -- "$(dirname -- "$destination")"
+    backup_if_present "$destination"
+    install -m 644 "$source" "$destination"
+    printf 'Registered browser host -> %s\n' "$destination"
+}
 
 for file in "${BIN_FILES[@]}"; do
     source_file="$BIN_SOURCE/$file"
@@ -449,3 +487,27 @@ install_source "$manifest_template" "$HOME_NATIVE_MANIFEST" 644
 if ! $IS_MACOS && [[ $NATIVE_MANIFESTS_SAME == false ]]; then
     install_source "$manifest_template" "$XDG_NATIVE_MANIFEST" 644
 fi
+for extra_manifest in "${EXTRA_GECKO_MANIFESTS[@]}"; do
+    register_browser_manifest "$manifest_template" "$extra_manifest"
+done
+
+chromium_manifest_template="$STAGING_DIR/firefox_youtube_downloader_chromium.json"
+python3 - "$chromium_manifest_template" "$BIN_TARGET/yt-dlp-native-host.py" "$CHROMIUM_ORIGIN" <<'PY'
+import json
+import sys
+
+destination, host_path, origin = sys.argv[1:]
+manifest = {
+    "name": "firefox_youtube_downloader",
+    "description": "Native Messaging host for Huginn Downloader",
+    "path": host_path,
+    "type": "stdio",
+    "allowed_origins": [origin],
+}
+with open(destination, "w", encoding="utf-8") as stream:
+    json.dump(manifest, stream, indent=2)
+    stream.write("\n")
+PY
+for chromium_manifest in "${CHROMIUM_MANIFESTS[@]}"; do
+    register_browser_manifest "$chromium_manifest_template" "$chromium_manifest"
+done

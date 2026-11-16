@@ -1314,6 +1314,65 @@ class WrapperTests(unittest.TestCase):
             )
             self.assertEqual(yt_dlp_commands[0][-2:], ["--", url])
 
+    def test_download_audio_playlist_url_and_items_finalize_every_track(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            track1 = Path(tmp) / "first.opus"
+            track2 = Path(tmp) / "second.opus"
+            commands = []
+
+            def fake_run(command, **kwargs):
+                commands.append(command)
+                if command[0] == "yt-dlp":
+                    print_files = {}
+                    for idx, value in enumerate(command[:-2]):
+                        if value == "--print-to-file":
+                            print_files[command[idx + 1]] = command[idx + 2]
+                    Path(print_files["after_move:filepath"]).write_text(
+                        f"{track1}\n{track2}\n", encoding="utf-8"
+                    )
+                    Path(print_files["after_move:duration"]).write_text(
+                        "120\n240\n", encoding="utf-8"
+                    )
+                    self._write_download_sidecars(
+                        track1, {"title": "First", "channel": "Artist A", "duration": 120}
+                    )
+                    self._write_download_sidecars(
+                        track2, {"title": "Second", "channel": "Artist B", "duration": 240}
+                    )
+                return SimpleNamespace(stdout="")
+
+            config = {
+                "download_dir": tmp,
+                "auto_tag": True,
+                "rsgain": False,
+                "embed_thumbnail": False,
+            }
+            with mock.patch.object(wrapper, "tag_audio_file"):
+                with mock.patch.object(
+                    wrapper, "_ensure_audio_properties",
+                    side_effect=lambda path, *_args, **_kwargs: path,
+                ):
+                    with mock.patch.object(
+                        wrapper.subprocess, "run", side_effect=fake_run
+                    ):
+                        result = wrapper.download_audio(
+                            "https://www.youtube.com/playlist?list=PL123",
+                            config,
+                            playlist_items="1-3,5",
+                        )
+
+            yt_dlp_command = next(cmd for cmd in commands if cmd[0] == "yt-dlp")
+            self.assertIn("--yes-playlist", yt_dlp_command)
+            self.assertNotIn("--no-playlist", yt_dlp_command)
+            self.assertEqual(
+                yt_dlp_command[yt_dlp_command.index("--playlist-items") + 1],
+                "1-3,5",
+            )
+            self.assertTrue((Path(tmp) / "Artist A - First.opus").is_file())
+            self.assertTrue((Path(tmp) / "Artist B - Second.opus").is_file())
+            self.assertEqual(result, str(Path(tmp) / "Artist B - Second.opus"))
+
     def test_download_audio_auto_tag_false_skips_retag_and_honors_rsgain(self):
         wrapper = _load_wrapper(self)
         for do_rsgain in (False, True):
@@ -2210,6 +2269,31 @@ class WrapperTests(unittest.TestCase):
         self.assertNotIn("-P", command)
         self.assertEqual(command[-2:], ["--", "https://vimeo.com/12345"])
         self.assertEqual(run.call_count, 1)
+
+    def test_video_mode_forwards_playlist_scope_and_items(self):
+        wrapper = _load_wrapper(self)
+        commands = []
+        with mock.patch.object(wrapper, "effective_video_download_dir", return_value=None), \
+             mock.patch.object(wrapper, "_run_with_auth_retry", side_effect=lambda cmd: commands.append(cmd)):
+            wrapper.download_video(
+                "https://www.youtube.com/watch?v=1&list=PLabc",
+                {"verbose_output": False},
+                playlist=False,
+            )
+            wrapper.download_video(
+                "https://www.youtube.com/watch?v=1&list=PLabc",
+                {"verbose_output": False},
+                playlist=True,
+                playlist_items="1-5",
+            )
+
+        self.assertIn("--no-playlist", commands[0])
+        self.assertNotIn("--yes-playlist", commands[0])
+        self.assertIn("--yes-playlist", commands[1])
+        self.assertEqual(
+            commands[1][commands[1].index("--playlist-items") + 1],
+            "1-5",
+        )
 
     def test_main_reports_video_yt_dlp_failure_without_traceback(self):
         wrapper = _load_wrapper(self)

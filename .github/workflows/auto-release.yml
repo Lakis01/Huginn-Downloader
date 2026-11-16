@@ -1,0 +1,152 @@
+name: Automated Version Bump & Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump level (patch, minor, major)
+        required: false
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || (!startsWith(github.event.head_commit.message, 'chore(release):') && !contains(github.event.head_commit.message, '[skip release]'))
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            dpkg-dev desktop-file-utils ffmpeg nodejs \
+            python3-mutagen python3-pil
+
+      - name: Run full verification suite before version bump
+        run: |
+          python3 -m unittest discover -s tests -v </dev/null
+          node tests/test_firefox_extension.js
+          bash tests/test_shortcut.sh </dev/null
+          desktop-file-validate desktop/*.desktop
+
+      - name: Bump version and verify updated artifacts
+        id: bump
+        run: |
+          set -euo pipefail
+          BUMP_FLAG="--${{ inputs.bump || 'patch' }}"
+          VERSION=$(python3 scripts/bump_version.py "$BUMP_FLAG")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          python3 -m unittest tests/test_native_host.py tests/test_packaging.py -v </dev/null
+          node tests/test_firefox_extension.js
+          bash scripts/build-xpi.sh
+          bash scripts/build-chromium.sh
+          cp dist/huginn-chromium.zip "dist/huginn-chromium-${VERSION}.zip"
+
+      - name: Commit version bump and push tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension/manifest.json bin/yt-dlp-native-host.py \
+            tests/test_firefox_extension.js tests/test_native_host.py README.md
+          git commit -m "chore(release): ${{ steps.bump.outputs.tag }} [skip release]"
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "${{ steps.bump.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Build source tarball, Debian .deb, Fedora .rpm, and Arch recipe
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash scripts/build-source-tarball.sh dist
+          bash scripts/build-deb.sh dist
+          rpm_out="$GITHUB_WORKSPACE/dist/rpm-out"
+          mkdir -p "$rpm_out"
+          chmod 777 "$rpm_out"
+          docker run --rm \
+            -e VERSION="$VERSION" \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -v "$rpm_out:/out" \
+            -w /src \
+            fedora:latest \
+            bash -euc '
+              dnf install -y rpm-build python3 tar gzip shadow-utils
+              useradd --create-home package-builder
+              su - package-builder -s /bin/bash -c \
+                "bash /src/scripts/build-rpm.sh /src/dist/huginn-downloader-${VERSION}-source.tar.gz /out"
+            '
+          mv "$rpm_out"/*.rpm dist/
+          rmdir "$rpm_out"
+          bash scripts/build-arch-recipe.sh "dist/huginn-downloader-${VERSION}-source.tar.gz" dist
+
+      - name: Sign or submit Firefox extension to AMO
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          AMO_CHANNEL: ${{ vars.AMO_CHANNEL || 'unlisted' }}
+        run: |
+          set -euo pipefail
+          if [[ -z ${AMO_JWT_ISSUER:-} || -z ${AMO_JWT_SECRET:-} ]]; then
+            echo "AMO_JWT_ISSUER / AMO_JWT_SECRET secrets are not set; skipping AMO signing."
+            exit 0
+          fi
+          if [[ $AMO_CHANNEL == listed ]]; then
+            trap 'rm -f extension/.amo-upload-uuid' EXIT
+            WEB_EXT_API_KEY="$AMO_JWT_ISSUER" \
+            WEB_EXT_API_SECRET="$AMO_JWT_SECRET" \
+            npx --yes web-ext sign \
+              --source-dir extension \
+              --artifacts-dir web-ext-artifacts \
+              --channel=listed \
+              --timeout=300000 || echo "AMO listed submission queued for review."
+            newest="$(ls -t web-ext-artifacts/*.xpi 2>/dev/null | head -n 1 || true)"
+            if [[ -n $newest ]]; then
+              cp "$newest" dist/huginn-signed.xpi
+            fi
+          else
+            bash scripts/sign-xpi.sh
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          assets=(
+            "dist/huginn-chromium-${VERSION}.zip"
+            "dist/huginn-companion_${VERSION}_all.deb"
+            "dist/huginn-companion-${VERSION}-1.noarch.rpm"
+            "dist/huginn-downloader-${VERSION}-source.tar.gz"
+            "dist/huginn-downloader-${VERSION}-arch-pkgbuild.tar.gz"
+          )
+          if [[ -f dist/huginn-signed.xpi ]]; then
+            assets=("dist/huginn-signed.xpi" "${assets[@]}")
+          else
+            assets=("dist/firefox-youtube-downloader.xpi" "${assets[@]}")
+          fi
+          gh release create "$TAG" "${assets[@]}" \
+            --title "Huginn Downloader $VERSION" \
+            --generate-notes

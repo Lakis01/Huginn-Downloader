@@ -139,12 +139,12 @@ The popup uses short format labels. These choices are also available through
 
 | Popup label | Format | Behavior |
 | --- | --- | --- |
-| Best available | `best` | Keep native Opus/M4A when possible without lossy re-encoding. |
+| Native (Opus / m4a) | `best` | Keep native Opus/M4A when possible without lossy re-encoding. |
 | MP3 | `mp3` | Convert through FFmpeg for players that require MP3. |
-| M4A / AAC | `m4a` | Prefer native AAC; convert through FFmpeg only when needed. |
+| M4A / AAC (transcode if not natively available) | `m4a` | Prefer native AAC; convert through FFmpeg only when needed. |
 | Ogg Vorbis | `ogg` | Convert through FFmpeg to Vorbis. |
 | FLAC | `flac` | Convert through FFmpeg; it cannot restore quality lost in the source. |
-| Opus | `opus` | Force Opus; copy native Opus when possible, otherwise convert through FFmpeg. |
+| Opus (transcode if not natively available) | `opus` | Force Opus; copy native Opus when possible, otherwise convert through FFmpeg. |
 
 More detail on forced Opus and AAC behavior:
 
@@ -502,7 +502,7 @@ The popup stores these options in the user's config file:
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
 | Verbose yt-dlp diagnostics | Off (quiet) | The download terminal shows live progress, speed, and ETA even in quiet mode. Turn this on to include yt-dlp's detailed logs (`verbose_output`); those logs may include URLs and request details. |
-| Audio format | Best available (native Opus / M4A, no conversion) | Best available, MP3, M4A / AAC, Ogg Vorbis, FLAC, or Opus. The popup labels are short; the audio-quality section above explains conversion behavior. |
+| Audio format | Native (Opus / m4a) (no conversion) | Native (Opus / m4a), MP3, M4A / AAC (transcode if not natively available), Ogg Vorbis, FLAC, or Opus (transcode if not natively available). The audio-quality section above explains conversion behavior. |
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |
 | Embed thumbnail picture | On | Download and embed cover art (`image/webp`, JPEG for M4A). Turn off to skip thumbnails entirely. |
 | Convert thumbnail to JPEG | Off | Transcode cover art to `image/jpeg` for legacy hardware/car players that cannot render embedded WebP. |
@@ -567,48 +567,18 @@ Settings → Shortcuts → Custom Shortcuts**. On GNOME or Cinnamon, add the thr
 commands above under **Settings → Keyboard → Keyboard Shortcuts → Custom
 Shortcuts** and choose unused key combinations.
 
-## Forking for Brave, Chrome, Edge & Safari — contributions welcome
+## Chromium, Brave, Vivaldi, Chrome, Edge & LibreWolf support
 
-Please feel free to fork this project or contribute — it would be appreciated
-to build all extensions in this place — to also include Safari, Brave, Chrome,
-Chromium, Edge, Vivaldi, or the browser of your choice. Pull requests that add
-a browser shell while reusing the exact same Python companion
-(`bin/yt-dlp-native-host.py`, `yt-dlp-shortcut.sh`, `yt-dlp-wrapper.py`) are
-especially welcome.
+Huginn Downloader shares the exact same local companion across all major browsers:
 
-Research results for building the extension for other browsers:
+- **Gecko family (Firefox, LibreWolf, Zen, Floorp, Waterfox):** install the signed XPI from GitHub Releases or AMO; `install.sh`, `install.py`, and the Linux `.deb`/`.rpm`/Arch packages automatically register the Mozilla and LibreWolf Native Messaging hosts.
+- **Chromium family (Brave, Chromium, Ungoogled Chromium, Vivaldi, Google Chrome, Microsoft Edge):** run `bash scripts/build-chromium.sh` (or download `huginn-chromium-<version>.zip` from GitHub Releases and extract it). Open `brave://extensions` / `chrome://extensions` / `vivaldi://extensions`, turn on **Developer mode**, click **Load unpacked**, and select the extracted folder (`dist/huginn-chromium` when building locally). The MV3 manifest carries a fixed public `"key"` (`hlekndcccbgmhlablldcddddmknkjomg`), so the companion installers (`install.sh`, `install.py`, and the Linux packages) register the Native Messaging host automatically for Brave, Chromium, Google Chrome, Vivaldi, and Edge.
+- **Store notes:** Google bans YouTube downloaders from the Chrome Web Store, and Brave/Vivaldi pull extensions directly from the Chrome Web Store rather than operating separate public extension stores — so Chromium-family users install the unsigned unpacked MV3 build permanently in Developer Mode with zero store signing needed.
+- **Safari (macOS):** Apple's Mac App Store rejects YouTube downloader extensions under Guideline 5.2.3, but macOS users can convert `extension/` locally in one command (`xcrun safari-web-extension-converter extension/`) and run it in Safari with free local Xcode signing.
 
-- **Chrome Web Store (Chrome, Brave, Edge, Vivaldi):** Google strictly bans
-  YouTube downloader extensions from the official Chrome Web Store to protect
-  YouTube. However, Brave, Chromium, Vivaldi, and Chrome all allow installing an
-  unpacked folder or `.crx` via Developer Mode (`chrome://extensions` → Load
-  unpacked), and share the exact same `chrome.runtime.sendNativeMessage` API.
-- **Safari (macOS):** Apple's Mac App Store rejects YouTube downloader
-  extensions under Guideline 5.2.3, but macOS users can convert `extension/`
-  locally in one command (`xcrun safari-web-extension-converter extension/`)
-  and run it in Safari with free local Xcode signing.
+## Automated releases (GitHub Actions)
 
-Technical porting notes (same architecture, only the browser shell changes):
-
-- **Chromium-based browsers (Brave, Chrome, Edge, Vivaldi):** port
-  `extension/` to `manifest_version: 3` — move `background.js` into a service
-  worker, keep `menus`/`contextMenus` and `activeTab` usage, and swap
-  `browser.runtime.sendNativeMessage` for `chrome.runtime.sendNativeMessage`
-  (the background script already falls back to the `chrome` namespace).
-  Install the same host manifest under the Chromium messaging directory
-  instead of Firefox's, e.g. `~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/`
-  or `~/.config/google-chrome/NativeMessagingHosts/` for the matching channel,
-  keeping the host ID `firefox_youtube_downloader` (or rename it consistently
-  in both the manifest and the extension).
-- **Safari:** run Apple's converter on the shared source
-  (`xcrun safari-web-extension-converter extension/`), then wire the converted
-  target to the same Python host via Safari's native-messaging bridge. The
-  download, tagging, and cut pipeline (`yt-dlp`, FFmpeg, `ytdl_meta.py`) is
-  browser-agnostic and needs no changes.
-
-In all cases the local companion, config schema, and CLI (`yt-dlp-shortcut.sh`
-audio/video/cut) stay identical; only the browser shell and the messaging-host
-registration path differ.
+`.github/workflows/auto-release.yml` automates version bumping (`scripts/bump_version.py`), testing, Firefox AMO submission (`AMO_JWT_ISSUER` and `AMO_JWT_SECRET` repository secrets, with optional `AMO_CHANNEL` variable set to `unlisted` or `listed`), Chromium MV3 zip packaging, Linux package building (`.deb`, `.rpm`, Arch recipe, source tarball), and GitHub Release publishing on pushes to `main`.
 
 ## Uninstall & rollback
 

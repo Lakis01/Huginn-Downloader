@@ -120,8 +120,46 @@ def _dependencies():
     }
 
 
-def _launch_download(mode: str, chosen_url: str) -> None:
+def _normalize_playlist_items(value):
+    """Validate and normalize a yt-dlp --playlist-items / -I specification."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("playlist_items must be a string")
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if len(stripped) > 256:
+        raise ValueError("invalid playlist_items specification")
+    tokens = []
+    for raw_token in stripped.split(","):
+        token = re.sub(r"\s*([-:])\s*", r"\1", raw_token.strip())
+        if not token:
+            raise ValueError("invalid playlist_items specification")
+        if not re.fullmatch(r"(?:-?\d+|(?:-?\d+)?:-?\d*(?::-?\d*)?|\d+-\d+)", token):
+            raise ValueError("invalid playlist_items specification")
+        if not any(ch.isdigit() for ch in token):
+            raise ValueError("invalid playlist_items specification")
+        tokens.append(token)
+    return ",".join(tokens)
+
+
+def _launch_download(
+    mode: str,
+    chosen_url: str,
+    *,
+    playlist: bool | None = None,
+    playlist_items: str | None = None,
+) -> None:
     """Launch a download in a user-visible terminal on the current OS."""
+    extra_args: list[str] = []
+    if playlist is True:
+        extra_args.append("--playlist")
+    elif playlist is False:
+        extra_args.append("--no-playlist")
+    if playlist_items:
+        extra_args.extend(["--playlist-items", playlist_items])
+
     wrapper_py = Path(__file__).with_name("yt-dlp-wrapper.py")
     if sys.platform.startswith("linux"):
         shortcut = Path(
@@ -130,7 +168,7 @@ def _launch_download(mode: str, chosen_url: str) -> None:
             )
         )
         subprocess.Popen(
-            [str(shortcut), mode, chosen_url],
+            [str(shortcut), *extra_args, mode, chosen_url],
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -144,13 +182,16 @@ def _launch_download(mode: str, chosen_url: str) -> None:
         )
         try:
             os.fchmod(descriptor, 0o700)
+            quoted_args = " ".join(
+                shlex.quote(arg) for arg in [*extra_args, mode, chosen_url]
+            )
             command = (
                 "#!/bin/sh\n"
                 'rm -f -- "$0"\n'
                 'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"\n'
                 f"exec {shlex.quote(sys.executable)} "
                 f"{shlex.quote(str(wrapper_py))} --wait-keypress "
-                f"{shlex.quote(mode)} {shlex.quote(chosen_url)}\n"
+                f"{quoted_args}\n"
             )
             stream = os.fdopen(descriptor, "w", encoding="utf-8")
             descriptor = -1
@@ -178,6 +219,7 @@ def _launch_download(mode: str, chosen_url: str) -> None:
             sys.executable,
             str(wrapper_py),
             "--wait-keypress",
+            *extra_args,
             mode,
             chosen_url,
         ]
@@ -238,16 +280,41 @@ def _handle_download(message):
     if not isinstance(fallbacks, list):
         return {"ok": False, "error": "fallbacks must be a list"}
 
+    playlist = message.get("playlist")
+    if playlist is not None and not isinstance(playlist, bool):
+        return {"ok": False, "error": "playlist must be a boolean"}
+
+    try:
+        playlist_items = _normalize_playlist_items(message.get("playlist_items"))
+    except ValueError as error:
+        return {"ok": False, "error": str(error)}
+
+    if playlist is False:
+        playlist_items = None
+
     candidates = [message.get("url"), *fallbacks]
     chosen_url = next((url for url in candidates if _is_allowed_url(url)), None)
     if chosen_url is None:
         return {"ok": False, "error": "no valid URL was provided"}
 
     try:
-        _launch_download(mode, chosen_url)
+        if playlist is None and playlist_items is None:
+            _launch_download(mode, chosen_url)
+        else:
+            _launch_download(
+                mode,
+                chosen_url,
+                playlist=playlist,
+                playlist_items=playlist_items,
+            )
     except OSError as error:
         return {"ok": False, "error": str(error)}
-    return {"ok": True, "launched": True, "mode": mode, "url": chosen_url}
+    response = {"ok": True, "launched": True, "mode": mode, "url": chosen_url}
+    if playlist is not None:
+        response["playlist"] = playlist
+    if playlist_items is not None:
+        response["playlist_items"] = playlist_items
+    return response
 
 
 def handle_message(message):

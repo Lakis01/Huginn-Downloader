@@ -32,6 +32,12 @@ bash packaging/linux/stage-root.sh . %{buildroot} /usr/lib64/mozilla/native-mess
 %dir /usr/lib/firefox-youtube-downloader
 /usr/lib/firefox-youtube-downloader/*
 /usr/lib64/mozilla/native-messaging-hosts/firefox_youtube_downloader.json
+/usr/lib64/librewolf/native-messaging-hosts/firefox_youtube_downloader.json
+/etc/chromium/native-messaging-hosts/firefox_youtube_downloader.json
+/etc/opt/chrome/native-messaging-hosts/firefox_youtube_downloader.json
+/etc/brave/native-messaging-hosts/firefox_youtube_downloader.json
+/etc/vivaldi/native-messaging-hosts/firefox_youtube_downloader.json
+/etc/opt/edge/native-messaging-hosts/firefox_youtube_downloader.json
 /usr/share/applications/*.desktop
 
 %changelog

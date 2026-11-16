@@ -125,6 +125,21 @@ def is_youtube_url(url: str) -> bool:
     return any(host == base or host.endswith(f".{base}") for base in _YOUTUBE_HOSTS)
 
 
+def is_playlist_url(url: str) -> bool:
+    """Return True when a URL directly addresses a playlist page."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    path = parsed.path.rstrip("/")
+    if path == "/playlist":
+        params = urllib.parse.parse_qs(parsed.query)
+        return bool(params.get("list"))
+    return "/playlist/" in parsed.path
+
+
 def wait_for_keypress(prompt: str = "\nPress any key to close...") -> None:
     """Wait for a single keypress in raw/cbreak mode (interactive TTY only)."""
     if not sys.stdin.isatty():
@@ -968,8 +983,8 @@ def _yt_dlp_output_args(config=None):
     return ["--verbose"] if cfg.get("verbose_output", False) else ["--quiet"]
 
 
-def _read_print_to_file(print_path):
-    """Return the post-move media filepath yt-dlp reported via --print-to-file."""
+def _read_all_print_to_file(print_path) -> list[str]:
+    """Return all post-move media filepaths yt-dlp reported via --print-to-file."""
     try:
         with open(print_path, encoding="utf-8") as handle:
             lines = [line.strip() for line in handle if line.strip()]
@@ -977,18 +992,36 @@ def _read_print_to_file(print_path):
         lines = []
     if not lines:
         raise _YtDlpError("yt-dlp did not report the post-move media filepath")
-    return lines[-1]
+    return lines
+
+
+def _read_print_to_file(print_path):
+    """Return the post-move media filepath yt-dlp reported via --print-to-file."""
+    return _read_all_print_to_file(print_path)[-1]
+
+
+def _read_all_durations_print_to_file(print_path) -> list[float | None]:
+    """Return per-item post-move durations reported by yt-dlp."""
+    try:
+        with open(print_path, encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle if line.strip()]
+    except OSError:
+        return []
+    durations: list[float | None] = []
+    for line in lines:
+        try:
+            duration = float(line)
+        except ValueError:
+            durations.append(None)
+            continue
+        durations.append(duration if 0 < duration < float("inf") else None)
+    return durations
 
 
 def _read_duration_print_to_file(print_path):
     """Return yt-dlp's post-move duration, or None when it was unavailable."""
-    try:
-        with open(print_path, encoding="utf-8") as handle:
-            lines = [line.strip() for line in handle if line.strip()]
-        duration = float(lines[-1]) if lines else None
-    except (OSError, ValueError):
-        return None
-    return duration if duration is not None and 0 < duration < float("inf") else None
+    durations = _read_all_durations_print_to_file(print_path)
+    return durations[-1] if durations else None
 
 
 def _new_print_to_file():
@@ -1008,7 +1041,7 @@ def _remove_temp_file(path):
         pass
 
 
-def download_audio(url, config=None):
+def download_audio(url, config=None, *, playlist=None, playlist_items=None):
     config_was_live = config is None
     cfg = dict(config) if config is not None else load_config()
     cfg["channel_mode"] = _choose_channel_mode(cfg)
@@ -1017,6 +1050,17 @@ def download_audio(url, config=None):
     embed_thumbnail = cfg.get("embed_thumbnail", True)
     thumbnail_jpg = cfg.get("thumbnail_jpg", False)
     effective_dir = effective_download_dir(cfg)
+    use_playlist = (
+        bool(playlist_items)
+        or (playlist is True)
+        or (playlist is None and is_playlist_url(url))
+    )
+    if use_playlist:
+        playlist_args = ["--yes-playlist"]
+        if playlist_items:
+            playlist_args.extend(["--playlist-items", str(playlist_items)])
+    else:
+        playlist_args = ["--no-playlist"]
     print(f"[1/2] Downloading audio from {url}...")
     print_path = _new_print_to_file()
     duration_path = _new_print_to_file()
@@ -1046,7 +1090,7 @@ def download_audio(url, config=None):
             *extras,
             *_audio_format_args(cfg),
             *_yt_dlp_output_args(cfg),
-            "--no-playlist",
+            *playlist_args,
             "--progress",
             "-o", "%(title)s.%(ext)s",
             "--print-to-file", "after_move:filepath", print_path,
@@ -1054,25 +1098,33 @@ def download_audio(url, config=None):
             "--", url,
         ]
         _run_with_auth_retry(command)
-        filepath = _read_print_to_file(print_path)
-        original_filepath = filepath
-        filepath = _ensure_audio_properties(filepath, cfg)
-        if Path(filepath) != Path(original_filepath):
-            _move_audio_sidecar(original_filepath, filepath)
-        duration = _read_duration_print_to_file(duration_path)
-        return finalize_audio_download(
-            filepath,
-            "",
-            cfg,
-            duration,
-            refresh_auto_tag=config_was_live,
-        )
+        filepaths = _read_all_print_to_file(print_path)
+        durations = _read_all_durations_print_to_file(duration_path)
+        final_path = None
+        for index, filepath in enumerate(filepaths):
+            original_filepath = filepath
+            filepath = _ensure_audio_properties(filepath, cfg)
+            if Path(filepath) != Path(original_filepath):
+                _move_audio_sidecar(original_filepath, filepath)
+            duration = (
+                durations[index]
+                if index < len(durations)
+                else (durations[-1] if len(filepaths) == 1 and durations else None)
+            )
+            final_path = finalize_audio_download(
+                filepath,
+                "",
+                cfg,
+                duration,
+                refresh_auto_tag=config_was_live,
+            )
+        return final_path
     finally:
         _remove_temp_file(print_path)
         _remove_temp_file(duration_path)
 
 
-def download_video(url, config=None):
+def download_video(url, config=None, *, playlist=None, playlist_items=None):
     cfg = dict(config) if config is not None else load_config()
     effective_dir = effective_video_download_dir(cfg)
     print("[1/2] Downloading video & audio streams...")
@@ -1081,6 +1133,13 @@ def download_video(url, config=None):
         extras.extend(["--ies", "youtube,youtube:tab"])
     if effective_dir is not None:
         extras.extend(["-P", effective_dir])
+    playlist_args = []
+    if playlist is False:
+        playlist_args.append("--no-playlist")
+    elif playlist is True or playlist_items:
+        playlist_args.append("--yes-playlist")
+        if playlist_items:
+            playlist_args.extend(["--playlist-items", str(playlist_items)])
     command = [
         "yt-dlp",
         *extras,
@@ -1090,6 +1149,7 @@ def download_video(url, config=None):
         "--convert-thumbnails", "webp",
         "--embed-metadata",
         *_yt_dlp_output_args(cfg),
+        *playlist_args,
         "--progress",
         "--print",
         "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
@@ -1313,16 +1373,36 @@ def _print_update_notice(status):
 
 def main(argv=None):
     argv = sys.argv if argv is None else argv
-    args = list(argv[1:])
+    raw_args = list(argv[1:])
     wait_keypress = False
-    if args and args[0] == "--wait-keypress":
-        wait_keypress = True
-        args = args[1:]
+    playlist = None
+    playlist_items = None
+    args = []
+    index = 0
+    while index < len(raw_args):
+        arg = raw_args[index]
+        if arg == "--wait-keypress":
+            wait_keypress = True
+        elif arg == "--playlist":
+            playlist = True
+        elif arg == "--no-playlist":
+            playlist = False
+        elif arg == "--playlist-items":
+            if index + 1 >= len(raw_args):
+                print("Missing value for --playlist-items.", file=sys.stderr)
+                return 1
+            playlist_items = raw_args[index + 1]
+            index += 1
+        elif arg.startswith("--playlist-items="):
+            playlist_items = arg.split("=", 1)[1]
+        else:
+            args.append(arg)
+        index += 1
     if os.environ.get("YTDL_WAIT_KEYPRESS") == "1":
         wait_keypress = True
     try:
         if len(args) < 2:
-            print("Usage: yt-dlp-wrapper.py [--wait-keypress] [audio|video|cut] <url>")
+            print("Usage: yt-dlp-wrapper.py [--wait-keypress] [--playlist|--no-playlist] [--playlist-items SPEC] [audio|video|cut] <url>")
             return 1
 
         mode, url = args[0], args[1]
@@ -1337,9 +1417,23 @@ def main(argv=None):
             _print_update_notice(status)
         try:
             if mode == "audio":
-                download_audio(url)
+                if playlist is None and playlist_items is None:
+                    download_audio(url)
+                else:
+                    download_audio(
+                        url,
+                        playlist=playlist,
+                        playlist_items=playlist_items,
+                    )
             elif mode == "video":
-                download_video(url)
+                if playlist is None and playlist_items is None:
+                    download_video(url)
+                else:
+                    download_video(
+                        url,
+                        playlist=playlist,
+                        playlist_items=playlist_items,
+                    )
             elif mode == "cut":
                 interactive_cut(url)
             else:

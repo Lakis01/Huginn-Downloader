@@ -97,18 +97,25 @@ async function openOnboarding() {
   await api.tabs.create({ url });
 }
 
-async function sendDownload(mode, primaryUrl, fallbacks) {
+async function sendDownload(mode, primaryUrl, fallbacks, options) {
   const api = ext();
   if (!api) return { ok: false, error: 'extension API unavailable' };
   const candidates = dedupeUrls([primaryUrl, ...(fallbacks || [])]);
   const url = candidates[0] || null;
+  const payload = {
+    action: 'download',
+    mode,
+    url,
+    fallbacks: candidates.slice(1),
+  };
+  if (options && typeof options.playlist === 'boolean') {
+    payload.playlist = options.playlist;
+  }
+  if (options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
+    payload.playlist_items = options.playlistItems.trim();
+  }
   try {
-    const response = await api.runtime.sendNativeMessage(HOST_ID, {
-      action: 'download',
-      mode,
-      url,
-      fallbacks: candidates.slice(1),
-    });
+    const response = await api.runtime.sendNativeMessage(HOST_ID, payload);
     // A non-OK reply is a download failure from a connected companion,
     // not a missing companion, so it must not open onboarding. Only a
     // rejected sendNativeMessage (companion missing) does that.
@@ -137,11 +144,19 @@ async function handleMenuClick(info, tab) {
   await sendDownload(mode, primaryUrl, fallbacks);
 }
 
-function handlePillMessage(message) {
+function handlePillMessage(message, _sender, sendResponse) {
   if (!message || message.type !== 'ytdl-trigger-download') return undefined;
   const mode = message.mode;
   if (mode !== 'audio' && mode !== 'video' && mode !== 'cut') return undefined;
-  return sendDownload(mode, message.url || null, message.fallbacks || []);
+  const result = sendDownload(mode, message.url || null, message.fallbacks || [], {
+    playlist: message.playlist,
+    playlistItems: message.playlistItems,
+  });
+  if (typeof sendResponse === 'function' && (typeof browser === 'undefined' || !browser)) {
+    Promise.resolve(result).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  return result;
 }
 
 async function setupMenus() {
@@ -181,14 +196,18 @@ async function setupMenus() {
       icons: { 16: 'icons/cut.svg', 32: 'icons/cut.svg' },
     },
   ];
+  const supportsMenuIcons = Boolean(typeof browser !== 'undefined' && browser && browser.menus);
   for (const item of items) {
+    const menuItem = supportsMenuIcons
+      ? item
+      : (({ icons: _icons, ...rest }) => rest)(item);
     try {
-      const created = menus.create(item);
+      const created = menus.create(menuItem);
       if (created && typeof created.catch === 'function') {
         await created.catch(async () => {
           // A stale persisted menu can block creation; update instead.
           try {
-            if (menus.update) await menus.update(item.id, item);
+            if (menus.update) await menus.update(item.id, menuItem);
           } catch (_updateError) {
             // Menu still stands; nothing to repair.
           }
@@ -196,7 +215,7 @@ async function setupMenus() {
       }
     } catch (_error) {
       try {
-        if (menus.update) await menus.update(item.id, item);
+        if (menus.update) await menus.update(item.id, menuItem);
       } catch (_updateError) {
         // Menu still stands; nothing to repair.
       }

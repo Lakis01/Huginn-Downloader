@@ -150,6 +150,22 @@ run_shortcut audio "$valid_url"
 assert_launch audio "$valid_url" 'explicit URL and mode'
 pass 'passes explicit URLs and mode as separate arguments'
 
+rm -f -- "$CALL_ARGS"
+HOME="$TMP/home" YTDL_TERMINAL=${YTDL_TERMINAL:-konsole} \
+    "$SHORTCUT" --playlist --playlist-items 1-5,8 audio "$valid_url"
+[[ -f "$CALL_ARGS" ]] || fail 'playlist shortcut launch failed'
+mapfile -t playlist_args < "$CALL_ARGS"
+assert_eq '-e' "${playlist_args[0]:-}" 'playlist shortcut: Konsole execute option'
+assert_eq "$SOURCE_WRAPPER" "${playlist_args[1]:-}" 'playlist shortcut: wrapper path'
+assert_eq '--wait-keypress' "${playlist_args[2]:-}" 'playlist shortcut: wait-keypress option'
+assert_eq '--playlist' "${playlist_args[3]:-}" 'playlist shortcut: --playlist flag'
+assert_eq '--playlist-items' "${playlist_args[4]:-}" 'playlist shortcut: --playlist-items flag'
+assert_eq '1-5,8' "${playlist_args[5]:-}" 'playlist shortcut: item spec'
+assert_eq 'audio' "${playlist_args[6]:-}" 'playlist shortcut: mode'
+assert_eq "$valid_url" "${playlist_args[7]:-}" 'playlist shortcut: URL'
+assert_eq 8 "${#playlist_args[@]}" 'playlist shortcut: argument count'
+pass 'forwards --playlist and --playlist-items flags to wrapper'
+
 PRIMARY_SELECTION=$other_url MPRIS_OUTPUT='no active media' \
     CLIPBOARD_SELECTION='' run_shortcut audio 'not a URL'
 assert_launch audio "$other_url" 'invalid explicit URL fallback'

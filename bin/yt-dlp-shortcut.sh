@@ -30,8 +30,45 @@ SCRIPT_NAME=${0##*/}
 MODE=audio
 
 usage() {
-    printf 'Usage: %s [audio|video|cut] [URL1 [URL2]]\n' "$SCRIPT_NAME" >&2
+    printf 'Usage: %s [--playlist|--no-playlist] [--playlist-items SPEC] [audio|video|cut] [URL1 [URL2]]\n' "$SCRIPT_NAME" >&2
 }
+
+PLAYLIST_ARGS=()
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --playlist)
+            PLAYLIST_ARGS+=(--playlist)
+            shift
+            ;;
+        --no-playlist)
+            PLAYLIST_ARGS+=(--no-playlist)
+            shift
+            ;;
+        --playlist-items=*)
+            spec=${1#*=}
+            if [[ ! $spec =~ ^[0-9:,-]+$ || ! $spec =~ [0-9] ]]; then
+                printf 'Invalid playlist items specification: %s\n' "$spec" >&2
+                exit 2
+            fi
+            PLAYLIST_ARGS+=(--playlist-items "$spec")
+            shift
+            ;;
+        --playlist-items)
+            if [[ $# -lt 2 || ! $2 =~ ^[0-9:,-]+$ || ! $2 =~ [0-9] ]]; then
+                printf 'Invalid playlist items specification.\n' >&2
+                exit 2
+            fi
+            PLAYLIST_ARGS+=(--playlist-items "$2")
+            shift 2
+            ;;
+        *)
+            POSITIONAL+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 
 CANDIDATES=()
 
@@ -282,13 +319,13 @@ fi
 
 case ${terminal_name##*/} in
     konsole|tilix|alacritty|kitty|xterm|x-terminal-emulator)
-        exec "$terminal_name" -e "$WRAPPER" --wait-keypress "$MODE" "$URL"
+        exec "$terminal_name" -e "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} "$MODE" "$URL"
         ;;
     xfce4-terminal)
-        exec "$terminal_name" -x "$WRAPPER" --wait-keypress "$MODE" "$URL"
+        exec "$terminal_name" -x "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} "$MODE" "$URL"
         ;;
     ptyxis|kgx|gnome-terminal|mate-terminal)
-        exec "$terminal_name" -- "$WRAPPER" --wait-keypress "$MODE" "$URL"
+        exec "$terminal_name" -- "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} "$MODE" "$URL"
         ;;
     *)
         printf 'Unsupported terminal emulator: %s\n' "$terminal_name" >&2

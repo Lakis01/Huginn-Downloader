@@ -12,6 +12,7 @@ NATIVE_MANIFEST_ROOT=$3
 APP_ROOT=/usr/lib/firefox-youtube-downloader
 HOST_PATH="$APP_ROOT/yt-dlp-native-host.py"
 EXTENSION_ID=firefox-youtube-downloader@lakis01.github.io
+CHROMIUM_ORIGIN=chrome-extension://hlekndcccbgmhlablldcddddmknkjomg/
 
 [[ $NATIVE_MANIFEST_ROOT == /* ]] || {
     printf 'Native Messaging manifest root must be absolute: %s\n' "$NATIVE_MANIFEST_ROOT" >&2
@@ -71,6 +72,41 @@ manifest = {
 Path(destination).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY
 chmod 644 "$manifest_destination"
+
+if [[ $NATIVE_MANIFEST_ROOT == /usr/lib64/* ]]; then
+    librewolf_manifest="$DEST_ROOT/usr/lib64/librewolf/native-messaging-hosts/firefox_youtube_downloader.json"
+else
+    librewolf_manifest="$DEST_ROOT/usr/lib/librewolf/native-messaging-hosts/firefox_youtube_downloader.json"
+fi
+mkdir -p -- "$(dirname -- "$librewolf_manifest")"
+cp "$manifest_destination" "$librewolf_manifest"
+chmod 644 "$librewolf_manifest"
+
+for chromium_dir in \
+    /etc/chromium/native-messaging-hosts \
+    /etc/opt/chrome/native-messaging-hosts \
+    /etc/brave/native-messaging-hosts \
+    /etc/vivaldi/native-messaging-hosts \
+    /etc/opt/edge/native-messaging-hosts; do
+    chromium_manifest="$DEST_ROOT$chromium_dir/firefox_youtube_downloader.json"
+    mkdir -p -- "$(dirname -- "$chromium_manifest")"
+    python3 - "$chromium_manifest" "$HOST_PATH" "$CHROMIUM_ORIGIN" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+destination, host_path, origin = sys.argv[1:]
+manifest = {
+    "name": "firefox_youtube_downloader",
+    "description": "Native Messaging host for Huginn Downloader",
+    "path": host_path,
+    "type": "stdio",
+    "allowed_origins": [origin],
+}
+Path(destination).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
+    chmod 644 "$chromium_manifest"
+done
 
 install -Dm644 "$SOURCE_ROOT/LICENSE" \
     "$DEST_ROOT/usr/share/licenses/firefox-youtube-downloader-companion/LICENSE"

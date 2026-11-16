@@ -191,6 +191,72 @@ class NativeHostTests(unittest.TestCase):
             stderr=HOST.subprocess.DEVNULL,
         )
 
+    def test_download_forwards_playlist_and_items_and_rejects_invalid_specs(self):
+        with mock.patch.dict(os.environ, {"YTDL_SHORTCUT": "/tmp/fake-shortcut"}), mock.patch.object(
+            HOST.subprocess, "Popen"
+        ) as popen:
+            responses = run_host(
+                [
+                    {
+                        "action": "download",
+                        "mode": "audio",
+                        "url": "https://www.youtube.com/watch?v=1&list=PL123",
+                        "playlist": True,
+                        "playlist_items": "1-5, 8",
+                    },
+                    {
+                        "action": "download",
+                        "mode": "video",
+                        "url": "https://www.youtube.com/watch?v=1&list=PL123",
+                        "playlist": False,
+                    },
+                    {
+                        "action": "download",
+                        "mode": "audio",
+                        "url": "https://www.youtube.com/watch?v=1&list=PL123",
+                        "playlist": True,
+                        "playlist_items": "1; rm -rf /",
+                    },
+                    {
+                        "action": "download",
+                        "mode": "audio",
+                        "url": "https://www.youtube.com/watch?v=1&list=PL123",
+                        "playlist": True,
+                        "playlist_items": "--exec",
+                    },
+                ]
+            )
+
+        self.assertEqual(len(responses), 4)
+        self.assertTrue(responses[0]["ok"])
+        self.assertEqual(responses[0]["playlist"], True)
+        self.assertEqual(responses[0]["playlist_items"], "1-5,8")
+        self.assertTrue(responses[1]["ok"])
+        self.assertEqual(responses[1]["playlist"], False)
+        self.assertFalse(responses[2]["ok"])
+        self.assertFalse(responses[3]["ok"])
+        self.assertEqual(popen.call_count, 2)
+        self.assertEqual(
+            popen.call_args_list[0].args[0],
+            [
+                "/tmp/fake-shortcut",
+                "--playlist",
+                "--playlist-items",
+                "1-5,8",
+                "audio",
+                "https://www.youtube.com/watch?v=1&list=PL123",
+            ],
+        )
+        self.assertEqual(
+            popen.call_args_list[1].args[0],
+            [
+                "/tmp/fake-shortcut",
+                "--no-playlist",
+                "video",
+                "https://www.youtube.com/watch?v=1&list=PL123",
+            ],
+        )
+
     def test_download_accepts_safe_arbitrary_http_sites_and_rejects_invalid_mode(self):
         with mock.patch.dict(os.environ, {"YTDL_SHORTCUT": "/tmp/fake-shortcut"}), mock.patch.object(
             HOST.subprocess, "Popen"

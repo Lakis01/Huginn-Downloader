@@ -469,7 +469,7 @@ function testContentStatic() {
 }
 
 // Minimal DOM fixture to run content.js.
-function createContentFixture() {
+function createContentFixture(options = {}) {
   class El {
     constructor(tag) {
       this.nodeType = 1;
@@ -591,7 +591,12 @@ function createContentFixture() {
   document.documentElement.appendChild(document.head);
   document.documentElement.appendChild(document.body);
   document.appendChild(document.documentElement);
-  const location = { href: 'https://www.youtube.com/watch?v=abc123', hostname: 'www.youtube.com', pathname: '/watch', origin: 'https://www.youtube.com' };
+  const location = {
+    href: options.href || 'https://www.youtube.com/watch?v=abc123',
+    hostname: 'www.youtube.com',
+    pathname: '/watch',
+    origin: 'https://www.youtube.com',
+  };
   const metadata = document.createElement('ytd-watch-metadata');
   const topRow = document.createElement('div');
   topRow.id = 'top-row';
@@ -851,14 +856,13 @@ function testPopup() {
   assert.ok(audioOptionsMarkup, 'audio format options are present');
   const audioOptions = Array.from(audioOptionsMarkup[1].matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g), (match) => [match[1], match[2]]);
   assert.deepEqual(audioOptions, [
-    ['best', 'Best available'],
+    ['best', 'Native (Opus / m4a)'],
     ['mp3', 'MP3'],
-    ['m4a', 'M4A / AAC'],
+    ['m4a', 'M4A / AAC (transcode if not natively available)'],
     ['ogg', 'Ogg Vorbis'],
     ['flac', 'FLAC'],
-    ['opus', 'Opus'],
-  ], 'short codec labels put forced Opus last');
-  assert.ok(!audioOptionsMarkup[1].includes('('), 'codec option labels have no parenthetical explanations');
+    ['opus', 'Opus (transcode if not natively available)'],
+  ], 'audio format labels clarify native vs transcode behavior');
   assert.ok(html.includes('id="mp3QualityRow"'), 'popup has #mp3QualityRow');
   assert.ok(html.includes('sub-row'), 'mp3 row uses .sub-row');
   assert.ok(/id="mp3QualityRow"[^>]*hidden/.test(html) || /hidden[^>]*id="mp3QualityRow"/.test(html), 'mp3 row starts hidden');
@@ -1408,6 +1412,221 @@ function testBuildScript() {
   assert.ok(!names.includes('icons/plugin.svg'), 'XPI omits removed icons/plugin.svg');
 }
 
+function testContentPlaylistCardsAndWatchPrompt() {
+  // Playlist cards extract /playlist?list=... URLs for right-click context downloads.
+  {
+    const fx = createContentFixture();
+    const responder = fx.messageListeners[0];
+    const query = () => {
+      let answered = null;
+      responder({ type: 'ytdl-get-context-url' }, {}, (r) => { answered = r; });
+      return answered.url;
+    };
+
+    const playlistCard = fx.document.createElement('ytd-playlist-renderer');
+    const watchLink = fx.document.createElement('a');
+    watchLink.setAttribute('href', '/watch?v=track1&list=PLplaylist123');
+    playlistCard.appendChild(watchLink);
+    fx.document.body.appendChild(playlistCard);
+    fx.setHitStackArr([playlistCard]);
+    playlistCard.dispatchEvent({ type: 'contextmenu', target: playlistCard, bubbles: true, clientX: 12, clientY: 14 });
+    assert.equal(
+      query(),
+      'https://www.youtube.com/playlist?list=PLplaylist123',
+      'ytd-playlist-renderer card resolves to playlist URL',
+    );
+
+    const lockupPlaylist = fx.document.createElement('yt-lockup-view-model');
+    const thumbLink = fx.document.createElement('a');
+    thumbLink.setAttribute('href', '/watch?v=first9&list=PLlockup456');
+    const viewFullLink = fx.document.createElement('a');
+    viewFullLink.setAttribute('href', '/playlist?list=PLlockup456');
+    lockupPlaylist.appendChild(thumbLink);
+    lockupPlaylist.appendChild(viewFullLink);
+    fx.document.body.appendChild(lockupPlaylist);
+    fx.setHitStackArr([thumbLink, lockupPlaylist]);
+    thumbLink.dispatchEvent({ type: 'contextmenu', target: thumbLink, bubbles: true, clientX: 22, clientY: 24 });
+    assert.equal(
+      query(),
+      'https://www.youtube.com/playlist?list=PLlockup456',
+      'yt-lockup-view-model playlist card prefers /playlist?list=... link',
+    );
+  }
+
+  // Non-playlist watch page dispatches immediately without opening a playlist dialog.
+  {
+    const fx = createContentFixture({ href: 'https://www.youtube.com/watch?v=single123' });
+    const buttons = fx.document.querySelector('[data-ytdl-controls]').querySelectorAll('button');
+    buttons[0].dispatchEvent({ type: 'click', target: buttons[0], bubbles: true });
+    assert.equal(fx.sentMessages.length, 1);
+    assert.equal(fx.document.querySelector('[data-ytdl-playlist-dialog]'), null, 'no dialog on non-playlist watch page');
+  }
+
+  // Playlist watch page opens prompt, mounts side-panel checkboxes, and syncs two-way with yt-dlp range input.
+  {
+    const fx = createContentFixture({ href: 'https://www.youtube.com/watch?v=vid2&list=PLabc&index=2' });
+    const panel = fx.document.createElement('ytd-playlist-panel-renderer');
+    const titles = ['Track One', 'Track Two', 'Track Three', 'Track Four', 'Track Five'];
+    titles.forEach((title, idx) => {
+      const item = fx.document.createElement('ytd-playlist-panel-video-renderer');
+      const link = fx.document.createElement('a');
+      link.setAttribute('href', `/watch?v=v${idx + 1}&list=PLabc&index=${idx + 1}`);
+      const titleEl = fx.document.createElement('span');
+      titleEl.id = 'video-title';
+      titleEl.textContent = title;
+      link.appendChild(titleEl);
+      item.appendChild(link);
+      panel.appendChild(item);
+    });
+    fx.document.body.appendChild(panel);
+
+    const buttons = fx.document.querySelector('[data-ytdl-controls]').querySelectorAll('button');
+    // Click Audio -> opens prompt instead of dispatching immediately.
+    buttons[0].dispatchEvent({ type: 'click', target: buttons[0], bubbles: true });
+    assert.equal(fx.sentMessages.length, 0, 'playlist watch click prompts before downloading');
+
+    const dialog = fx.document.querySelector('[data-ytdl-playlist-dialog="true"]');
+    assert.ok(dialog, 'playlist prompt dialog mounted');
+    const sideChecks = fx.document.querySelectorAll('[data-ytdl-side-checkbox="true"]');
+    assert.equal(sideChecks.length, 5, 'graphical checkboxes mounted onto side playlist panel items');
+    assert.ok(sideChecks.every((box) => box.checked === true), 'all side checkboxes start checked');
+
+    // "This video only" dispatches playlist: false and closes the dialog.
+    const singleBtn = dialog.querySelector('[data-ytdl-scope="single"]');
+    singleBtn.dispatchEvent({ type: 'click', target: singleBtn, bubbles: true });
+    assert.equal(fx.sentMessages.length, 1);
+    assert.equal(fx.sentMessages[0].mode, 'audio');
+    assert.equal(fx.sentMessages[0].playlist, false);
+    assert.equal(fx.document.querySelector('[data-ytdl-playlist-dialog]'), null, 'dialog closes after single selection');
+    assert.equal(fx.document.querySelectorAll('[data-ytdl-side-checkbox]').length, 0, 'side checkboxes removed on close');
+
+    // Re-open for Video, uncheck item 3 & 5 via side checkboxes -> input becomes "1-2,4".
+    buttons[1].dispatchEvent({ type: 'click', target: buttons[1], bubbles: true });
+    const dialog2 = fx.document.querySelector('[data-ytdl-playlist-dialog="true"]');
+    const sideChecks2 = fx.document.querySelectorAll('[data-ytdl-side-checkbox="true"]');
+    sideChecks2[2].checked = false;
+    sideChecks2[2].dispatchEvent({ type: 'change', target: sideChecks2[2], bubbles: true });
+    sideChecks2[4].checked = false;
+    sideChecks2[4].dispatchEvent({ type: 'change', target: sideChecks2[4], bubbles: true });
+
+    const itemsInput = dialog2.querySelector('[data-ytdl-playlist-items="true"]');
+    assert.equal(itemsInput.value, '1-2,4', 'side checkboxes sync range text in yt-dlp syntax');
+
+    // Typing "1-3, 5" in input syncs back to side checkboxes.
+    itemsInput.value = '1-3, 5';
+    itemsInput.dispatchEvent({ type: 'input', target: itemsInput, bubbles: true });
+    assert.deepEqual(
+      sideChecks2.map((b) => Boolean(b.checked)),
+      [true, true, true, false, true],
+      'yt-dlp range input updates side-panel checkboxes',
+    );
+
+    // Clicking "Download playlist" dispatches playlist: true and normalized playlistItems.
+    const playlistBtn = dialog2.querySelector('[data-ytdl-scope="playlist"]');
+    playlistBtn.dispatchEvent({ type: 'click', target: playlistBtn, bubbles: true });
+    assert.equal(fx.sentMessages.length, 2);
+    assert.equal(fx.sentMessages[1].mode, 'video');
+    assert.equal(fx.sentMessages[1].playlist, true);
+    assert.equal(fx.sentMessages[1].playlistItems, '1-3,5');
+    assert.equal(fx.document.querySelector('[data-ytdl-playlist-dialog]'), null, 'dialog closes after playlist launch');
+  }
+}
+
+async function testBackgroundPlaylistMessageRelay() {
+  const { handlers, calls } = runBackgroundFixture();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await handlers.message({
+    type: 'ytdl-trigger-download',
+    mode: 'audio',
+    url: 'https://www.youtube.com/watch?v=v1&list=PLabc',
+    playlist: true,
+    playlistItems: '1-3,5',
+  });
+  assert.equal(calls.nativeMessages.length, 1);
+  assert.equal(calls.nativeMessages[0].msg.playlist, true);
+  assert.equal(calls.nativeMessages[0].msg.playlist_items, '1-3,5');
+}
+
+async function testChromiumBuildAndBackground() {
+  const buildSh = readFile('scripts/build-chromium.sh');
+  assertAsciiNoEmoji('scripts/build-chromium.sh', buildSh);
+  execFileSync('bash', [path.join(ROOT, 'scripts', 'build-chromium.sh')], { cwd: ROOT, stdio: 'ignore' });
+
+  const unpackedManifestPath = path.join(ROOT, 'dist', 'huginn-chromium', 'manifest.json');
+  const zipPath = path.join(ROOT, 'dist', 'huginn-chromium.zip');
+  assert.ok(fs.existsSync(unpackedManifestPath), 'unpacked Chromium manifest.json built');
+  assert.ok(fs.existsSync(zipPath), 'Chromium zip archive built');
+
+  const mv3 = JSON.parse(fs.readFileSync(unpackedManifestPath, 'utf8'));
+  const ffManifest = JSON.parse(readFile('extension/manifest.json'));
+  assert.equal(mv3.manifest_version, 3);
+  assert.equal(mv3.version, ffManifest.version);
+  assert.deepEqual(mv3.background, { service_worker: 'background.js' });
+  assert.ok(mv3.permissions.includes('contextMenus'), 'MV3 uses contextMenus permission');
+  assert.ok(mv3.permissions.includes('nativeMessaging'), 'MV3 includes nativeMessaging');
+  assert.ok(Array.isArray(mv3.host_permissions) && mv3.host_permissions.includes('*://*.youtube.com/*'));
+  assert.equal(mv3.icons['128'], 'icons/huginn-logo-128.png');
+  assert.ok(typeof mv3.key === 'string' && mv3.key.length > 100, 'MV3 includes deterministic RSA key');
+  const der = Buffer.from(mv3.key, 'base64');
+  const hashHex = crypto.createHash('sha256').update(der).digest('hex').slice(0, 32);
+  const derivedId = Array.from(hashHex, (c) => String.fromCharCode('a'.charCodeAt(0) + Number.parseInt(c, 16))).join('');
+  assert.equal(derivedId, 'hlekndcccbgmhlablldcddddmknkjomg', 'MV3 key yields fixed Chromium extension ID');
+
+  // Re-running build-chromium produces byte-identical zip output.
+  const firstHash = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex');
+  execFileSync('bash', [path.join(ROOT, 'scripts', 'build-chromium.sh')], { cwd: ROOT, stdio: 'ignore' });
+  const secondHash = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex');
+  assert.equal(secondHash, firstHash, 'Chromium zip build is deterministic');
+
+  // Chromium-only VM fixture (browser undefined, chrome.contextMenus present).
+  const src = readFile('extension/background.js');
+  const created = [];
+  const nativeCalls = [];
+  let messageListener = null;
+  const chrome = {
+    contextMenus: {
+      removeAll() { return Promise.resolve(); },
+      create(item) { created.push(item); return Promise.resolve(); },
+      onClicked: { addListener() {} },
+      update() { return Promise.resolve(); },
+    },
+    tabs: {
+      sendMessage() { return Promise.resolve({ url: null }); },
+      create() { return Promise.resolve(); },
+    },
+    runtime: {
+      sendNativeMessage(host, msg) {
+        nativeCalls.push({ host, msg });
+        return Promise.resolve({ ok: true, launched: true });
+      },
+      onMessage: { addListener(fn) { messageListener = fn; } },
+      onInstalled: { addListener() {} },
+      onStartup: { addListener() {} },
+      getURL(p) { return `chrome-extension://hlekndcccbgmhlablldcddddmknkjomg/${p}`; },
+    },
+  };
+  const context = { browser: undefined, chrome, console, setTimeout, clearTimeout, URL };
+  vm.createContext(context);
+  vm.runInContext(src, context, { filename: 'background.js' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(created.length, 4, 'Chromium creates four context menu items');
+  for (const item of created) {
+    assert.equal('icons' in item, false, `Chromium menu item ${item.id} omits Firefox-only icons field`);
+  }
+  assert.ok(messageListener, 'Chromium registers runtime.onMessage listener');
+  const responded = await new Promise((resolve) => {
+    const keepChannel = messageListener(
+      { type: 'ytdl-trigger-download', mode: 'audio', url: 'https://www.youtube.com/watch?v=cr1' },
+      {},
+      (reply) => resolve(reply),
+    );
+    assert.equal(keepChannel, true, 'Chromium sendResponse async path returns true');
+  });
+  assert.equal(responded.ok, true);
+  assert.equal(nativeCalls.length, 1);
+}
+
 async function main() {
   testManifest();
   testReadmeBrandAndSetupGuidance();
@@ -1420,9 +1639,11 @@ async function main() {
   await testBackgroundStaticMenus();
   await testBackgroundRemoveAllOrdering();
   await testBackgroundSrcAndFrameFallbacks();
+  await testBackgroundPlaylistMessageRelay();
   testContentCss();
   testContentStatic();
   testContentBehavior();
+  testContentPlaylistCardsAndWatchPrompt();
   await testContentGestureState();
   testContentPillMountsOnce();
   testPopup();
@@ -1434,6 +1655,7 @@ async function main() {
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   testSignScript();
   testBuildScript();
+  await testChromiumBuildAndBackground();
   console.log('Firefox extension fixture tests passed');
 }
 

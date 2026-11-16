@@ -44,6 +44,9 @@ for asset in "${expected_assets[@]}"; do
     }
     upload_paths+=("$ASSET_DIR/$asset")
 done
+if [[ -f $ASSET_DIR/huginn-chromium-${VERSION}.zip ]]; then
+    upload_paths+=("$ASSET_DIR/huginn-chromium-${VERSION}.zip")
+fi
 
 attempts=${YTDL_RELEASE_WAIT_ATTEMPTS:-30}
 delay=${YTDL_RELEASE_WAIT_SECONDS:-5}

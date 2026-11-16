@@ -13,9 +13,11 @@ import sys
 ROOT = Path(__file__).resolve().parent
 BIN_SOURCE = ROOT / "bin"
 BUILD_SCRIPT = ROOT / "scripts/build_xpi.py"
+CHROMIUM_BUILD_SCRIPT = ROOT / "scripts/build_chromium.py"
 APP_NAME = "FirefoxYouTubeDownloader"
 HOST_NAME = "firefox_youtube_downloader"
 EXTENSION_ID = "firefox-youtube-downloader@lakis01.github.io"
+CHROMIUM_EXTENSION_ID = "hlekndcccbgmhlablldcddddmknkjomg"
 
 sys.path.insert(0, str(BIN_SOURCE))
 import ytdl_config
@@ -37,6 +39,7 @@ def _windows_paths(environment: dict[str, str]) -> dict[str, Path]:
     app_dir = _local_app_data(environment) / APP_NAME
     bin_dir = app_dir / "bin"
     manifest = app_dir / f"{HOST_NAME}.json"
+    chromium_manifest = app_dir / f"{HOST_NAME}_chromium.json"
     config = ytdl_config.config_path(environment, "nt")
     return {
         "app": app_dir,
@@ -44,8 +47,11 @@ def _windows_paths(environment: dict[str, str]) -> dict[str, Path]:
         "host": bin_dir / "yt-dlp-native-host.py",
         "trampoline": bin_dir / "yt-dlp-native-host.cmd",
         "manifest": manifest,
+        "chromium_manifest": chromium_manifest,
         "config": config,
         "xpi": ROOT / "dist/firefox-youtube-downloader.xpi",
+        "chromium_unpacked": ROOT / "dist/huginn-chromium",
+        "chromium_zip": ROOT / "dist/huginn-chromium.zip",
     }
 
 
@@ -90,7 +96,14 @@ def _parse_args(argv=None):
 def _preflight(paths: dict[str, Path], sources: list[Path]) -> None:
     destinations = [paths["bin"] / source.name for source in sources]
     destinations.extend(
-        [paths["trampoline"], paths["manifest"], paths["config"], paths["xpi"]]
+        [
+            paths["trampoline"],
+            paths["manifest"],
+            paths["chromium_manifest"],
+            paths["config"],
+            paths["xpi"],
+            paths["chromium_zip"],
+        ]
     )
     for destination in destinations:
         if destination.is_dir():
@@ -102,10 +115,9 @@ def _write_json(destination: Path, value: dict) -> None:
     destination.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def _register_native_host(manifest_path: Path) -> None:
+def _register_registry_host(registry_path: str, manifest_path: Path) -> None:
     import winreg
 
-    registry_path = rf"Software\Mozilla\NativeMessagingHosts\{HOST_NAME}"
     key = winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_WRITE
     )
@@ -113,6 +125,27 @@ def _register_native_host(manifest_path: Path) -> None:
         winreg.SetValueEx(key, "", 0, winreg.REG_SZ, str(manifest_path))
     finally:
         winreg.CloseKey(key)
+
+
+def _register_native_host(
+    manifest_path: Path, chromium_manifest_path: Path | None = None
+) -> None:
+    if chromium_manifest_path is not None:
+        for vendor_prefix in (
+            r"Software\Google\Chrome",
+            r"Software\Chromium",
+            r"Software\BraveSoftware\Brave-Browser",
+            r"Software\Vivaldi",
+            r"Software\Microsoft\Edge",
+        ):
+            _register_registry_host(
+                rf"{vendor_prefix}\NativeMessagingHosts\{HOST_NAME}",
+                chromium_manifest_path,
+            )
+    _register_registry_host(
+        rf"Software\Mozilla\NativeMessagingHosts\{HOST_NAME}",
+        manifest_path,
+    )
 
 
 def _configuration(paths: dict[str, Path], args, environment: dict[str, str]) -> dict:
@@ -166,15 +199,35 @@ def _install_windows(args, environment: dict[str, str]) -> int:
         "allowed_extensions": [EXTENSION_ID],
     }
     _write_json(paths["manifest"], manifest)
-    _register_native_host(paths["manifest"])
+    chromium_manifest = {
+        "name": HOST_NAME,
+        "description": "Native Messaging host for Huginn Downloader",
+        "path": str(paths["trampoline"]),
+        "type": "stdio",
+        "allowed_origins": [f"chrome-extension://{CHROMIUM_EXTENSION_ID}/"],
+    }
+    _write_json(paths["chromium_manifest"], chromium_manifest)
+    _register_native_host(paths["manifest"], paths["chromium_manifest"])
 
     subprocess.run(
         [sys.executable, str(BUILD_SCRIPT), str(ROOT / "extension"), str(paths["xpi"])],
         check=True,
     )
+    if CHROMIUM_BUILD_SCRIPT.is_file():
+        subprocess.run(
+            [
+                sys.executable,
+                str(CHROMIUM_BUILD_SCRIPT),
+                str(ROOT / "extension"),
+                str(paths["chromium_unpacked"]),
+                str(paths["chromium_zip"]),
+            ],
+            check=True,
+        )
     config_destination = ytdl_config.save_config(config, environment, "nt")
     print(f"Saved plugin configuration to {config_destination}")
     print(f"Installed native messaging manifest -> {paths['manifest']}")
+    print(f"Installed Chromium native messaging manifest -> {paths['chromium_manifest']}")
     print(f"Registered HKCU native host: {HOST_NAME}")
     print(f"Built {paths['xpi']}")
     return 0

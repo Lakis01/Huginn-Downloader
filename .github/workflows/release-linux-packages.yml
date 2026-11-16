@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   build-and-upload:
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: ubuntu-24.04
     steps:
       - name: Check out tagged source
@@ -39,6 +40,8 @@ jobs:
           sudo apt-get install -y dpkg-dev
           bash scripts/build-source-tarball.sh dist
           bash scripts/build-deb.sh dist
+          bash scripts/build-chromium.sh
+          cp dist/huginn-chromium.zip "dist/huginn-chromium-${version}.zip"
           dpkg-deb --info "dist/huginn-companion_${version}_all.deb"
           dpkg-deb --contents "dist/huginn-companion_${version}_all.deb"
 
@@ -79,6 +82,7 @@ jobs:
             dist/*.rpm
             dist/*-source.tar.gz
             dist/*-arch-pkgbuild.tar.gz
+            dist/huginn-chromium-*.zip
           if-no-files-found: error
 
       - name: Validate Arch recipe with makepkg
