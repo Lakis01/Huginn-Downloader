@@ -430,10 +430,8 @@ class NativeHostPresenceTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
             os.environ, {"HOME": tmp}, clear=False
-        ), mock.patch.object(
-            HOST, "detected_cpu_threads", return_value=12
-        ), mock.patch.object(
-            HOST, "recommended_postprocess_threads", return_value=10
+        ), mock.patch(
+            "ytdl_config.os.cpu_count", return_value=12
         ), mock.patch.object(
             HOST, "check_ytdlp_update", return_value=sentinel
         ) as check:
