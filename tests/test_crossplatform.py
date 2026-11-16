@@ -412,7 +412,7 @@ class WindowsInstallerTests(unittest.TestCase):
         installer = load_script(self, "windows_installer_dry", "install.py")
         with tempfile.TemporaryDirectory() as tmp:
             env = {"LOCALAPPDATA": str(Path(tmp) / "Local"), "APPDATA": str(Path(tmp) / "Roaming")}
-            xpi = ROOT / "dist/firefox-youtube-downloader.xpi"
+            xpi = ROOT / "dist/huginn-firefox.xpi"
             xpi_before = xpi.read_bytes() if xpi.exists() else None
             with mock.patch.dict(os.environ, env, clear=True):
                 with mock.patch.object(installer, "_is_windows", return_value=True):
@@ -501,7 +501,7 @@ class WindowsInstallerTests(unittest.TestCase):
                 },
             )
             self.assertEqual(ytdlp_config.read_bytes(), original_ytdlp_config)
-            xpi = ROOT / "dist/firefox-youtube-downloader.xpi"
+            xpi = ROOT / "dist/huginn-firefox.xpi"
             with zipfile.ZipFile(xpi) as archive:
                 self.assertIsNone(archive.testzip())
                 self.assertEqual(archive.namelist()[0], "manifest.json")

@@ -2,6 +2,7 @@
 """Download YouTube audio, video, or an interactively selected audio cut."""
 
 import codecs
+import concurrent.futures
 import errno
 import json
 import math
@@ -12,11 +13,26 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.parse
 from collections.abc import Mapping
 from typing import Any
 
 from ytdl_config import effective_download_dir, effective_video_download_dir, load_config
+
+try:
+    from ytdl_config import effective_postprocess_threads
+except ImportError:  # pragma: no cover - tests may inject a minimal ytdl_config stub
+
+    def effective_postprocess_threads(config=None, cpu_threads=None):
+        total = max(1, int(os.cpu_count() or 4)) if cpu_threads is None else max(1, int(cpu_threads))
+        if isinstance(config, Mapping):
+            val = config.get("postprocess_threads")
+            if isinstance(val, int) and not isinstance(val, bool) and val > 0:
+                return min(64, val)
+        return 1 if total <= 2 else total - 2
+
+_COMMIT_LOCK = threading.Lock()
 from ytdl_meta import parse_info, sanitize_filename, strip_language_tags, tag_audio_file
 
 try:
@@ -126,8 +142,15 @@ def is_youtube_url(url: str) -> bool:
     return any(host == base or host.endswith(f".{base}") for base in _YOUTUBE_HOSTS)
 
 
+_YOUTUBE_CHANNEL_PATH_RE = re.compile(
+    r"^/(?:@[^/]+|(?:channel|c|user)/[^/]+)"
+    r"(?:/(?:videos|shorts|streams|releases|playlists|featured))?$",
+    re.IGNORECASE,
+)
+
+
 def is_playlist_url(url: str) -> bool:
-    """Return True when a URL directly addresses a playlist page."""
+    """Return True when a URL directly addresses a playlist or channel tab."""
     try:
         parsed = urllib.parse.urlsplit(url)
     except ValueError:
@@ -138,7 +161,9 @@ def is_playlist_url(url: str) -> bool:
     if path == "/playlist":
         params = urllib.parse.parse_qs(parsed.query)
         return bool(params.get("list"))
-    return "/playlist/" in parsed.path
+    if "/playlist/" in parsed.path:
+        return True
+    return is_youtube_url(url) and bool(_YOUTUBE_CHANNEL_PATH_RE.fullmatch(path))
 
 
 def wait_for_keypress(prompt: str = "\nPress any key to close...") -> None:
@@ -386,18 +411,19 @@ def _move_collision_safe(source_path, target_path):
 
 def _commit_tagged_file(temp_path, original_path, target_path):
     """Install a tagged copy without clobbering an existing target."""
-    if target_path == original_path:
-        os.replace(temp_path, original_path)
-        return original_path
+    with _COMMIT_LOCK:
+        if target_path == original_path:
+            os.replace(temp_path, original_path)
+            return original_path
 
-    final_path = _move_collision_safe(temp_path, target_path)
-    try:
-        original_path.unlink()
-    except OSError:
-        # The tagged output is valid; don't remove it if source cleanup
-        # cannot complete. The caller still gets the final output path.
-        pass
-    return final_path
+        final_path = _move_collision_safe(temp_path, target_path)
+        try:
+            original_path.unlink()
+        except OSError:
+            # The tagged output is valid; don't remove it if source cleanup
+            # cannot complete. The caller still gets the final output path.
+            pass
+        return final_path
 
 
 def _read_track_gain(final_path):
@@ -446,8 +472,20 @@ def _read_track_gain(final_path):
         return None
 
 
-def _run_rsgain(final_path):
+def _run_rsgain(final_path, *, quiet=False):
     """Apply ReplayGain normalization and report the resulting gain."""
+    if quiet:
+        try:
+            subprocess.run(
+                ["rsgain", "custom", "-s", "i", str(final_path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except TypeError:
+            subprocess.run(["rsgain", "custom", "-s", "i", str(final_path)], check=True)
+        return
     subprocess.run(["rsgain", "custom", "-s", "i", str(final_path)], check=True)
     gain = _read_track_gain(final_path)
     if gain:
@@ -529,6 +567,7 @@ def finalize_audio_download(
     duration_seconds=None,
     *,
     refresh_auto_tag=False,
+    quiet=False,
 ) -> str:
     """Tag, name, and route a downloaded audio file before optional ReplayGain."""
     cfg = dict(config) if config is not None else load_config()
@@ -543,7 +582,8 @@ def finalize_audio_download(
     thumbnail_jpg = cfg.get("thumbnail_jpg", False)
     media_path = Path(media_path).expanduser().resolve()
     if not auto_tag:
-        print("Skipping automatic tag extraction (auto_tag=false).")
+        if not quiet:
+            print("Skipping automatic tag extraction (auto_tag=false).")
         strip_language_tags(str(media_path))
         info_path = _info_sidecar_path(media_path)
         info = {}
@@ -566,13 +606,15 @@ def finalize_audio_download(
         long_dir = _long_audio_target_dir(cfg, duration)
         final_path = media_path
         if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
-            final_path = _move_collision_safe(media_path, long_dir / media_path.name)
+            with _COMMIT_LOCK:
+                final_path = _move_collision_safe(media_path, long_dir / media_path.name)
         info_path.unlink(missing_ok=True)
         if thumbnail_path:
             thumbnail_path.unlink(missing_ok=True)
         if do_rsgain:
-            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
-            _run_rsgain(str(final_path))
+            if not quiet:
+                print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+            _run_rsgain(str(final_path), quiet=quiet) if quiet else _run_rsgain(str(final_path))
         return str(final_path)
     info_path = _info_sidecar_path(media_path)
     try:
@@ -585,27 +627,30 @@ def finalize_audio_download(
         ) from None
     meta = parse_info(info)
     duration = duration_seconds if duration_seconds is not None else meta.get("duration", 0)
-    if meta["is_tagged"]:
-        print("\n\033[1;32mDetected High-Quality Auto-Generated Audio track.\033[0m")
-        print(
-            f"  Title:    {meta['title']}\n  Artist:   {meta['artist']}"
-            f"\n  Album:    {meta['album']}\n  Date:     {meta['date']}\n"
-        )
-    else:
-        print("\n\033[1;34mStandard track detected.\033[0m\n")
+    if not quiet:
+        if meta["is_tagged"]:
+            print("\n\033[1;32mDetected High-Quality Auto-Generated Audio track.\033[0m")
+            print(
+                f"  Title:    {meta['title']}\n  Artist:   {meta['artist']}"
+                f"\n  Album:    {meta['album']}\n  Date:     {meta['date']}\n"
+            )
+        else:
+            print("\n\033[1;34mStandard track detected.\033[0m\n")
     thumbnail_path = _find_thumbnail(media_path, info) if embed_thumbnail else None
 
     if not _has_usable_tag_metadata(meta, thumbnail_path):
         long_dir = _long_audio_target_dir(cfg, duration)
         final_path = media_path
         if long_dir is not None and media_path.parent.resolve() != long_dir.resolve():
-            final_path = _move_collision_safe(media_path, long_dir / media_path.name)
+            with _COMMIT_LOCK:
+                final_path = _move_collision_safe(media_path, long_dir / media_path.name)
         info_path.unlink(missing_ok=True)
         if thumbnail_path:
             thumbnail_path.unlink(missing_ok=True)
         if do_rsgain:
-            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
-            _run_rsgain(str(final_path))
+            if not quiet:
+                print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+            _run_rsgain(str(final_path), quiet=quiet) if quiet else _run_rsgain(str(final_path))
         return str(final_path)
 
     target_path = media_path.with_name(
@@ -622,7 +667,8 @@ def finalize_audio_download(
 
     try:
         shutil.copy2(media_path, temp_path)
-        print("[2/2] Automatic tag extraction & cover art...")
+        if not quiet:
+            print("[2/2] Automatic tag extraction & cover art...")
         # thumbnail_jpg=True forces JPEG across all containers for legacy players;
         # otherwise tag_audio_file picks WebP for Opus/Ogg/MP3/FLAC and JPEG for M4A.
         prefer_webp = False if thumbnail_jpg else None
@@ -639,8 +685,9 @@ def finalize_audio_download(
     if thumbnail_path:
         thumbnail_path.unlink(missing_ok=True)
     if do_rsgain:
-        print("ReplayGain normalization (rsgain: analyzing -> applying)...")
-        _run_rsgain(str(final_path))
+        if not quiet:
+            print("ReplayGain normalization (rsgain: analyzing -> applying)...")
+        _run_rsgain(str(final_path), quiet=quiet) if quiet else _run_rsgain(str(final_path))
     return str(final_path)
 
 
@@ -652,17 +699,18 @@ def _move_audio_sidecar(source_path, target_path):
     """Move yt-dlp's info JSON when a post-download encode changes the suffix."""
     source_path = Path(source_path)
     target_path = Path(target_path)
-    source_info = _info_sidecar_path(source_path)
-    if not source_info.is_file():
-        return
-    target_info = target_path.with_suffix(".info.json")
-    if source_info.resolve() == target_info.resolve():
-        return
-    if target_info.exists():
-        raise _YtDlpError(
-            f"Unable to preserve yt-dlp metadata: sidecar already exists at '{target_info}'"
-        )
-    os.replace(source_info, target_info)
+    with _COMMIT_LOCK:
+        source_info = _info_sidecar_path(source_path)
+        if not source_info.is_file():
+            return
+        target_info = target_path.with_suffix(".info.json")
+        if source_info.resolve() == target_info.resolve():
+            return
+        if target_info.exists():
+            raise _YtDlpError(
+                f"Unable to preserve yt-dlp metadata: sidecar already exists at '{target_info}'"
+            )
+        os.replace(source_info, target_info)
 
 
 def _ensure_audio_properties(
@@ -916,6 +964,10 @@ _BATCH_PROGRESS_TEMPLATE = (
 )
 _BATCH_LINE_RE = re.compile(r"^\[batch\s+(\d+)/(\d+|\?)\]\s*(.*)$")
 _PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)%")
+_ANSI_ERASE_RE = re.compile(r"\x1b\[[0-9;]*[JK]")
+_BLANK_ERASE_RE = re.compile(r"(?:^|\r)[ \t]+(?=\r|$)")
+_ANSI_ERASE_BYTES_RE = re.compile(rb"(?:\x1b\[[0-9;]*[JK])+")
+_BLANK_ERASE_BYTES_RE = re.compile(rb"\r[ \t]+(?=\r|$)")
 
 
 def format_pacman_bar(index, total, item_percent=None, detail="", width=24):
@@ -968,26 +1020,38 @@ def format_pacman_bar(index, total, item_percent=None, detail="", width=24):
 
 
 def _rewrite_batch_progress_text(text):
-    """Convert yt-dlp [batch X/Y] progress lines into pacman-style bars."""
-    if "[batch " not in text:
-        return text
-    parts = re.split(r"([\r\n]+)", text)
+    """Convert yt-dlp [batch X/Y] progress lines into persistent pacman bars."""
+    cleaned = _ANSI_ERASE_RE.sub("", text)
+    if "[batch " not in cleaned:
+        stripped = _BLANK_ERASE_RE.sub("", cleaned)
+        if not stripped or not stripped.strip(" \t\r"):
+            return "\n" if "\n" in stripped else ""
+        return stripped
+    parts = re.split(r"([\r\n]+)", cleaned)
+    out = []
     for i in range(0, len(parts), 2):
         line = parts[i]
-        match = _BATCH_LINE_RE.match(line)
-        if not match:
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        if not line.strip() and "\n" not in sep:
             continue
-        idx_str, total_str, detail = match.groups()
-        pct_match = _PERCENT_RE.search(detail)
-        if pct_match:
-            item_pct = float(pct_match.group(1))
-        elif "Download completed" in detail:
-            item_pct = 100.0
-        else:
-            item_pct = None
-        total_arg = int(total_str) if total_str.isdigit() else total_str
-        parts[i] = format_pacman_bar(int(idx_str), total_arg, item_pct, detail)
-    return "".join(parts)
+        match = _BATCH_LINE_RE.match(line)
+        if match:
+            idx_str, total_str, detail = match.groups()
+            pct_match = _PERCENT_RE.search(detail)
+            if pct_match:
+                item_pct = float(pct_match.group(1))
+            elif "Download completed" in detail:
+                item_pct = 100.0
+            else:
+                item_pct = None
+            total_arg = int(total_str) if total_str.isdigit() else total_str
+            line = format_pacman_bar(int(idx_str), total_arg, item_pct, detail)
+            if "\n" in sep and total_str.isdigit() and int(idx_str) < int(total_str):
+                sep = "\r"
+        out.append(line)
+        if sep:
+            out.append(sep)
+    return "".join(out)
 
 
 def _write_stream_text(text, output_stream, binary_stream, encoding):
@@ -999,6 +1063,30 @@ def _write_stream_text(text, output_stream, binary_stream, encoding):
     else:
         output_stream.write(text)
         output_stream.flush()
+
+
+def _pad_cr_lines(text, prev_bar_len):
+    """Pad CR-rewritten bar lines to avoid leftover chars when width shrinks."""
+    if "\r" not in text and "\n" not in text:
+        return text, prev_bar_len
+    parts = re.split(r"([\r\n]+)", text)
+    out = []
+    max_len = prev_bar_len
+    for i in range(0, len(parts), 2):
+        line = parts[i]
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        if line:
+            pad = max(0, max_len - len(line))
+            if "\n" in sep:
+                max_len = 0
+            else:
+                max_len = len(line)
+            out.append(line + (" " * pad))
+        elif sep:
+            out.append(line)
+        if sep:
+            out.append(sep)
+    return "".join(out), max_len
 
 
 def _run_yt_dlp_command(command):
@@ -1030,6 +1118,14 @@ def _run_yt_dlp_command(command):
     binary_stream = getattr(output_stream, "buffer", None)
     capture_limit = 64 * 1024
     pending_text = ""
+    prev_bar_len = 0
+    ended_with_cr = False
+
+    if is_batch_progress:
+        init_bar = format_pacman_bar(1, "?", 0.0, "Preparing batch download...")
+        prev_bar_len = len(init_bar)
+        _write_stream_text(f"\r{init_bar}\r", output_stream, binary_stream, encoding)
+        ended_with_cr = True
 
     try:
         while True:
@@ -1045,34 +1141,55 @@ def _run_yt_dlp_command(command):
                 if split_idx >= 0:
                     ready = pending_text[: split_idx + 1]
                     pending_text = pending_text[split_idx + 1 :]
+                    rewritten = _rewrite_batch_progress_text(ready)
+                    if rewritten:
+                        padded, prev_bar_len = _pad_cr_lines(rewritten, prev_bar_len)
+                        ended_with_cr = padded.endswith("\r")
+                        _write_stream_text(
+                            padded,
+                            output_stream,
+                            binary_stream,
+                            encoding,
+                        )
+            else:
+                clean_chunk = _BLANK_ERASE_BYTES_RE.sub(
+                    b"", _ANSI_ERASE_BYTES_RE.sub(b"", chunk)
+                )
+                if not clean_chunk or not clean_chunk.strip(b" \t\r"):
+                    if b"\n" not in clean_chunk:
+                        continue
+                ended_with_cr = clean_chunk.endswith(b"\r")
+                if binary_stream is not None:
+                    binary_stream.write(clean_chunk)
+                    binary_stream.flush()
+                else:
+                    text = decoder.decode(clean_chunk)
+                    if text:
+                        output_stream.write(text)
+                        output_stream.flush()
+        if is_batch_progress:
+            pending_text += decoder.decode(b"", final=True)
+            if pending_text:
+                rewritten = _rewrite_batch_progress_text(pending_text)
+                if rewritten:
+                    padded, prev_bar_len = _pad_cr_lines(rewritten, prev_bar_len)
+                    ended_with_cr = padded.endswith("\r")
                     _write_stream_text(
-                        _rewrite_batch_progress_text(ready),
+                        padded,
                         output_stream,
                         binary_stream,
                         encoding,
                     )
-            elif binary_stream is not None:
-                binary_stream.write(chunk)
-                binary_stream.flush()
-            else:
-                text = decoder.decode(chunk)
-                if text:
-                    output_stream.write(text)
+            if ended_with_cr:
+                _write_stream_text("\n", output_stream, binary_stream, encoding)
+        else:
+            if binary_stream is None:
+                final_text = decoder.decode(b"", final=True)
+                if final_text:
+                    output_stream.write(final_text)
                     output_stream.flush()
-        if is_batch_progress:
-            pending_text += decoder.decode(b"", final=True)
-            if pending_text:
-                _write_stream_text(
-                    _rewrite_batch_progress_text(pending_text),
-                    output_stream,
-                    binary_stream,
-                    encoding,
-                )
-        elif binary_stream is None:
-            final_text = decoder.decode(b"", final=True)
-            if final_text:
-                output_stream.write(final_text)
-                output_stream.flush()
+            if ended_with_cr:
+                _write_stream_text("\n", output_stream, binary_stream, encoding)
     except BaseException:
         try:
             process.terminate()
@@ -1228,36 +1345,83 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
         filepaths = _read_all_print_to_file(print_path)
         durations = _read_all_durations_print_to_file(duration_path)
         total_tracks = len(filepaths)
-        final_path = None
-        for index, filepath in enumerate(filepaths):
+        if total_tracks == 0:
+            return None
+        if total_tracks == 1:
+            filepath = filepaths[0]
             original_filepath = filepath
             filepath = _ensure_audio_properties(filepath, cfg)
             if Path(filepath) != Path(original_filepath):
                 _move_audio_sidecar(original_filepath, filepath)
-            duration = (
-                durations[index]
-                if index < len(durations)
-                else (durations[-1] if len(filepaths) == 1 and durations else None)
-            )
-            final_path = finalize_audio_download(
+            duration = durations[0] if durations else None
+            return finalize_audio_download(
                 filepath,
                 "",
                 cfg,
                 duration,
                 refresh_auto_tag=config_was_live,
             )
-            if total_tracks > 1:
-                track_label = Path(final_path or filepath).name
-                print(
-                    format_pacman_bar(
-                        index + 1,
-                        total_tracks,
-                        100.0,
-                        f"Finalizing track {index + 1}/{total_tracks}: {track_label}",
-                    ),
-                    flush=True,
+
+        if config_was_live:
+            _refresh_auto_tag_before_finalize(cfg, cfg.get("auto_tag", True))
+        workers = min(total_tracks, max(1, effective_postprocess_threads(cfg)))
+        ordered_results = [None] * total_tracks
+
+        def _finalize_one(index, filepath):
+            original_filepath = filepath
+            local_cfg = dict(cfg)
+            filepath = _ensure_audio_properties(filepath, local_cfg)
+            if Path(filepath) != Path(original_filepath):
+                _move_audio_sidecar(original_filepath, filepath)
+            duration = durations[index] if index < len(durations) else None
+            try:
+                final_p = finalize_audio_download(
+                    filepath,
+                    "",
+                    local_cfg,
+                    duration,
+                    refresh_auto_tag=False,
+                    quiet=True,
                 )
-        return final_path
+            except TypeError:
+                final_p = finalize_audio_download(
+                    filepath,
+                    "",
+                    local_cfg,
+                    duration,
+                    refresh_auto_tag=config_was_live,
+                )
+            return index, final_p, filepath
+
+        completed = 0
+        prev_bar_len = 0
+        is_tty = bool(getattr(sys.stdout, "isatty", lambda: False)())
+        print(
+            f"[2/2] Post-processing {total_tracks} tracks using {workers} "
+            f"thread{'s' if workers != 1 else ''}...",
+            flush=True,
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(_finalize_one, idx, path)
+                for idx, path in enumerate(filepaths)
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                idx, final_p, orig_path = future.result()
+                ordered_results[idx] = final_p
+                completed += 1
+                track_label = Path(final_p or orig_path).name
+                bar_text = format_pacman_bar(
+                    completed,
+                    total_tracks,
+                    100.0,
+                    f"Finalizing track {completed}/{total_tracks}: {track_label}",
+                )
+                pad = max(0, prev_bar_len - len(bar_text))
+                prev_bar_len = len(bar_text)
+                end_char = "\r" if (is_tty and completed < total_tracks) else "\n"
+                print(bar_text + (" " * pad), end=end_char, flush=True)
+        return ordered_results[-1]
     finally:
         _remove_temp_file(print_path)
         _remove_temp_file(duration_path)

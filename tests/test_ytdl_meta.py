@@ -3505,5 +3505,71 @@ class V24AudioPipelineTests(unittest.TestCase):
         self.assertIn("--progress-template", commands[0])
         self.assertIn(wrapper._BATCH_PROGRESS_TEMPLATE, commands[0])
         out = stdout_capture.getvalue()
-        self.assertIn("(1/2) [############------------]  50% | Finalizing track 1/2: t1.opus", out)
-        self.assertIn("(2/2) [########################] 100% | Finalizing track 2/2: t2.opus", out)
+        self.assertIn("Post-processing 2 tracks", out)
+        self.assertIn("(1/2) [############------------]  50% | Finalizing track 1/2:", out)
+        self.assertIn("(2/2) [########################] 100% | Finalizing track 2/2:", out)
+        self.assertIn("t1.opus", out)
+        self.assertIn("t2.opus", out)
+
+    def test_channel_urls_are_playlists_and_blank_erases_do_not_flash_bars(self):
+        wrapper = _load_wrapper(self)
+        self.assertTrue(wrapper.is_playlist_url("https://www.youtube.com/@dustroadrecordsai/videos"))
+        self.assertTrue(wrapper.is_playlist_url("https://www.youtube.com/channel/UC123/streams"))
+        self.assertFalse(wrapper.is_playlist_url("https://www.youtube.com/watch?v=GXxEJTfUHJc"))
+
+        # Blank MultilinePrinter.end() erase sequences must be dropped so bars never flash/disappear.
+        self.assertEqual(wrapper._rewrite_batch_progress_text("\r                    \r"), "")
+        self.assertEqual(wrapper._rewrite_batch_progress_text("\x1b[2K\r"), "")
+        # Intermediate item newlines convert to CR so the progress bar persists on a single line.
+        mid = "[batch 1/3] 100% of 5.00MiB\n\r          \r"
+        rewritten_mid = wrapper._rewrite_batch_progress_text(mid)
+        self.assertTrue(rewritten_mid.endswith("\r"))
+        self.assertIn("(1/3) [########----------------]  33% | 100% of 5.00MiB", rewritten_mid)
+
+    def test_download_audio_respects_postprocess_threads_setting(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            tracks = [Path(tmp) / f"track{i}.opus" for i in range(4)]
+            for path in tracks:
+                path.write_bytes(b"audio")
+
+            def fake_run(command, **_kwargs):
+                for idx, val in enumerate(command[:-2]):
+                    if val == "--print-to-file" and command[idx + 1] == "after_move:filepath":
+                        Path(command[idx + 2]).write_text(
+                            "\n".join(str(p) for p in tracks) + "\n", encoding="utf-8"
+                        )
+                return SimpleNamespace(returncode=0)
+
+            active_lock = wrapper.threading.Lock()
+            active = 0
+            max_seen = 0
+
+            def fake_finalize(path, *_args, **_kwargs):
+                nonlocal active, max_seen
+                with active_lock:
+                    active += 1
+                    max_seen = max(max_seen, active)
+                wrapper.time.sleep(0.05) if hasattr(wrapper, "time") else __import__("time").sleep(0.05)
+                with active_lock:
+                    active -= 1
+                return path
+
+            with mock.patch.object(wrapper, "effective_download_dir", return_value=None), \
+                 mock.patch.object(wrapper, "_ensure_audio_properties", side_effect=lambda p, *_a, **_k: p), \
+                 mock.patch.object(wrapper, "finalize_audio_download", side_effect=fake_finalize), \
+                 mock.patch.object(wrapper.subprocess, "run", side_effect=fake_run), \
+                 mock.patch("sys.stdout", new_callable=io.StringIO):
+                wrapper.download_audio(
+                    "https://www.youtube.com/playlist?list=PLpar",
+                    {
+                        "auto_tag": False,
+                        "rsgain": False,
+                        "embed_thumbnail": False,
+                        "channel_mode": "stereo",
+                        "postprocess_threads": 2,
+                    },
+                    playlist=True,
+                )
+
+        self.assertEqual(max_seen, 2)

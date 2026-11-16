@@ -293,6 +293,9 @@ def load_config(
     long_dir = stored.get("long_audio_dir", config["long_audio_dir"])
     if isinstance(long_dir, str) and long_dir.strip():
         config["long_audio_dir"] = long_dir
+    threads = stored.get("postprocess_threads")
+    if isinstance(threads, int) and not isinstance(threads, bool) and 1 <= threads <= 64:
+        config["postprocess_threads"] = threads
     config["download_dir"] = _normalize_legacy_default(
         config["download_dir"], "audio", env, platform_name
     )
@@ -369,6 +372,13 @@ def save_config(
         if not isinstance(value, str) or not value.strip():
             raise ValueError("long_audio_dir must be a non-empty string")
         normalized["long_audio_dir"] = value
+    if "postprocess_threads" in config:
+        value = config["postprocess_threads"]
+        if value is not None:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > 64:
+                raise ValueError("postprocess_threads must be an integer between 0 and 64")
+            if value > 0:
+                normalized["postprocess_threads"] = value
 
     destination = config_path(env, platform_name)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -424,3 +434,26 @@ def effective_video_download_dir(
     if ytdlp_config_exists(env, platform_name):
         return None
     return _expand_user(user_download_directories(env, platform_name)["videos"], env)
+
+
+def detected_cpu_threads() -> int:
+    """Return logical CPU thread count (at least 1)."""
+    return max(1, int(os.cpu_count() or 4))
+
+
+def recommended_postprocess_threads(cpu_threads: int | None = None) -> int:
+    """Leave two logical CPUs free on multi-core hosts for UI responsiveness."""
+    total = detected_cpu_threads() if cpu_threads is None else max(1, int(cpu_threads))
+    return 1 if total <= 2 else total - 2
+
+
+def effective_postprocess_threads(
+    config: Mapping[str, Any] | None = None,
+    cpu_threads: int | None = None,
+) -> int:
+    """Resolve user-configured worker threads or the prudent auto recommendation."""
+    if isinstance(config, Mapping):
+        value = config.get("postprocess_threads")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return min(64, value)
+    return recommended_postprocess_threads(cpu_threads)

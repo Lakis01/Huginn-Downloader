@@ -18,6 +18,22 @@ const VIDEO_PRESETS = {
 };
 
 let lastDeps = null;
+let ytdlpNetworkCheckAttempted = false;
+
+function getExtensionVersion(fallback) {
+  const api = ext();
+  try {
+    if (api && api.runtime && typeof api.runtime.getManifest === 'function') {
+      const manifest = api.runtime.getManifest();
+      if (manifest && typeof manifest.version === 'string' && manifest.version) {
+        return manifest.version;
+      }
+    }
+  } catch (_error) {
+    // Fall back when runtime.getManifest is unavailable in test mocks.
+  }
+  return fallback || null;
+}
 
 function ext() {
   if (typeof browser !== 'undefined' && browser) return browser;
@@ -138,6 +154,31 @@ function updateLongAudioRow() {
 }
 
 function renderUpdateNote(status) {
+  const versionLine = $('ytdlpVersionLine');
+  const versionText = $('ytdlpVersionText');
+  const versionBadge = $('ytdlpVersionBadge');
+  if (versionLine) {
+    if (status && status.installed) {
+      versionLine.hidden = false;
+      if (versionText) {
+        versionText.textContent = status.outdated && status.latest
+          ? `yt-dlp ${status.installed} (latest ${status.latest})`
+          : `yt-dlp ${status.installed}`;
+      }
+      if (versionBadge) {
+        versionBadge.hidden = false;
+        versionBadge.textContent = status.outdated ? 'Outdated' : 'Up to date';
+        if (versionBadge.classList) {
+          versionBadge.classList.toggle('bad', Boolean(status.outdated));
+          versionBadge.classList.toggle('ok', !status.outdated);
+        }
+      }
+    } else {
+      versionLine.hidden = true;
+      if (versionBadge) versionBadge.hidden = true;
+    }
+  }
+
   const note = $('ytdlpUpdateNote');
   if (!note) return;
   if (!status || !status.outdated) {
@@ -164,11 +205,54 @@ function renderUpdateNote(status) {
   if (hintEl) hintEl.textContent = hint;
 }
 
+function updateThreadsControl(response) {
+  const select = $('postprocessThreads');
+  if (!select) return;
+  const detected = Number(response && response.cpu_threads) ||
+    (typeof navigator !== 'undefined' && Number(navigator.hardwareConcurrency)) ||
+    4;
+  const cpuThreads = Math.max(1, Math.floor(detected));
+  const recommended = Number(response && response.recommended_threads) ||
+    (cpuThreads <= 2 ? 1 : cpuThreads - 2);
+  if (select.options) {
+    const options = Array.from(select.options);
+    const autoOpt = options.find((item) => item.value === '0');
+    if (autoOpt) {
+      autoOpt.textContent = `Auto (${recommended} of ${cpuThreads} threads, max - 2)`;
+    }
+  }
+  const config = (response && response.config) || {};
+  const configured = Number(config.postprocess_threads);
+  select.value = Number.isInteger(configured) && configured > 0 ? String(configured) : '0';
+  const threadsNote = $('threadsNote');
+  if (threadsNote) {
+    const active = Number.isInteger(configured) && configured > 0 ? configured : recommended;
+    threadsNote.textContent =
+      `Using ${active} thread${active === 1 ? '' : 's'} (${cpuThreads} CPU threads detected) for parallel cover art, metadata, and ReplayGain inside one terminal.`;
+  }
+}
+
+async function refreshLiveYtdlpUpdate() {
+  if (ytdlpNetworkCheckAttempted) return;
+  ytdlpNetworkCheckAttempted = true;
+  const api = ext();
+  if (!api || !api.runtime || typeof api.runtime.sendNativeMessage !== 'function') return;
+  try {
+    const resp = await api.runtime.sendNativeMessage(HOST_ID, { action: 'check_ytdlp_update' });
+    if (resp && resp.ok && resp.yt_dlp_status) renderUpdateNote(resp.yt_dlp_status);
+  } catch (_error) {
+    // Offline or host older than check_ytdlp_update; keep cached/local status.
+  }
+}
+
 function renderConnected(response) {
   setVisible(true);
   updateDownloadPresets(response);
   lastDeps = response.deps || null;
-  $('statusText').textContent = `Connected (companion ${response.version || 'unknown'})`;
+  const companionVersion = response.version || 'unknown';
+  const extensionVersion = getExtensionVersion(companionVersion);
+  $('statusText').textContent =
+    `Connected (extension ${extensionVersion}, companion ${companionVersion})`;
   const config = response.config || {};
   $('autoTag').checked = config.auto_tag !== false;
   $('rsgain').checked = config.rsgain === true;
@@ -186,6 +270,7 @@ function renderConnected(response) {
   updateMp3Row();
   updateFormatNote();
   updateLongAudioRow();
+  updateThreadsControl(response);
   const missingNote = $('rsgainMissingNote');
   if (missingNote) {
     if (lastDeps && lastDeps.rsgain === true) missingNote.hidden = true;
@@ -217,11 +302,17 @@ function renderConnected(response) {
     ? `Missing tools: ${missing.join(', ')}`
     : 'Tools ready: yt-dlp, ffmpeg, rsgain.';
   renderUpdateNote(response.yt_dlp_status);
+  if (response.yt_dlp_status && response.yt_dlp_status.installed && !response.yt_dlp_status.latest) {
+    refreshLiveYtdlpUpdate();
+  }
 }
 
 function renderDisconnected() {
   setVisible(false);
-  $('statusText').textContent = 'Companion not connected';
+  const extensionVersion = getExtensionVersion(null);
+  $('statusText').textContent = extensionVersion
+    ? `Companion not connected (extension ${extensionVersion})`
+    : 'Companion not connected';
   if ($('installCmd')) $('installCmd').textContent = INSTALL_CMD;
   renderUpdateNote(null);
 }
@@ -322,6 +413,13 @@ function main() {
   if ($('verboseOutput')) {
     $('verboseOutput').addEventListener('change', (event) => {
       saveConfig({ verbose_output: event.target.checked });
+    });
+  }
+  const threadsEl = $('postprocessThreads');
+  if (threadsEl) {
+    threadsEl.addEventListener('change', () => {
+      const value = Number.parseInt(threadsEl.value, 10);
+      saveConfig({ postprocess_threads: Number.isInteger(value) && value > 0 ? value : 0 });
     });
   }
   const audioFormatEl = $('audioFormat');

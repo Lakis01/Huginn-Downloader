@@ -66,7 +66,7 @@ file themselves and cannot discover it by searching AMO.
 2. Wait for the command to finish. The signed XPI is written under
    `web-ext-artifacts/` (the filename includes the extension name/version).
    Keep the signed result, not the unsigned
-   `dist/firefox-youtube-downloader.xpi`, as the user-facing download.
+   `dist/huginn-firefox.xpi`, as the user-facing download.
    Maintainers can run the same flow as a one-command script instead:
 
     ```sh

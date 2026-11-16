@@ -591,11 +591,12 @@ function createContentFixture(options = {}) {
   document.documentElement.appendChild(document.head);
   document.documentElement.appendChild(document.body);
   document.appendChild(document.documentElement);
+  const initialUrl = new URL(options.href || 'https://www.youtube.com/watch?v=abc123');
   const location = {
-    href: options.href || 'https://www.youtube.com/watch?v=abc123',
-    hostname: 'www.youtube.com',
-    pathname: '/watch',
-    origin: 'https://www.youtube.com',
+    href: initialUrl.href,
+    hostname: initialUrl.hostname,
+    pathname: initialUrl.pathname,
+    origin: initialUrl.origin,
   };
   const metadata = document.createElement('ytd-watch-metadata');
   const topRow = document.createElement('div');
@@ -951,7 +952,7 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'ytdlpVersionLine', 'ytdlpVersionText', 'ytdlpVersionBadge', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'postprocessThreads', 'threadsNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
   const document = {
@@ -981,6 +982,7 @@ function createPopupFixture(pingResponse) {
         }
         return pingResponse;
       },
+      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.5' }),
     },
   };
   const context = {
@@ -1382,7 +1384,7 @@ function testBuildScript() {
   const sh = readFile('scripts/build-xpi.sh');
   assertAsciiNoEmoji('scripts/build-xpi.sh', sh);
   assert.ok(sh.includes('zipfile'), 'uses Python zipfile, not the zip CLI');
-  assert.ok(sh.includes('firefox-youtube-downloader.xpi'), 'builds the xpi artifact');
+  assert.ok(sh.includes('huginn-firefox.xpi'), 'builds the xpi artifact');
   assert.ok(sh.includes('manifest.json'), 'validates manifest at archive root');
   assert.ok(sh.includes('sorted'), 'deterministic sorted entries');
   const stat = fs.statSync(path.join(ROOT, 'scripts', 'build-xpi.sh'));
@@ -1391,7 +1393,7 @@ function testBuildScript() {
   assert.ok(gi.split('\n').some((line) => line.trim() === 'dist/' || line.trim() === 'dist' || line.trim() === '/dist/'), '.gitignore lists dist/');
 
   const source = path.join(EXT, 'popup.js');
-  const archive = path.join(ROOT, 'dist', 'firefox-youtube-downloader.xpi');
+  const archive = path.join(ROOT, 'dist', 'huginn-firefox.xpi');
   const build = () => execFileSync('bash', [path.join(ROOT, 'scripts', 'build-xpi.sh')], { cwd: ROOT, stdio: 'ignore' });
   const digest = () => crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
   const original = fs.statSync(source);
@@ -1583,13 +1585,14 @@ function testContentPlaylistCardsAndWatchPrompt() {
     assert.equal(ctx.playlistId, 'PLhover789');
     assert.equal(ctx.topVideoUrl, 'https://www.youtube.com/watch?v=toppreview1');
 
-    // Single row inside side panel stays non-playlist single-track target.
+    // Row inside playlist panel carrying list= resolves as playlist prompt candidate preserving row track URL.
     fx.setHitStackArr([panelRow]);
     panelRow.dispatchEvent({ type: 'contextmenu', target: panelRow, bubbles: true, clientX: 22, clientY: 28 });
     let rowCtx = null;
     responder({ type: 'ytdl-get-context-url' }, {}, (r) => { rowCtx = r; });
     assert.equal(rowCtx.url, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
-    assert.ok(!rowCtx.isPlaylist, 'individual playlist panel row stays single-track target');
+    assert.equal(rowCtx.isPlaylist, true, 'playlist row carrying list= prompts playlist vs single track');
+    assert.equal(rowCtx.topVideoUrl, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
 
     // Choice modal: "all", "top", and "select" (graphical selection on matching playlist).
     let modalReply = null;
@@ -1640,6 +1643,118 @@ function testContentPlaylistCardsAndWatchPrompt() {
     assert.equal(fx.document.querySelector('[data-ytdl-context-modal]'), null, 'choice modal closes on graphical select');
     assert.ok(fx.document.querySelector('[data-ytdl-playlist-dialog="true"]'), 'graphical playlist dialog opens cleanly');
   }
+
+  // Channel view: Audio & Video pill (no Cut), card checkboxes with titles, and hover gesture preservation.
+  {
+    const fx = createContentFixture({ href: 'https://www.youtube.com/@dustroadrecordsai/videos' });
+    const header = fx.document.createElement('yt-flexible-actions-view-model');
+    fx.document.body.appendChild(header);
+    const grid = fx.document.createElement('ytd-rich-grid-renderer');
+    const contents = fx.document.createElement('div');
+    contents.id = 'contents';
+    const cardTitles = ['First Song', 'Second Song', 'Third Song'];
+    cardTitles.forEach((songTitle, idx) => {
+      const card = fx.document.createElement('ytd-rich-item-renderer');
+      const lockup = fx.document.createElement('yt-lockup-view-model');
+      const durLink = fx.document.createElement('a');
+      durLink.setAttribute('href', `/watch?v=chan${idx + 1}`);
+      durLink.textContent = `0${idx + 3}:15`;
+      const titleLink = fx.document.createElement('a');
+      titleLink.setAttribute('href', `/watch?v=chan${idx + 1}`);
+      titleLink.textContent = songTitle;
+      lockup.appendChild(durLink);
+      lockup.appendChild(titleLink);
+      card.appendChild(lockup);
+      contents.appendChild(card);
+    });
+    grid.appendChild(contents);
+    fx.document.body.appendChild(grid);
+    grid.dispatchEvent({ type: 'yt-navigate-finish', target: grid, bubbles: true });
+
+    const channelPill = header.querySelector('[data-ytdl-batch-controls="true"]');
+    assert.ok(channelPill, 'channel view mounts [Audio | Video] pill in flexible actions');
+    const pillModes = channelPill.querySelectorAll('button').map((b) => b.getAttribute('data-ytdl-mode'));
+    assert.deepEqual(pillModes, ['audio', 'video'], 'channel pill excludes Cut button');
+
+    channelPill.querySelector('[data-ytdl-mode="audio"]').dispatchEvent({ type: 'click', bubbles: true });
+    assert.equal(fx.sentMessages.length, 0, 'clicking channel Audio opens graphical item selection');
+    const panelBar = contents.querySelector('[data-ytdl-panel-bar="true"]');
+    assert.ok(panelBar, 'channel grid mounts batch toolbar');
+    const channelChecks = contents.querySelectorAll('[data-ytdl-channel-check="true"]');
+    assert.equal(channelChecks.length, 3, 'checkboxes appear next to all channel video cards');
+    const dialogItems = fx.document.querySelectorAll('[data-ytdl-dialog-item="true"]');
+    assert.ok(dialogItems[0].textContent.includes('First Song'), 'skips duration-only links for lockup title');
+
+    const boxes = contents.querySelectorAll('[data-ytdl-side-checkbox="true"]');
+    boxes[1].checked = false;
+    boxes[1].dispatchEvent({ type: 'change', target: boxes[1], bubbles: true });
+    const dlBtn = panelBar.querySelector('[data-ytdl-panel-download="true"]');
+    assert.equal(dlBtn.textContent, 'Download 2 selected (audio)');
+    dlBtn.dispatchEvent({ type: 'click', target: dlBtn, bubbles: true });
+    assert.equal(fx.sentMessages.length, 1);
+    assert.equal(fx.sentMessages[0].mode, 'audio');
+    assert.equal(fx.sentMessages[0].playlist, true);
+    assert.equal(fx.sentMessages[0].playlistItems, '1,3');
+
+    // Hovering a playlist card before #video-preview spawns preserves isPlaylist across preview fade-in.
+    const responder = fx.messageListeners[0];
+    const hoveredPlaylistCard = fx.document.createElement('yt-lockup-view-model');
+    const hoverPlLink = fx.document.createElement('a');
+    hoverPlLink.setAttribute('href', '/playlist?list=PLhoverLockup');
+    hoveredPlaylistCard.appendChild(hoverPlLink);
+    fx.document.body.appendChild(hoveredPlaylistCard);
+    hoveredPlaylistCard.dispatchEvent({ type: 'pointerover', target: hoveredPlaylistCard, bubbles: true });
+
+    const barePreview = fx.document.createElement('ytd-video-preview');
+    const barePrevLink = fx.document.createElement('a');
+    barePrevLink.setAttribute('href', '/watch?v=topOnly');
+    barePreview.appendChild(barePrevLink);
+    fx.document.body.appendChild(barePreview);
+    fx.setHitStackArr([barePreview]);
+    barePreview.dispatchEvent({ type: 'pointerdown', target: barePreview, bubbles: true, button: 2, clientX: 40, clientY: 50 });
+    barePreview.dispatchEvent({ type: 'contextmenu', target: barePreview, bubbles: true, clientX: 40, clientY: 50 });
+
+    let ctx = null;
+    responder({ type: 'ytdl-get-context-url' }, {}, (r) => { ctx = r; });
+    assert.equal(ctx.isPlaylist, true, 'lastHoveredCard rescues playlist context behind #video-preview');
+    assert.equal(ctx.playlistId, 'PLhoverLockup');
+    assert.equal(ctx.topVideoUrl, 'https://www.youtube.com/watch?v=topOnly');
+  }
+}
+
+async function testPopupVersionBadgeAndThreads() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const fx = createPopupFixture({
+    ok: true,
+    version: '2.5.5',
+    cpu_threads: 12,
+    recommended_threads: 10,
+    effective_threads: 10,
+    config: { audio_format: 'best', auto_tag: true, rsgain: false },
+    deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
+    yt_dlp_status: { installed: '2026.11.01', latest: '2026.11.01', outdated: false },
+  });
+  const threadsEl = fx.elements.get('postprocessThreads');
+  const autoOpt = { value: '0', textContent: 'Auto (max available - 2)' };
+  threadsEl.options = [autoOpt, { value: '1', textContent: '1 thread' }, { value: '4', textContent: '4 threads' }];
+  fx.triggerReady();
+  await tick(30);
+
+  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.5, companion 2.5.5)');
+  assert.equal(fx.elements.get('ytdlpVersionLine').hidden, false);
+  assert.equal(fx.elements.get('ytdlpVersionText').textContent, 'yt-dlp 2026.11.01');
+  assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Up to date');
+  assert.equal(autoOpt.textContent, 'Auto (10 of 12 threads, max - 2)');
+  assert.equal(threadsEl.value, '0');
+
+  threadsEl.value = '4';
+  for (const fn of threadsEl.listeners.change || []) await fn({ target: threadsEl });
+  await tick(10);
+  const saved = [...fx.nativeCalls].reverse().find(
+    (call) => call.msg && call.msg.action === 'set_config' && call.msg.config && 'postprocess_threads' in call.msg.config,
+  );
+  assert.ok(saved, 'postprocess_threads change sends set_config');
+  assert.equal(saved.msg.config.postprocess_threads, 4);
 }
 
 async function testBackgroundPlaylistMessageRelay() {
@@ -1810,6 +1925,7 @@ async function main() {
   await testPopupVideoFolderIsIndependentFromAudioFolder();
   await testPopupVerboseOutputToggleDefaultsOffAndPersists();
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
+  await testPopupVersionBadgeAndThreads();
   testSignScript();
   testBuildScript();
   await testChromiumBuildAndBackground();

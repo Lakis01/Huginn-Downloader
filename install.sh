@@ -5,7 +5,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 BIN_SOURCE="$ROOT/bin"
 DESKTOP_SOURCE="$ROOT/desktop"
 TARGET_HOME=${HOME:-}
-XPI_TARGET="$ROOT/dist/firefox-youtube-downloader.xpi"
+XPI_TARGET="$ROOT/dist/huginn-firefox.xpi"
 IS_MACOS=false
 [[ $(uname -s) == Darwin ]] && IS_MACOS=true
 

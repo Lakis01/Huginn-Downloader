@@ -75,7 +75,7 @@ def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     root = Path(__file__).resolve().parents[1]
     source = Path(args[0]) if len(args) > 0 else root / "extension"
-    output = Path(args[1]) if len(args) > 1 else root / "dist/firefox-youtube-downloader.xpi"
+    output = Path(args[1]) if len(args) > 1 else root / "dist/huginn-firefox.xpi"
     try:
         names = build_xpi(source, output)
     except (OSError, ValueError) as error:

@@ -419,6 +419,41 @@ class NativeHostPresenceTests(unittest.TestCase):
             self.assertEqual(resolved, str(user_ytdlp))
             self.assertEqual(path_entries[0], str(user_bin))
 
+    def test_ping_exposes_thread_metadata_and_live_ytdlp_check_action(self):
+        sentinel = {
+            "installed": "2026.11.01",
+            "latest": "2026.11.15",
+            "outdated": True,
+            "age_days": 14,
+            "reason": "behind_latest",
+            "update_hint": "yt-dlp -U",
+        }
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"HOME": tmp}, clear=False
+        ), mock.patch.object(
+            HOST, "detected_cpu_threads", return_value=12
+        ), mock.patch.object(
+            HOST, "recommended_postprocess_threads", return_value=10
+        ), mock.patch.object(
+            HOST, "check_ytdlp_update", return_value=sentinel
+        ) as check:
+            responses = run_host([
+                {"action": "ping"},
+                {"action": "check_ytdlp_update"},
+                {"action": "set_config", "config": {"postprocess_threads": 4}},
+                {"action": "set_config", "config": {"postprocess_threads": 0}},
+            ])
+
+        self.assertEqual(responses[0]["cpu_threads"], 12)
+        self.assertEqual(responses[0]["recommended_threads"], 10)
+        self.assertEqual(responses[0]["effective_threads"], 10)
+        self.assertEqual(responses[1]["yt_dlp_status"], sentinel)
+        self.assertEqual(responses[2]["effective_threads"], 4)
+        self.assertEqual(responses[3]["effective_threads"], 10)
+        self.assertNotIn("postprocess_threads", responses[3]["config"])
+        check.assert_any_call(allow_network=False)
+        check.assert_any_call(allow_network=True)
+
 
 if __name__ == "__main__":
     unittest.main()

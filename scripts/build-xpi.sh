@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/extension"
-OUT="$ROOT/dist/firefox-youtube-downloader.xpi"
+OUT="$ROOT/dist/huginn-firefox.xpi"
+rm -f "$ROOT/dist/firefox-youtube-downloader.xpi"
 
 "${PYTHON:-python3}" "$ROOT/scripts/build_xpi.py" "$SRC" "$OUT"

@@ -471,6 +471,32 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config["audio_format"], "opus")
         self.assertEqual(config["channel_mode"], "ask")
 
+    def test_postprocess_threads_recommendation_and_round_trip(self):
+        from ytdl_config import (
+            effective_postprocess_threads,
+            recommended_postprocess_threads,
+        )
+
+        self.assertEqual(recommended_postprocess_threads(1), 1)
+        self.assertEqual(recommended_postprocess_threads(2), 1)
+        self.assertEqual(recommended_postprocess_threads(12), 10)
+        self.assertEqual(effective_postprocess_threads({}, cpu_threads=8), 6)
+        self.assertEqual(
+            effective_postprocess_threads({"postprocess_threads": 3}, cpu_threads=8),
+            3,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            baseline = load_config(env)
+            self.assertNotIn("postprocess_threads", baseline)
+            save_config({"postprocess_threads": 6}, env)
+            self.assertEqual(load_config(env)["postprocess_threads"], 6)
+            save_config({"postprocess_threads": 0}, env)
+            self.assertNotIn("postprocess_threads", load_config(env))
+            with self.assertRaises(ValueError):
+                save_config({"postprocess_threads": 99}, env)
+
 
 if __name__ == "__main__":
     unittest.main()

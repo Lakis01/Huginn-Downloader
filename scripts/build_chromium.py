@@ -71,7 +71,7 @@ def build_chromium_manifest(firefox_manifest: dict) -> dict:
         "description": firefox_manifest["description"],
         "homepage_url": firefox_manifest["homepage_url"],
         "key": CHROMIUM_PUBLIC_KEY,
-        "permissions": ["nativeMessaging", "contextMenus", "activeTab"],
+        "permissions": ["nativeMessaging", "contextMenus", "activeTab", "scripting"],
         "host_permissions": [
             "*://*.youtube.com/*",
             "*://youtube.com/*",

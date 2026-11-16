@@ -427,7 +427,7 @@ assert_file_contains "$TMP/dry-run.out" '.mozilla/native-messaging-hosts/firefox
     'installer dry-run lists home native-messaging manifest'
 assert_file_contains "$TMP/dry-run.out" '.config/mozilla/native-messaging-hosts/firefox_youtube_downloader.json' \
     'installer dry-run lists XDG native-messaging manifest'
-assert_file_contains "$TMP/dry-run.out" 'dist/firefox-youtube-downloader.xpi' 'installer dry-run lists XPI target'
+assert_file_contains "$TMP/dry-run.out" 'dist/huginn-firefox.xpi' 'installer dry-run lists XPI target'
 [[ ! -e "$dry_home/.local/bin" ]] || fail 'default installer invocation created the bin directory'
 [[ ! -e "$dry_home/.local/share/applications" ]] || fail 'default installer invocation created the applications directory'
 pass 'installer defaults to a no-write dry run'
@@ -452,9 +452,9 @@ pass 'installer backs up replaced files and installs staged sources without a UR
 assert_installer_preflight_conflict() {
     local label=$1 home=$2 conflict_destination=$3 xdg_config_home=${4:-}
     local xpi_before xpi_existed=false
-    if [[ -e "$ROOT/dist/firefox-youtube-downloader.xpi" ]]; then
+    if [[ -e "$ROOT/dist/huginn-firefox.xpi" ]]; then
         xpi_existed=true
-        xpi_before=$(sha256sum "$ROOT/dist/firefox-youtube-downloader.xpi")
+        xpi_before=$(sha256sum "$ROOT/dist/huginn-firefox.xpi")
     fi
     mkdir -p -- "$conflict_destination"
     if HOME="$home" XDG_CONFIG_HOME="$xdg_config_home" "$INSTALLER" --install --yes > "$TMP/preflight.out" 2>&1; then
@@ -463,9 +463,9 @@ assert_installer_preflight_conflict() {
     assert_file_contains "$TMP/preflight.out" 'is a directory' "$label conflict report"
     [[ ! -e "$home/.local/bin" ]] || fail "$label wrote binaries before preflight completed"
     if $xpi_existed; then
-        assert_eq "$xpi_before" "$(sha256sum "$ROOT/dist/firefox-youtube-downloader.xpi")" "$label did not rebuild XPI before preflight"
+        assert_eq "$xpi_before" "$(sha256sum "$ROOT/dist/huginn-firefox.xpi")" "$label did not rebuild XPI before preflight"
     else
-        [[ ! -e "$ROOT/dist/firefox-youtube-downloader.xpi" ]] || fail "$label built XPI before preflight"
+        [[ ! -e "$ROOT/dist/huginn-firefox.xpi" ]] || fail "$label built XPI before preflight"
     fi
 }
 
@@ -548,8 +548,8 @@ for manifest in (
         "allowed_extensions": ["firefox-youtube-downloader@lakis01.github.io"],
     }, value
 PY
-[[ -s "$ROOT/dist/firefox-youtube-downloader.xpi" ]] || fail 'installer did not build the XPI'
-python3 - "$ROOT/dist/firefox-youtube-downloader.xpi" <<'PY'
+[[ -s "$ROOT/dist/huginn-firefox.xpi" ]] || fail 'installer did not build the XPI'
+python3 - "$ROOT/dist/huginn-firefox.xpi" <<'PY'
 import sys
 import zipfile
 

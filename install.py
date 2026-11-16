@@ -49,7 +49,7 @@ def _windows_paths(environment: dict[str, str]) -> dict[str, Path]:
         "manifest": manifest,
         "chromium_manifest": chromium_manifest,
         "config": config,
-        "xpi": ROOT / "dist/firefox-youtube-downloader.xpi",
+        "xpi": ROOT / "dist/huginn-firefox.xpi",
         "chromium_unpacked": ROOT / "dist/huginn-chromium",
         "chromium_zip": ROOT / "dist/huginn-chromium.zip",
     }

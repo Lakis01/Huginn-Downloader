@@ -14,9 +14,12 @@ import tempfile
 from urllib.parse import urlsplit
 
 from ytdl_config import (
+    detected_cpu_threads,
     effective_download_dir,
+    effective_postprocess_threads,
     effective_video_download_dir,
     load_config,
+    recommended_postprocess_threads,
     save_config,
     user_download_directories,
     ytdlp_config_exists,
@@ -245,12 +248,11 @@ def _launch_download(
     raise OSError(f"Unsupported platform: {sys.platform}")
 
 
-def _config_response():
-    config = load_config()
+def _safe_ytdlp_status(*, allow_network=False):
     try:
-        yt_dlp_status = check_ytdlp_update(allow_network=False)
+        return check_ytdlp_update(allow_network=allow_network)
     except Exception:
-        yt_dlp_status = {
+        return {
             "installed": None,
             "latest": None,
             "outdated": False,
@@ -258,6 +260,11 @@ def _config_response():
             "reason": "unknown",
             "update_hint": "yt-dlp -U",
         }
+
+
+def _config_response():
+    config = load_config()
+    yt_dlp_status = _safe_ytdlp_status(allow_network=False)
     return {
         "ok": True,
         "version": VERSION,
@@ -268,6 +275,9 @@ def _config_response():
         "ytdlp_config_exists": ytdlp_config_exists(),
         "deps": _dependencies(),
         "yt_dlp_status": yt_dlp_status,
+        "cpu_threads": detected_cpu_threads(),
+        "recommended_threads": recommended_postprocess_threads(),
+        "effective_threads": effective_postprocess_threads(config),
     }
 
 
@@ -324,6 +334,8 @@ def handle_message(message):
     try:
         if action in {"ping", "get_config"}:
             return _config_response()
+        if action == "check_ytdlp_update":
+            return {"ok": True, "yt_dlp_status": _safe_ytdlp_status(allow_network=True)}
         if action == "set_config":
             updates = message.get("config", {})
             if not isinstance(updates, dict):
@@ -332,6 +344,8 @@ def handle_message(message):
             config.update(updates)
             if config.get("download_dir") == "":
                 config["download_dir"] = None
+            if config.get("postprocess_threads") in (0, None):
+                config.pop("postprocess_threads", None)
             save_config(config)
             return _config_response()
         if action == "download":

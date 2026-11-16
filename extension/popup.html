@@ -12,8 +12,18 @@
     <span class="dot" id="statusDot" aria-hidden="true"></span>
     <span id="statusText">Checking companion connection...</span>
   </p>
+  <p class="status-sub" id="ytdlpVersionLine" hidden>
+    <span id="ytdlpVersionText"></span>
+    <span class="badge" id="ytdlpVersionBadge" hidden></span>
+  </p>
 
   <section id="connectedView" hidden>
+    <div class="update-note" id="ytdlpUpdateNote" hidden>
+      <h2>yt-dlp update available</h2>
+      <p id="ytdlpUpdateText"></p>
+      <code class="cmd" id="ytdlpUpdateHint"></code>
+    </div>
+
     <h2>Audio format</h2>
     <select id="audioFormat" class="select" aria-label="Audio format">
       <option value="best">Native (Opus / m4a)</option>
@@ -66,6 +76,20 @@
     </label>
     <p class="warn-note" id="rsgainMissingNote" hidden></p>
 
+    <h2>Post-processing threads</h2>
+    <select id="postprocessThreads" class="select" aria-label="Post-processing threads">
+      <option value="0">Auto (max available - 2)</option>
+      <option value="1">1 thread (sequential)</option>
+      <option value="2">2 threads</option>
+      <option value="4">4 threads</option>
+      <option value="6">6 threads</option>
+      <option value="8">8 threads</option>
+      <option value="10">10 threads</option>
+      <option value="12">12 threads</option>
+      <option value="16">16 threads</option>
+    </select>
+    <p class="note" id="threadsNote">Runs tagging, artwork, and ReplayGain in parallel within one terminal after batch downloads.</p>
+
     <h2>yt-dlp output</h2>
     <label class="toggle">
       <input type="checkbox" id="verboseOutput">
@@ -109,11 +133,6 @@
     </div>
 
     <p class="note" id="depsLine"></p>
-    <div class="update-note" id="ytdlpUpdateNote" hidden>
-      <h2>yt-dlp update available</h2>
-      <p id="ytdlpUpdateText"></p>
-      <code class="cmd" id="ytdlpUpdateHint"></code>
-    </div>
   </section>
 
   <section id="setupView" hidden>

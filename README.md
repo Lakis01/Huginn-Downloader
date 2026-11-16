@@ -524,7 +524,7 @@ cd Huginn-Downloader
 The installer copies the Python host and helpers to
 `%LOCALAPPDATA%\FirefoxYouTubeDownloader\bin`, writes its manifest and config
 under `%LOCALAPPDATA%\FirefoxYouTubeDownloader`, registers the host for the
-current Windows user, and builds `dist\firefox-youtube-downloader.xpi` without
+current Windows user, and builds `dist\huginn-firefox.xpi` without
 requiring Bash. Install the **AMO-signed** XPI in Firefox separately; the local
 installer's XPI is an unsigned build artifact. If Windows Terminal (`wt.exe`)
 is installed, downloads open there; otherwise the host opens a new console.
@@ -539,6 +539,7 @@ The popup stores these options in the user's config file:
 | Video download folder | XDG Videos directory plus `Youtube Downloads` | Independent from audio; choose the XDG Downloads folder plus `Youtube`, a custom path, or `Keep yt-dlp config` (`video_download_dir`). If no yt-dlp config exists, `Keep` falls back to the Videos directory. |
 | Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
+| Post-processing threads | `Auto` (`max available - 2`) | Parallel worker count for cover art, metadata tagging, and ReplayGain after batch downloads finish (runs inside a single terminal). |
 | Verbose yt-dlp diagnostics | Off (quiet) | The download terminal shows live progress, speed, and ETA even in quiet mode. Turn this on to include yt-dlp's detailed logs (`verbose_output`); those logs may include URLs and request details. |
 | Audio format | Native (Opus / m4a) (no conversion) | Native (Opus / m4a), MP3, M4A / AAC (transcode if not natively available), Ogg Vorbis, FLAC, or Opus (transcode if not natively available). The audio-quality section above explains conversion behavior. |
 | MP3 quality | `V0` (~245 kbps VBR, Recommended) | `V0`, `320k`, `V2`, or `V5`; shown only when the format is `mp3`. Mono scales `320k` to `192k` automatically. |

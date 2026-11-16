@@ -310,7 +310,7 @@ class ReleaseAssetUploadTests(unittest.TestCase):
                 f"huginn-downloader-{version}-arch-pkgbuild.tar.gz",
             ):
                 (assets / name).write_bytes(b"fixture")
-            (assets / "firefox-youtube-downloader.xpi").write_bytes(b"unsigned local build")
+            (assets / "huginn-firefox.xpi").write_bytes(b"unsigned local build")
             env = os.environ | {
                 "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
                 "GH_LOG": str(log),

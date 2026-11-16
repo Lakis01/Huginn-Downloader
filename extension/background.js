@@ -103,10 +103,34 @@ function isHttpUrl(value) {
   }
 }
 
-async function queryContextInfo(tabId) {
+async function ensureContentScriptLoaded(tabId) {
+  const api = ext();
+  if (!api || !tabId) return false;
+  try {
+    if (api.scripting && api.scripting.executeScript) {
+      if (api.scripting.insertCSS) {
+        await api.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => {});
+      }
+      await api.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+      return true;
+    }
+    if (api.tabs && api.tabs.executeScript) {
+      if (api.tabs.insertCSS) {
+        await api.tabs.insertCSS(tabId, { file: 'content.css' }).catch(() => {});
+      }
+      await api.tabs.executeScript(tabId, { file: 'content.js' });
+      return true;
+    }
+  } catch (_error) {
+    return false;
+  }
+  return false;
+}
+
+async function queryContextInfo(tabId, tabUrl) {
   const api = ext();
   if (!api || !tabId) return null;
-  try {
+  const askOnce = async () => {
     const response = await api.tabs.sendMessage(tabId, { type: 'ytdl-get-context-url' });
     if (response && typeof response.url === 'string' && response.url) {
       return {
@@ -117,23 +141,42 @@ async function queryContextInfo(tabId) {
         topVideoUrl: typeof response.topVideoUrl === 'string' ? response.topVideoUrl : null,
       };
     }
+    return null;
+  };
+  try {
+    return await askOnce();
   } catch (_error) {
-    // Content script is not loaded here (for example a non-YouTube
-    // page), so fall back to the menu target URLs below.
+    if (isYouTubeUrl(tabUrl) && (await ensureContentScriptLoaded(tabId))) {
+      try {
+        return await askOnce();
+      } catch (_retryError) {
+        return null;
+      }
+    }
   }
   return null;
 }
 
-async function promptPlaylistChoice(tabId, payload) {
+async function promptPlaylistChoice(tabId, payload, tabUrl) {
   const api = ext();
   if (!api || !tabId) return false;
-  try {
+  const sendOnce = async () => {
     const response = await api.tabs.sendMessage(tabId, {
       type: 'ytdl-prompt-playlist-choice',
       ...payload,
     });
     return Boolean(response && response.shown);
+  };
+  try {
+    return await sendOnce();
   } catch (_error) {
+    if (isYouTubeUrl(tabUrl) && (await ensureContentScriptLoaded(tabId))) {
+      try {
+        return await sendOnce();
+      } catch (_retryError) {
+        return false;
+      }
+    }
     return false;
   }
 }
@@ -180,7 +223,8 @@ async function handleMenuClick(info, tab) {
   const mode = MENU_MODES[info.menuItemId];
   if (!mode) return;
   const tabId = tab && tab.id;
-  const contextInfo = await queryContextInfo(tabId);
+  const tabUrl = (tab && tab.url) || info.pageUrl || null;
+  const contextInfo = await queryContextInfo(tabId, tabUrl);
   const contextUrl = contextInfo ? contextInfo.url : null;
   // Menu target fallback order: hovered YouTube card, link, usable
   // image/audio/video source, frame, page, then the active tab. A srcUrl
@@ -211,15 +255,23 @@ async function handleMenuClick(info, tab) {
     return;
   }
 
-  if ((mode === 'audio' || mode === 'video') && isPlaylistTarget && tabId) {
-    const shown = await promptPlaylistChoice(tabId, {
-      mode,
-      url: primaryUrl,
-      playlistUrl,
-      topVideoUrl,
-      playlistId,
-    });
-    if (shown) return;
+  if ((mode === 'audio' || mode === 'video') && isPlaylistTarget) {
+    if (tabId) {
+      const shown = await promptPlaylistChoice(
+        tabId,
+        {
+          mode,
+          url: primaryUrl,
+          playlistUrl,
+          topVideoUrl,
+          playlistId,
+        },
+        tabUrl,
+      );
+      if (shown) return;
+    }
+    await sendDownload(mode, playlistUrl || primaryUrl, fallbacks, { playlist: true });
+    return;
   }
 
   await sendDownload(mode, primaryUrl, fallbacks);

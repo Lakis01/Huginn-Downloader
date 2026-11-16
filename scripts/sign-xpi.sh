@@ -74,7 +74,7 @@ while True:
         raise RuntimeError(f"AMO version {target_version} is not signed yet (status={last_status})")
     time.sleep(min(poll_interval, remaining))
 
-out_path = root / "web-ext-artifacts" / f"firefox_youtube_downloader-{target_version}-an+fx.xpi"
+out_path = root / "web-ext-artifacts" / f"huginn_downloader-{target_version}-an+fx.xpi"
 for attempt in range(3):
     try:
         dl_req = urllib.request.Request(file_info["url"], headers={"Authorization": f"JWT {make_token()}"})
