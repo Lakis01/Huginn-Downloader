@@ -49,6 +49,13 @@ The watch-page pill starts audio, video, or cut downloads without leaving
 YouTube. The example is an official audio upload; its description shows the
 standard metadata format used by automatic tagging.
 
+![Graphical playlist and channel batch selection](docs/screenshots/playlist-batch-selection.png)
+
+When downloading from a playlist or channel, Huginn mounts checkboxes next to
+individual videos alongside **Select all**, **Deselect all**, and a live
+selected-item **Download** button — synced two-way with `yt-dlp` range syntax
+(`1-5, 8`).
+
 ![Right-click context menu](docs/screenshots/context-menu.png)
 
 Huginn adds Audio, Video, and Cut Audio actions to your browser's context menu.
