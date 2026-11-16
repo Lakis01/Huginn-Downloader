@@ -47,7 +47,7 @@ class LinuxPackageStagingTests(unittest.TestCase):
             self.assertEqual(manifest["path"], "/usr/lib/firefox-youtube-downloader/yt-dlp-native-host.py")
             self.assertEqual(
                 manifest["allowed_extensions"],
-                ["firefox-youtube-downloader@lakis01.github.io"],
+                ["huginn-downloader@lakis01.github.io"],
             )
             librewolf_manifest = json.loads(
                 (stage / "usr/lib64/librewolf/native-messaging-hosts/firefox_youtube_downloader.json").read_text(encoding="utf-8")

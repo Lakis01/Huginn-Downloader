@@ -14,7 +14,27 @@ DEFAULT_VIDEO_DOWNLOAD_DIR = "~/Videos/Youtube Downloads"
 ALT_FRESH_DOWNLOAD_DIR = "~/Downloads/Youtube"
 SUPPORTED_AUDIO_FORMATS = ("best", "opus", "mp3", "m4a", "ogg", "flac")
 SUPPORTED_MP3_QUALITIES = ("V0", "320k", "V2", "V5")
+SUPPORTED_VIDEO_QUALITIES = ("best", "2160", "1440", "1080", "720", "480")
 LEGACY_MP3_QUALITY_ALIASES = {"128k": "V5"}
+
+
+def _validate_video_quality(value: Any) -> str:
+    """Validate and normalize a default video quality cap."""
+    if value is None or value == "":
+        return "best"
+    if isinstance(value, bool):
+        raise TypeError("video_quality must be a string or integer resolution")
+    if isinstance(value, int):
+        text = str(value)
+    elif isinstance(value, str):
+        text = value.strip().lower()
+        if text.endswith("p"):
+            text = text[:-1]
+    else:
+        raise TypeError("video_quality must be a string or integer resolution")
+    if text not in SUPPORTED_VIDEO_QUALITIES:
+        raise ValueError(f"video_quality must be one of {SUPPORTED_VIDEO_QUALITIES}")
+    return text
 
 _DEFAULT_CONFIG = {
     "download_dir": None,
@@ -296,6 +316,14 @@ def load_config(
     threads = stored.get("postprocess_threads")
     if isinstance(threads, int) and not isinstance(threads, bool) and 1 <= threads <= 64:
         config["postprocess_threads"] = threads
+    raw_video_quality = stored.get("video_quality")
+    if raw_video_quality is not None:
+        try:
+            validated_quality = _validate_video_quality(raw_video_quality)
+        except (TypeError, ValueError):
+            validated_quality = "best"
+        if validated_quality != "best":
+            config["video_quality"] = validated_quality
     config["download_dir"] = _normalize_legacy_default(
         config["download_dir"], "audio", env, platform_name
     )
@@ -379,6 +407,10 @@ def save_config(
                 raise ValueError("postprocess_threads must be an integer between 0 and 64")
             if value > 0:
                 normalized["postprocess_threads"] = value
+    if "video_quality" in config:
+        video_quality = _validate_video_quality(config["video_quality"])
+        if video_quality != "best":
+            normalized["video_quality"] = video_quality
 
     destination = config_path(env, platform_name)
     destination.parent.mkdir(parents=True, exist_ok=True)

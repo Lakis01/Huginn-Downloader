@@ -35,7 +35,7 @@ function testManifest() {
   assert.equal(manifest.manifest_version, 2);
   assert.equal(manifest.name, 'Huginn Downloader');
   assert.equal(manifest.homepage_url, 'https://github.com/Lakis01/Huginn-Downloader');
-  assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
+  assert.equal(manifest.browser_specific_settings.gecko.id, 'huginn-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
   assert.equal(manifest.version, '2.5.6', 'manifest version is 2.5.6');
@@ -85,7 +85,7 @@ function testReadmeBrandAndSetupGuidance() {
     'README explains that multiple downloads can run in parallel without waiting'
   );
   assert.ok(readme.includes('Pin Huginn Downloader to the toolbar'), 'README tells users to pin the extension');
-  assert.ok(normalizedReadme.includes('both the firefox extension and the local companion'), 'README explains both parts are required');
+  assert.ok(normalizedReadme.includes('both the browser extension and the local companion'), 'README explains both parts are required');
   assert.ok(readme.includes('CachyOS') && readme.includes('KDE'), 'README lists CachyOS + KDE testing');
   assert.ok(readme.includes('LMDE 7') && readme.includes('Cinnamon'), 'README lists LMDE 7 + Cinnamon testing');
   assert.ok(readme.includes('Debian 13') && readme.includes('GNOME'), 'README lists Debian 13 + GNOME testing');
@@ -617,11 +617,18 @@ function createContentFixture(options = {}) {
       onMessage: { addListener(fn) { messageListeners.push(fn); } },
     },
   };
+  const storeData = options.storage instanceof Map ? options.storage : new Map();
+  const sessionStorage = {
+    getItem(k) { return storeData.has(k) ? storeData.get(k) : null; },
+    setItem(k, v) { storeData.set(k, String(v)); },
+    removeItem(k) { storeData.delete(k); },
+  };
   const context = {
     window: { location },
     document,
     location,
     URL,
+    sessionStorage,
     MutationObserver: class { observe() {} },
     setTimeout: (fn) => { fn(); return 0; },
     clearTimeout: () => {},
@@ -633,7 +640,7 @@ function createContentFixture(options = {}) {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(EXT, 'content.js'), 'utf8'), context, { filename: 'content.js' });
   return {
-    document, location, sentMessages, messageListeners,
+    document, location, sentMessages, messageListeners, sessionStorage: storeData,
     setHitStack(els) { hitStack = els; },
     setHitStackArr(arr) { hitStack = arr; },
   };
@@ -952,7 +959,7 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'ytdlpVersionLine', 'ytdlpVersionText', 'ytdlpVersionBadge', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'postprocessThreads', 'threadsNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'ytdlpVersionLine', 'ytdlpVersionText', 'ytdlpVersionBadge', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'postprocessThreads', 'threadsNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'videoQuality', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
   const document = {
@@ -1755,6 +1762,91 @@ async function testPopupVersionBadgeAndThreads() {
   );
   assert.ok(saved, 'postprocess_threads change sends set_config');
   assert.equal(saved.msg.config.postprocess_threads, 4);
+
+  const vqEl = fx.elements.get('videoQuality');
+  assert.equal(vqEl.value, 'best', 'videoQuality defaults to best');
+  vqEl.value = '1080';
+  for (const fn of vqEl.listeners.change || []) await fn({ target: vqEl });
+  await tick(10);
+  const vqSaved = [...fx.nativeCalls].reverse().find(
+    (call) => call.msg && call.msg.action === 'set_config' && call.msg.config && 'video_quality' in call.msg.config,
+  );
+  assert.ok(vqSaved, 'videoQuality change sends set_config');
+  assert.equal(vqSaved.msg.config.video_quality, '1080');
+}
+
+function testChannelRedirectHiddenSpaAndPlaylistTarget() {
+  // 1. Clicking Audio on channel root redirects to /videos with pending sessionStorage flag.
+  {
+    const sharedStorage = new Map();
+    const fx = createContentFixture({
+      href: 'https://www.youtube.com/@dustroadrecordsai',
+      storage: sharedStorage,
+    });
+    const header = fx.document.createElement('yt-flexible-actions-view-model');
+    fx.document.body.appendChild(header);
+    header.dispatchEvent({ type: 'yt-navigate-finish', target: header, bubbles: true });
+    const pill = header.querySelector('[data-ytdl-batch-controls="true"]');
+    assert.ok(pill, 'channel root mounts batch controls');
+    pill.querySelector('[data-ytdl-mode="audio"]').dispatchEvent({ type: 'click', bubbles: true });
+    assert.equal(
+      fx.location.href,
+      'https://www.youtube.com/@dustroadrecordsai/videos',
+      'channel root click redirects to /videos before graphical selection',
+    );
+    assert.ok(sharedStorage.has('ytdl_pending_playlist_select'), 'pending channel selection saved across navigation');
+
+    // 2. Navigating to /videos with a leftover hidden playlist panel still selects visible channel cards!
+    const fx2 = createContentFixture({
+      href: 'https://www.youtube.com/@dustroadrecordsai/videos',
+      storage: sharedStorage,
+    });
+    const hiddenWrap = fx2.document.createElement('ytd-watch-flexy');
+    hiddenWrap.setAttribute('hidden', '');
+    const staleRow = fx2.document.createElement('ytd-playlist-panel-video-renderer');
+    const staleLink = fx2.document.createElement('a');
+    staleLink.setAttribute('href', '/watch?v=staleHidden1&list=PLold');
+    staleRow.appendChild(staleLink);
+    hiddenWrap.appendChild(staleRow);
+    fx2.document.body.appendChild(hiddenWrap);
+
+    const header2 = fx2.document.createElement('yt-flexible-actions-view-model');
+    fx2.document.body.appendChild(header2);
+    const grid = fx2.document.createElement('ytd-rich-grid-renderer');
+    const card = fx2.document.createElement('ytd-rich-item-renderer');
+    const cardLink = fx2.document.createElement('a');
+    cardLink.setAttribute('href', '/watch?v=realChan1');
+    cardLink.textContent = 'Channel Track 1';
+    card.appendChild(cardLink);
+    grid.appendChild(card);
+    fx2.document.body.appendChild(grid);
+    grid.dispatchEvent({ type: 'yt-navigate-finish', target: grid, bubbles: true });
+
+    assert.equal(sharedStorage.has('ytdl_pending_playlist_select'), false, 'pending channel selection consumed once cards load');
+    assert.equal(card.querySelectorAll('[data-ytdl-channel-check="true"]').length, 1, 'checkbox mounted on visible channel card instead of hidden panel');
+    assert.equal(staleRow.querySelectorAll('[data-ytdl-side-check="true"]').length, 0, 'hidden SPA panel row is ignored');
+  }
+
+  // 3. Right-click playlist modal "Select items graphically" navigates to /playlist?list=..., not /watch?v=...
+  {
+    const fx = createContentFixture({ href: 'https://www.youtube.com/results?search_query=synth' });
+    const responder = fx.messageListeners[0];
+    responder({
+      type: 'ytdl-prompt-playlist-choice',
+      mode: 'audio',
+      url: 'https://www.youtube.com/playlist?list=PL998877',
+      playlistUrl: 'https://www.youtube.com/playlist?list=PL998877',
+      topVideoUrl: 'https://www.youtube.com/watch?v=trackOne&list=PL998877',
+      playlistId: 'PL998877',
+    }, {}, () => {});
+    const selectBtn = fx.document.querySelector('[data-ytdl-context-action="select"]');
+    selectBtn.dispatchEvent({ type: 'click', target: selectBtn, bubbles: true });
+    assert.equal(
+      fx.location.href,
+      'https://www.youtube.com/playlist?list=PL998877',
+      'graphical selection navigates to /playlist?list=... without auto-playing top video',
+    );
+  }
 }
 
 async function testBackgroundPlaylistMessageRelay() {
@@ -1926,6 +2018,7 @@ async function main() {
   await testPopupVerboseOutputToggleDefaultsOffAndPersists();
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   await testPopupVersionBadgeAndThreads();
+  testChannelRedirectHiddenSpaAndPlaylistTarget();
   testSignScript();
   testBuildScript();
   await testChromiumBuildAndBackground();

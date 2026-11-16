@@ -118,6 +118,16 @@
     <input type="text" id="customVideoDir" class="path" placeholder="/home/user/Videos/Youtube" aria-label="Custom video folder" hidden>
     <p class="note" id="effectiveVideoDir"></p>
 
+    <h2>Default video quality</h2>
+    <select id="videoQuality" class="select" aria-label="Default video quality">
+      <option value="best">Best available (unlimited)</option>
+      <option value="2160">Best, up to 4K (2160p)</option>
+      <option value="1440">Best, up to 1440p (QHD)</option>
+      <option value="1080">Best, up to 1080p (Full HD)</option>
+      <option value="720">Best, up to 720p (HD)</option>
+      <option value="480">Best, up to 480p (SD)</option>
+    </select>
+
     <h2>Long audio routing</h2>
     <label class="toggle">
       <input type="checkbox" id="longAudioEnabled">

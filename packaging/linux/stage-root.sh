@@ -11,7 +11,7 @@ DEST_ROOT=$2
 NATIVE_MANIFEST_ROOT=$3
 APP_ROOT=/usr/lib/firefox-youtube-downloader
 HOST_PATH="$APP_ROOT/yt-dlp-native-host.py"
-EXTENSION_ID=firefox-youtube-downloader@lakis01.github.io
+EXTENSION_ID=huginn-downloader@lakis01.github.io
 CHROMIUM_ORIGIN=chrome-extension://hlekndcccbgmhlablldcddddmknkjomg/
 
 [[ $NATIVE_MANIFEST_ROOT == /* ]] || {

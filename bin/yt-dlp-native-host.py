@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Firefox Native Messaging host for Huginn Downloader."""
+"""Browser Native Messaging host for Huginn Downloader."""
 
 import json
 import os
@@ -66,7 +66,7 @@ def _ensure_macos_gui_path():
 
 
 def _ensure_linux_gui_path():
-    """Prefer user-installed tools in GUI-launched Firefox processes."""
+    """Prefer user-installed tools in GUI-launched browser processes."""
     if not sys.platform.startswith("linux"):
         return
     path_entries = os.environ.get("PATH", "").split(os.pathsep)

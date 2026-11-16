@@ -5,8 +5,9 @@ listing in the Firefox Add-ons catalog. Both routes use Mozilla's signing
 service. An **Unlisted** add-on is signed but does not appear in catalog search;
 a **Listed** add-on is signed and reviewed for public discovery.
 
-Huginn Downloader is a two-part application. The XPI contains the Firefox
-frontend; downloading is performed by the user's locally installed companion
+Huginn Downloader is a two-part application. The XPI contains the Gecko/Firefox
+browser frontend (matching the companion shared with Chromium-family builds);
+downloading is performed by the user's locally installed companion
 (`install.sh` on Linux/macOS or `install.ps1` on Windows) and `yt-dlp`. Users
 also need FFmpeg; automatic audio tagging uses Python, Mutagen, and Pillow, and
 ReplayGain is optional (`rsgain`). The browser add-on does not bundle or
@@ -16,8 +17,12 @@ download those programs.
 
 1. Create or sign in to a Firefox Account.
 2. Open <https://addons.mozilla.org/developers/> and accept the developer terms.
-3. Review the extension version and ID in `extension/manifest.json`. Keep the
-   stable ID `firefox-youtube-downloader@lakis01.github.io` for every release.
+3. Review the extension version and ID in `extension/manifest.json`. The add-on
+   uses the stable Gecko ID `huginn-downloader@lakis01.github.io` for the Huginn
+   Downloader brand (renamed from the legacy unlisted
+   `firefox-youtube-downloader@lakis01.github.io` ID). Keep `gecko.id` constant
+   once your Listed AMO store page is created so updates seamlessly go to the
+   same listing.
 4. Run the repository checks in `README.md` and build the deterministic package:
 
    ```sh
@@ -179,9 +184,12 @@ it to AMO's review and content policies.
    > not bundled with this add-on. Python, Mutagen, and Pillow are needed for
    > automatic tagging; `rsgain` is optional for ReplayGain.
 
-3. Upload clear screenshots of the extension's context menu, watch-page
-   controls, and settings popup. Make sure screenshots correspond to the
-   uploaded version and do not include private URLs or account information.
+3. Upload clear screenshots of the extension in action under **Edit Product Page
+   -> Images / Screenshots** on AMO (`docs/screenshots/watch-page-pill.png`,
+   `docs/screenshots/context-menu.png`, and `docs/screenshots/toolbar-popup.png`).
+   AMO supports up to 10 PNG/JPG screenshots directly on the public listing
+   page. Make sure screenshots correspond to the uploaded version and do not
+   include private URLs or account information.
 4. Complete the source-code section with the repository URL and a version tag
    that matches the submitted add-on. Provide reviewer instructions that say
    the extension intentionally requires a local Native Messaging companion,
@@ -221,14 +229,16 @@ it to AMO's review and content policies.
    context menu, watch-page controls, and settings. Link the store page from
    GitHub and README; users should install the companion separately.
 
-### Listed updates
+### Listed updates (automatic via GitHub Actions)
 
-For every update, increment the manifest version, run tests, build and upload
-the new source package, include a concise changelog, and complete any updated
-privacy/permission questions. Wait for signing/review before describing the
-version as available. Keep the previous GitHub release and store listing
-clearly distinguished; a Listed version is installed through AMO, while an
-Unlisted release is installed from its signed XPI.
+Once your first Listed version is approved under `huginn-downloader@lakis01.github.io`
+on AMO, set the GitHub repository variable `AMO_CHANNEL` to `listed` in
+**Settings -> Secrets and variables -> Actions -> Variables**. From that point
+on, every push to `main` automatically runs `.github/workflows/auto-release.yml`
+to bump the version, test, sign/submit the new Listed version to AMO using your
+`AMO_JWT_ISSUER` and `AMO_JWT_SECRET` secrets, and publish the GitHub Release
+with zero manual steps. For manual uploads, always increment `manifest.json`
+version first and include a concise changelog.
 
 ## AMO review and intellectual-property notes
 

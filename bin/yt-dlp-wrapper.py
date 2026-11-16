@@ -1427,6 +1427,20 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
         _remove_temp_file(duration_path)
 
 
+def _video_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
+    cfg = dict(config) if config is not None else load_config()
+    raw_quality = cfg.get("video_quality", "best")
+    quality = str(raw_quality if raw_quality is not None else "best").strip().lower()
+    if quality.endswith("p"):
+        quality = quality[:-1]
+    if quality in {"2160", "1440", "1080", "720", "480"}:
+        return [
+            "-f",
+            f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best",
+        ]
+    return ["-f", "bestvideo+bestaudio/best"]
+
+
 def download_video(url, config=None, *, playlist=None, playlist_items=None):
     cfg = dict(config) if config is not None else load_config()
     effective_dir = effective_video_download_dir(cfg)
@@ -1456,7 +1470,7 @@ def download_video(url, config=None, *, playlist=None, playlist_items=None):
     command = [
         "yt-dlp",
         *extras,
-        "-f", "bestvideo+bestaudio/best",
+        *_video_format_args(cfg),
         "--merge-output-format", "mkv",
         "--embed-thumbnail",
         "--convert-thumbnails", "webp",

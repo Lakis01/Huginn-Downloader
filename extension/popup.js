@@ -259,6 +259,7 @@ function renderConnected(response) {
   if ($('verboseOutput')) $('verboseOutput').checked = config.verbose_output === true;
   if ($('audioFormat')) $('audioFormat').value = config.audio_format || 'best';
   if ($('mp3Quality')) $('mp3Quality').value = config.mp3_quality || 'V0';
+  if ($('videoQuality')) $('videoQuality').value = config.video_quality || 'best';
   if ($('channelMode')) {
     $('channelMode').value = config.channel_mode || 'stereo';
   }
@@ -434,6 +435,12 @@ function main() {
   if (mp3QualityEl) {
     mp3QualityEl.addEventListener('change', () => {
       pushConfig();
+    });
+  }
+  const videoQualityEl = $('videoQuality');
+  if (videoQualityEl) {
+    videoQualityEl.addEventListener('change', () => {
+      saveConfig({ video_quality: videoQualityEl.value || 'best' });
     });
   }
   for (const id of ['embedThumbnail', 'thumbnailJpg', 'longAudioEnabled']) {

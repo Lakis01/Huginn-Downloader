@@ -193,6 +193,12 @@ html[dark] [data-ytdl-playlist-items] {
   font-size: 12px;
 }
 
+[data-ytdl-wait-note] {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
 html[dark] [data-ytdl-playlist-error] {
   color: #f28b82;
 }

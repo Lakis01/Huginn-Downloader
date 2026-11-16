@@ -545,7 +545,7 @@ for manifest in (
         "description": "Native Messaging host for Huginn Downloader",
         "path": str(home / ".local/bin/yt-dlp-native-host.py"),
         "type": "stdio",
-        "allowed_extensions": ["firefox-youtube-downloader@lakis01.github.io"],
+        "allowed_extensions": ["huginn-downloader@lakis01.github.io"],
     }, value
 PY
 [[ -s "$ROOT/dist/huginn-firefox.xpi" ]] || fail 'installer did not build the XPI'

@@ -4,23 +4,42 @@
   <img src="docs/logo/huginn-logo.webp" alt="Huginn Downloader raven logo" width="160">
 </p>
 
-Huginn Downloader is a Firefox extension and a separate local companion. Both
-the Firefox extension and the local companion are required: the extension
-provides the settings popup, YouTube watch-page controls, and browser context
-menu; the companion connects Firefox to the local
+**One click to save music and videos from YouTube (and hundreds of other sites)
+straight to your Music and Videos folders — with zero ads, zero shady
+"YouTube-to-MP3" websites, and original audio quality.**
+
+### Why Huginn Downloader?
+
+- **Built for everyone:** No copying URLs or typing terminal commands. Click
+  **Audio**, **Video**, or **Cut** right below any YouTube video — or
+  right-click a link on supported sites — and it saves directly to your device.
+- **No quality loss:** Saves YouTube's native **Opus / M4A** audio stream
+  without double-compressing it through lossy MP3 converters (optional MP3,
+  Ogg, and FLAC conversion is still built in for older hardware/car stereos).
+- **Clean library, ready to play:** Automatically strips clutter like
+  `(Official Video)`, `(Lyric Video)`, and `(Promo)`, embeds cover art and
+  artist/album tags, and optionally balances volume across tracks (`rsgain`) so
+  one song never blasts louder than the next.
+- **Playlists & channels with checkboxes:** Click **Audio** or **Video** on a
+  playlist or channel `/videos` tab (or right-click a playlist card) to pick
+  individual tracks graphically with **Select all / Deselect all** and a live
+  progress bar.
+- **Private & multi-browser:** Everything runs 100% locally on your own
+  computer (`yt-dlp` + FFmpeg) across **Firefox, LibreWolf, Chromium, Brave,
+  Vivaldi, Google Chrome, and Microsoft Edge** — no servers, accounts, or
+  tracking.
+
+Both the browser extension and the local companion are required: the extension
+provides the settings popup, YouTube page controls, and right-click context
+menu; the companion connects your browser via Native Messaging to the local
 `yt-dlp` backend, which fetches the media. The companion is not bundled with
 the extension, and the extension sends nothing to a project-owned server.
 
-`yt-dlp` and FFmpeg run locally on your computer: downloads go directly from
-the source to your machine, without an upload queue or ads. Each action starts
-an independent `yt-dlp` session, so you can run multiple audio, video, or cut
-downloads in parallel without waiting for one download to finish before
-starting the next. Huginn adds YouTube
-watch-page controls, a right-click menu, and system keyboard shortcuts, with
-choices for native Opus/M4A, forced Opus, MP3
-(`V0`/`V2`/`V5`/`320k`), Ogg, FLAC, channels, and cover art. Speed depends on
-the site, available formats, and your connection; native streams avoid an
-extra conversion when they match your chosen settings.
+Each action starts an independent `yt-dlp` session, so you can run multiple
+audio, video, or cut downloads in parallel without waiting for one download to
+finish before starting the next. Huginn adds native Opus/M4A, forced Opus, MP3
+(`V0`/`V2`/`V5`/`320k`), Ogg, FLAC, channels, default max video resolution,
+parallel post-processing threads, cover art, and system keyboard shortcuts.
 
 ## Screenshots & interface overview
 
@@ -32,15 +51,16 @@ standard metadata format used by automatic tagging.
 
 ![Right-click context menu](docs/screenshots/context-menu.png)
 
-Huginn adds Audio, Video, and Cut Audio actions to Firefox's context menu.
+Huginn adds Audio, Video, and Cut Audio actions to your browser's context menu.
 Custom keyboard shortcuts can run the local helper with the selected, active
 media, or clipboard URL.
 
 ![Toolbar popup settings](docs/screenshots/toolbar-popup.png)
 
-Clicking the pinned raven icon in Firefox's toolbar opens the Huginn Downloader
-popup, showing live companion connection status alongside audio-format,
-automatic-tagging, cover-art, ReplayGain, diagnostic, and folder settings.
+Clicking the pinned raven icon in your browser toolbar opens the Huginn
+Downloader popup, showing live companion and `yt-dlp` status alongside audio
+format, video quality cap, automatic tagging, cover art, ReplayGain, thread
+count, diagnostic, and folder settings.
 
 Although the watch-page pill is YouTube-specific, the context menu and local
 helper also work with other media sites supported by `yt-dlp`.
@@ -243,9 +263,11 @@ defaulting to stereo); non-interactive runs fall back to stereo.
 
 ## What you need
 
-- Firefox 115 or newer.
-- The signed Huginn Downloader extension from a GitHub Release or the
-  [Firefox Add-ons listing](https://addons.mozilla.org/).
+- A supported browser: Firefox 115+, LibreWolf, Zen, Floorp, Waterfox, Chromium,
+  Brave, Vivaldi, Google Chrome, or Microsoft Edge.
+- The Huginn Downloader extension from the Firefox Add-ons catalog / GitHub
+  Releases (`dist/huginn-signed.xpi`), or the unpacked Chromium MV3 build
+  (`huginn-chromium-*.zip`).
 - The matching local companion. The extension and companion are separate
   components; install both. The companion can be installed with a Linux release
   package or `install.sh`/`install.ps1` on Linux/macOS/Windows.
@@ -254,11 +276,12 @@ defaulting to stereo); non-interactive runs fall back to stereo.
   support audio tags and cover art; `rsgain` is optional for ReplayGain.
 
 Huginn is the graphical frontend; the local companion and `yt-dlp` are the
-backend. The extension provides a YouTube watch-page Audio/Video/Cut pill, a
-broadly available right-click submenu, and the settings popup. It uses Firefox
-Native Messaging to pass a user-selected mode and URL to the local companion.
-The pill is YouTube-specific; the menu accepts safe HTTP(S) URLs from sites
-supported by `yt-dlp`. The extension does not download media itself.
+backend. The extension provides a YouTube Audio/Video/Cut pill, channel and
+playlist item selection, a broadly available right-click submenu, and the
+settings popup. It uses browser Native Messaging to pass a user-selected mode
+and URL to the local companion. The pill is YouTube-specific; the menu accepts
+safe HTTP(S) URLs from sites supported by `yt-dlp`. The extension does not
+download media itself.
 
 Use Huginn only for content you are authorized to download. Running the frontend
 and backend locally does not grant download rights; copyright and
@@ -273,7 +296,8 @@ The companion uses these local programs and libraries:
   are made by the companion on your computer.
 - **`ffmpeg`** — the free, open-source audio/video toolkit that converts
   between formats (MP3, M4A, Ogg, FLAC, Opus cuts) and trims cut sections.
-- **Python 3** runs the Native Messaging host that connects Firefox to `yt-dlp`.
+- **Python 3** runs the Native Messaging host that connects your browser to
+  `yt-dlp`.
 - **Mutagen and Pillow** support automatic audio tagging and cover artwork.
 - **`rsgain`** (optional) — a free ReplayGain tool that normalizes loudness
   across tracks. Only needed if you turn on ReplayGain in the popup; the
@@ -350,11 +374,13 @@ Listed AMO add-on by following [docs/AMO-PUBLISHING.md](docs/AMO-PUBLISHING.md).
 
 ## Install the local companion
 
-Install the signed Huginn Downloader XPI separately in Firefox. For the local companion, Linux
-users can use a distro package from the same GitHub Release or the per-user
-`install.sh` fallback. The Windows/macOS instructions below remain separate.
-The distro packages install the Native Messaging host system-wide; `install.sh`
-installs it for the current user. Do not keep both installations active at once.
+Install the browser extension separately (signed XPI for Firefox-family browsers
+or unpacked MV3 folder for Chromium/Brave/Vivaldi/Chrome/Edge). For the local
+companion, Linux users can use a distro package from the same GitHub Release or
+the per-user `install.sh` fallback. The Windows/macOS instructions below remain
+separate. The distro packages install the Native Messaging host system-wide;
+`install.sh` installs it for the current user. Do not keep both installations
+active at once.
 
 ### Debian 13 (GNOME)
 
@@ -497,12 +523,13 @@ cd Huginn-Downloader
 ./install.sh --install --yes
 ```
 
-The macOS installer writes the Native Messaging manifest to
-`~/Library/Application Support/Mozilla/NativeMessagingHosts/` and skips
-Linux-only desktop entries. If Homebrew Python refuses a `--user`
-package install because of its environment policy, install Mutagen using your
-preferred Python package workflow for that Homebrew interpreter. Then install
-the signed XPI from a GitHub Release or AMO in Firefox.
+The macOS installer writes Native Messaging manifests for Mozilla, LibreWolf,
+Chromium, Chrome, Brave, Vivaldi, and Edge under
+`~/Library/Application Support/` and skips Linux-only desktop entries. If
+Homebrew Python refuses a `--user` package install because of its environment
+policy, install Mutagen using your preferred Python package workflow for that
+Homebrew interpreter. Then install the signed XPI or unpacked Chromium MV3 build
+from the matching GitHub Release.
 
 ### Windows 10/11
 
@@ -522,12 +549,15 @@ cd Huginn-Downloader
 ```
 
 The installer copies the Python host and helpers to
-`%LOCALAPPDATA%\FirefoxYouTubeDownloader\bin`, writes its manifest and config
-under `%LOCALAPPDATA%\FirefoxYouTubeDownloader`, registers the host for the
-current Windows user, and builds `dist\huginn-firefox.xpi` without
-requiring Bash. Install the **AMO-signed** XPI in Firefox separately; the local
-installer's XPI is an unsigned build artifact. If Windows Terminal (`wt.exe`)
-is installed, downloads open there; otherwise the host opens a new console.
+`%LOCALAPPDATA%\FirefoxYouTubeDownloader\bin`, writes its manifests and config
+under `%LOCALAPPDATA%\FirefoxYouTubeDownloader`, registers Native Messaging hosts
+for Mozilla and Chromium-family browsers (Chrome, Chromium, Brave, Vivaldi, and
+Edge) for the current Windows user, and builds `dist\huginn-firefox.xpi` plus
+`dist\huginn-chromium` without requiring Bash. For Firefox Release, install the
+**AMO-signed** XPI separately; for Chromium-family browsers, load
+`dist\huginn-chromium` unpacked in Developer Mode. If Windows Terminal
+(`wt.exe`) is installed, downloads open there; otherwise the host opens a new
+console.
 
 ## Configuration and installer behavior
 
@@ -537,7 +567,8 @@ The popup stores these options in the user's config file:
 | --- | --- | --- |
 | Audio download folder | XDG Music directory plus `Youtube Downloads` when yt-dlp has no config; otherwise use yt-dlp's configured path | Choose another audio directory or select `Keep yt-dlp config`; this is `download_dir`. |
 | Video download folder | XDG Videos directory plus `Youtube Downloads` | Independent from audio; choose the XDG Downloads folder plus `Youtube`, a custom path, or `Keep yt-dlp config` (`video_download_dir`). If no yt-dlp config exists, `Keep` falls back to the Videos directory. |
-| Automatic tagging | On | Extract description metadata and attach cover art to audio/cut downloads. |
+| Default video quality | `Best available (unlimited)` | Pick unlimited best quality or cap video resolution at `2160p` (4K), `1440p`, `1080p`, `720p`, or `480p` (`video_quality` in `config.json`). |
+| Automatic tagging | On | Extract Art Track credits when available; on regular uploads, strip video-title clutter (`(Official Video)`, `(Lyric Video)`, `(Promo)`, etc.) and only apply Artist/Title tags when extraction confidence is high. |
 | ReplayGain | Off | Run `rsgain` on finished audio/cut files. The toggle is blocked with install instructions when `rsgain` is not installed. |
 | Post-processing threads | `Auto` (`max available - 2`) | Parallel worker count for cover art, metadata tagging, and ReplayGain after batch downloads finish (runs inside a single terminal). |
 | Verbose yt-dlp diagnostics | Off (quiet) | The download terminal shows live progress, speed, and ETA even in quiet mode. Turn this on to include yt-dlp's detailed logs (`verbose_output`); those logs may include URLs and request details. |
@@ -631,10 +662,10 @@ Package removal does not delete your per-user config or Firefox profile. If you
 previously used `install.sh`, remove that per-user host separately so it does
 not shadow the system package.
 
-The Linux installer keeps timestamped `.bak.*` copies beside replaced files.
-To roll back, restore those files and remove only the Native Messaging manifests
-that did not exist before the install. It does not modify Firefox profiles or
-yt-dlp configuration.
+The Linux installer only creates a `.bak.*` copy when replacing an unrelated
+pre-existing file with the same name (replacing older Huginn files updates in
+place cleanly without leaving `.bak.*` clutter in `~/.local/bin`). It does not
+modify browser profiles or `yt-dlp` configuration.
 
 ## Troubleshooting
 
@@ -678,9 +709,10 @@ packages to that draft. Maintainers should publish the draft only after the
 workflow succeeds and the package assets are present. The workflow does not
 submit to AUR or other distro repositories.
 
-The Node fixture does not replace a final manual check in Firefox on each target
-OS. Test a signed XPI, companion install, menu action, watch-page controls, and
-popup settings before releasing.
+The Node fixture does not replace a final manual check in Firefox and Chromium
+on each target OS. Test a signed XPI / unpacked MV3 build, companion install,
+menu action, watch-page and channel controls, and popup settings before
+releasing.
 
 ## License
 

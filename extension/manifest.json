@@ -2,11 +2,11 @@
   "manifest_version": 2,
   "name": "Huginn Downloader",
   "version": "2.5.6",
-  "description": "yt-dlp Browser Extension fronted with custom post-processing pipeline",
+  "description": "yt-dlp Browser Extension frontend with custom post-processing pipeline",
   "homepage_url": "https://github.com/Lakis01/Huginn-Downloader",
   "browser_specific_settings": {
     "gecko": {
-      "id": "firefox-youtube-downloader@lakis01.github.io",
+      "id": "huginn-downloader@lakis01.github.io",
       "strict_min_version": "115.0",
       "data_collection_permissions": {
         "required": ["none"]

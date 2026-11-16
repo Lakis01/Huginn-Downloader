@@ -3573,3 +3573,56 @@ class V24AudioPipelineTests(unittest.TestCase):
                 )
 
         self.assertEqual(max_seen, 2)
+
+    def test_video_quality_config_and_format_args(self):
+        from ytdl_config import load_config, save_config
+
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp, "XDG_CONFIG_HOME": str(Path(tmp) / ".config")}
+            save_config({"video_quality": "1080p"}, env, "posix")
+            loaded = load_config(env, "posix")
+            self.assertEqual(loaded["video_quality"], "1080")
+            self.assertEqual(
+                wrapper._video_format_args(loaded),
+                ["-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"],
+            )
+            save_config({"video_quality": "best"}, env, "posix")
+            reset_loaded = load_config(env, "posix")
+            self.assertNotIn("video_quality", reset_loaded)
+            self.assertEqual(
+                wrapper._video_format_args(reset_loaded),
+                ["-f", "bestvideo+bestaudio/best"],
+            )
+
+    def test_smart_noise_stripping_and_conservative_fallback_tags(self):
+        # Strips stacked (Lyric Video) / (Promo) / (Official Music Video) noise cleanly
+        stripped = parse_info({
+            "title": "01. Neon Artist - Midnight Drive (Lyric Video) (Promo) [Official Music Video] | HD",
+            "channel": "Some Label Records",
+        })
+        self.assertEqual(stripped["artist"], "Neon Artist")
+        self.assertEqual(stripped["title"], "Midnight Drive")
+
+        # Swaps reversed "Title - Artist" when right side matches a clean artist channel
+        swapped = parse_info({
+            "title": "Starlight - Muse (Clip Officiel)",
+            "channel": "Muse",
+        })
+        self.assertEqual(swapped["artist"], "Muse")
+        self.assertEqual(swapped["title"], "Starlight")
+
+        # Refuses false-positive splits and generic handles: leaves artist untagged instead of mistagging
+        non_artist = parse_info({
+            "title": "Sunset Drive (Lyric Video) (Promo)",
+            "channel": "@randomuploader99",
+        })
+        self.assertEqual(non_artist["title"], "Sunset Drive")
+        self.assertEqual(non_artist["artist"], "")
+
+        episode_title = parse_info({
+            "title": "Episode 4 - How to Build a Guitar",
+            "channel": "Woodworking Clips",
+        })
+        self.assertEqual(episode_title["artist"], "")
+        self.assertEqual(episode_title["title"], "Episode 4 - How to Build a Guitar")

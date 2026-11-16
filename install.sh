@@ -326,22 +326,32 @@ PY
 }
 
 backup_if_present() {
-    local destination=$1 backup suffix=1
-    if [[ -e $destination || -L $destination ]]; then
-        backup="$destination.bak.$TIMESTAMP"
-        while [[ -e $backup || -L $backup ]]; do
-            backup="$destination.bak.$TIMESTAMP.$suffix"
-            suffix=$((suffix + 1))
-        done
-        cp -pPR "$destination" "$backup"
-        printf 'Backed up %s -> %s\n' "$destination" "$backup"
+    local destination=$1 source_file=${2:-} backup suffix=1
+    if [[ ! -e $destination && ! -L $destination ]]; then
+        return 0
     fi
+    rm -f -- "$destination".bak.*
+    if [[ -n $source_file && -e $source_file ]] && cmp -s "$source_file" "$destination"; then
+        return 0
+    fi
+    if [[ ! -L $destination ]] && grep -qE \
+        'Huginn Downloader|yt-dlp-wrapper\.py|ytdl_config|ytdl_meta|ytdl_version|check_ytdlp_update|parse_info|firefox_youtube_downloader|huginn-downloader@lakis01\.github\.io|firefox-youtube-downloader@lakis01\.github\.io|net\.local\.yt-dlp|x-scheme-handler/ytdl' \
+        "$destination" 2>/dev/null; then
+        return 0
+    fi
+    backup="$destination.bak.$TIMESTAMP"
+    while [[ -e $backup || -L $backup ]]; do
+        backup="$destination.bak.$TIMESTAMP.$suffix"
+        suffix=$((suffix + 1))
+    done
+    cp -pPR "$destination" "$backup"
+    printf 'Backed up %s -> %s\n' "$destination" "$backup"
 }
 
 install_source() {
     local source=$1 destination=$2 mode=$3
     mkdir -p -- "$(dirname -- "$destination")"
-    backup_if_present "$destination"
+    backup_if_present "$destination" "$source"
     install -m "$mode" "$source" "$destination"
     printf 'Installed %s -> %s\n' "$source" "$destination"
 }
@@ -446,7 +456,7 @@ fi
 register_browser_manifest() {
     local source=$1 destination=$2
     mkdir -p -- "$(dirname -- "$destination")"
-    backup_if_present "$destination"
+    backup_if_present "$destination" "$source"
     install -m 644 "$source" "$destination"
     printf 'Registered browser host -> %s\n' "$destination"
 }
@@ -477,7 +487,7 @@ manifest = {
     "description": "Native Messaging host for Huginn Downloader",
     "path": host_path,
     "type": "stdio",
-    "allowed_extensions": ["firefox-youtube-downloader@lakis01.github.io"],
+    "allowed_extensions": ["huginn-downloader@lakis01.github.io"],
 }
 with open(destination, "w", encoding="utf-8") as stream:
     json.dump(manifest, stream, indent=2)

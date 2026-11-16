@@ -477,7 +477,7 @@ class WindowsInstallerTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["name"], "firefox_youtube_downloader")
             self.assertEqual(manifest["path"], str(binary_dir / "yt-dlp-native-host.cmd"))
-            self.assertEqual(manifest["allowed_extensions"], ["firefox-youtube-downloader@lakis01.github.io"])
+            self.assertEqual(manifest["allowed_extensions"], ["huginn-downloader@lakis01.github.io"])
             self.assertEqual(registry_values["key"], "Software\\Mozilla\\NativeMessagingHosts\\firefox_youtube_downloader")
             self.assertEqual(registry_values["value"], str(manifest_path))
             self.assertTrue(registry_values["closed"])

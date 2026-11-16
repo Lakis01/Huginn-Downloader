@@ -10,13 +10,59 @@ _FEATURE_PATTERN = re.compile(
     r"(?i)(?:^|[\s(\[])(feat(?:uring)?\.?|ft\.?)\s+(.+?)\s*[)\]]*\s*$"
 )
 _UNSAFE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_NOISE_TAG_INNER = (
+    r"(?:official\s+)?(?:music\s+video|lyric(?:s)?\s+video|lyric(?:s)?|"
+    r"with\s+lyrics|video|audio|full\s+audio|original\s+audio|audio\s+only|"
+    r"visuali[sz]er|pseudo\s+video|promo(?:\s+video)?|promotional\s+video|"
+    r"full\s+video|live\s+video|performance\s+video|dance\s+video|"
+    r"animated\s+video|video\s+clip|videoclip|clip\s+officiel|"
+    r"video\s+oficial|videoclip\s+oficial|offizielles\s+video|musikvideo)|"
+    r"official(?:\s+hd(?:\s+video)?)?|full\s+hd|uhd|4k|8k|hd|hq|"
+    r"1080p|720p|60\s*fps|hi-?res|high\s+quality|stereo|"
+    r"remaster(?:ed)?(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?"
+)
 _CLEAN_SUFFIX_PATTERNS = (
     re.compile(
-        r"\s*[\[(]\s*(?:official\s+)?(?:music\s+video|lyric(?:s)?\s+video|"
-        r"lyric(?:s)?|audio|visuali[sz]er|4k|8k|1080p|720p)\s*[\])]\s*$",
+        r"\s*[(\[{]\s*(?:" + _NOISE_TAG_INNER + r")\s*[)\]}]+\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:\s+[-–—|]\s+|\s+//\s+)"
+        r"(?:official\s+(?:music\s+video|lyric(?:s)?\s+video|video|audio|visuali[sz]er|promo(?:\s+video)?)|"
+        r"music\s+video|lyric(?:s)?\s+video|promo(?:\s+video)?|"
+        r"clip\s+officiel|video\s+oficial|official|visuali[sz]er|hd|hq|4k|8k|1080p|720p)\s*$",
         re.IGNORECASE,
     ),
     re.compile(r"\s+\[?(?:4k|8k|1080p|720p)\]?\s*$", re.IGNORECASE),
+)
+_CLEAN_PREFIX_PATTERNS = (
+    re.compile(
+        r"^\s*[(\[{]\s*(?:" + _NOISE_TAG_INNER + r")\s*[)\]}]\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*0?\d{1,2}\s*[\.)]\s+(?=\S)"),
+    re.compile(r"^\s*0?\d{1,2}\s+[-–—]\s+(?=.+\s+[-–—]\s+)"),
+)
+_SPLIT_BAD_LEFT_RE = re.compile(
+    r"^(?:episode|ep\.?|part|pt\.?|chapter|ch\.?|track|lesson|lecture|"
+    r"tutorial|day|vol\.?|volume|week|module|session)\b(?:\s*#?\d+|\s+[ivx]+)?$",
+    re.IGNORECASE,
+)
+_SPLIT_BAD_RIGHT_RE = re.compile(
+    r"^(?:episode|ep\.?|part|pt\.?|chapter|ch\.?)\s*#?\d+(?:\s|$)|^full\s+album$",
+    re.IGNORECASE,
+)
+_NON_MUSIC_TITLE_RE = re.compile(
+    r"(?:^|\b)(?:tutorial|how\s+to\b|walkthrough|gameplay|playthrough|"
+    r"unboxing|reaction|interview|episode\s+\d+|lecture\s+\d+|"
+    r"stream\s+vod|highlights|compilation|megamix)(?:\b|$)|#",
+    re.IGNORECASE,
+)
+_NON_ARTIST_CHANNEL_RE = re.compile(
+    r"^@|\b(?:records|recordings|music\s+group|entertainment|compilation|"
+    r"compilations|promo|lyrics|nightcore|gaming|clips|podcasts?|tutorials?|"
+    r"reactions?|reviews?|archive|uploads|television|news)\b|(?:https?://|www\.)",
+    re.IGNORECASE,
 )
 _INSTRUMENT_ROLES = {
     "accordion", "acoustic guitar", "backing vocals", "bass", "bass guitar",
@@ -84,13 +130,29 @@ def _extract_feature(text):
 
 
 def _clean_title(text):
-    title = text.strip()
+    title = str(text or "").strip()
     previous = None
     while title and previous != title:
         previous = title
-        for pattern in _CLEAN_SUFFIX_PATTERNS:
+        for pattern in _CLEAN_PREFIX_PATTERNS:
             title = pattern.sub("", title).strip()
-    return title.rstrip(" .")
+        for pattern in _CLEAN_SUFFIX_PATTERNS:
+            candidate = pattern.sub("", title).strip()
+            if candidate:
+                title = candidate
+    return title.rstrip(" .|-")
+
+
+def _strip_surrounding_quotes(text):
+    value = str(text or "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1].strip()
+    if len(value) >= 2 and (
+        (value[0] == "“" and value[-1] == "”")
+        or (value[0] == "‘" and value[-1] == "’")
+    ):
+        return value[1:-1].strip()
+    return value
 
 
 def _artist_entities(display):
@@ -109,12 +171,37 @@ def _clean_channel(value):
     return name.strip()
 
 
+def _is_trusted_music_channel(raw_channel, raw_uploader):
+    for raw in (raw_channel, raw_uploader):
+        text = str(raw or "").strip()
+        if re.search(r"(?:\s+-\s+Topic|VEVO|\s+-\s+Official Artist Channel)$", text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _is_plausible_artist_title_split(left, right):
+    if not left or not right:
+        return False
+    if re.fullmatch(r"[\d:.\s]+", left):
+        return False
+    if _SPLIT_BAD_LEFT_RE.match(left) or _SPLIT_BAD_RIGHT_RE.match(right):
+        return False
+    words = left.split()
+    if len(words) > 6 and not re.search(r"(?:feat|ft\.?|with|&|,|\bx\b|\band\b)", left, re.IGNORECASE):
+        return False
+    return True
+
+
 def _parse_artists_from_title(title):
-    """Read a conventional leading ``Artist - Title`` fallback form."""
-    match = re.match(r"^(.+?)\s+-\s+(.+)$", title.strip())
+    """Read a conventional leading ``Artist - Title`` fallback form safely."""
+    match = re.match(r"^(.+?)\s+[-–—]\s+(.+)$", title.strip())
     if not match:
         return "", title.strip()
-    return match.group(1).strip(), match.group(2).strip()
+    left = match.group(1).strip()
+    right = _strip_surrounding_quotes(match.group(2).strip())
+    if not _is_plausible_artist_title_split(left, right):
+        return "", title.strip()
+    return left, right
 
 
 def _description_credits(lines):
@@ -396,14 +483,57 @@ def _parse_art_track(info, result, description):
 
 
 def _parse_fallback(info, result):
-    title = str(info.get("title") or "")
-    artist_from_title, title = _parse_artists_from_title(title)
-    title, featured_name, feature_phrase = _extract_feature(_clean_title(title))
-    result["title"] = _clean_title(title)
-
+    raw_title = _clean_title(str(info.get("title") or ""))
     channel = _clean_channel(info.get("channel"))
     uploader = _clean_channel(info.get("uploader"))
-    main_artist = artist_from_title or channel or uploader
+
+    explicit_track = _clean_title(str(info.get("track") or ""))
+    explicit_artist = str(info.get("artist") or "").strip()
+    if not explicit_artist and isinstance(info.get("artists"), list):
+        explicit_artist = ", ".join(
+            str(item).strip() for item in info["artists"] if str(item).strip()
+        )
+    if explicit_track and explicit_artist:
+        track_clean, featured_name, feature_phrase = _extract_feature(explicit_track)
+        result["title"] = _clean_title(_strip_surrounding_quotes(track_clean))
+        main_artist = _clean_channel(explicit_artist)
+        artist_from_title = main_artist
+    else:
+        artist_from_title, split_title = _parse_artists_from_title(raw_title)
+        known_channels = {
+            item.casefold()
+            for item in (channel, uploader)
+            if item and not _NON_ARTIST_CHANNEL_RE.search(item)
+        }
+        cleaned_split_title = _clean_title(_strip_surrounding_quotes(split_title))
+        if (
+            artist_from_title
+            and cleaned_split_title
+            and known_channels
+            and cleaned_split_title.casefold() in known_channels
+            and artist_from_title.casefold() not in known_channels
+        ):
+            artist_from_title, split_title = cleaned_split_title, artist_from_title
+
+        title_base, featured_name, feature_phrase = _extract_feature(
+            _clean_title(_strip_surrounding_quotes(split_title))
+        )
+        result["title"] = _clean_title(_strip_surrounding_quotes(title_base))
+
+        candidate_channel = channel or uploader
+        if artist_from_title:
+            main_artist = artist_from_title
+        elif _is_trusted_music_channel(info.get("channel"), info.get("uploader")):
+            main_artist = candidate_channel
+        elif (
+            candidate_channel
+            and not _NON_ARTIST_CHANNEL_RE.search(candidate_channel)
+            and not _NON_MUSIC_TITLE_RE.search(result["title"])
+            and len(result["title"].split()) <= 7
+        ):
+            main_artist = candidate_channel
+        else:
+            main_artist = ""
 
     if artist_from_title:
         artist_base, feature_from_artist, phrase_from_artist = _extract_feature(artist_from_title)
@@ -417,7 +547,7 @@ def _parse_fallback(info, result):
         display = main_artist
         entities = [main_artist] if main_artist else []
 
-    if featured_name:
+    if featured_name and main_artist:
         if not feature_phrase:
             feature_phrase = f"feat. {featured_name}"
         display = f"{main_artist} {feature_phrase}".strip()

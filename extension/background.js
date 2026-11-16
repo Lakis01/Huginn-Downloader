@@ -369,13 +369,35 @@ function attachListeners() {
   }
 }
 
+async function reinjectOpenYouTubeTabs() {
+  const api = ext();
+  if (!api || !api.tabs || typeof api.tabs.query !== 'function') return;
+  let tabs;
+  try {
+    tabs = await api.tabs.query({ url: ['*://*.youtube.com/*', '*://youtube.com/*'] });
+  } catch (_error) {
+    return;
+  }
+  if (!Array.isArray(tabs)) return;
+  for (const tab of tabs) {
+    if (!tab || !tab.id) continue;
+    if (tab.url && !isYouTubeUrl(tab.url)) continue;
+    await ensureContentScriptLoaded(tab.id).catch(() => false);
+  }
+}
+
+async function handleInstalledOrStartup() {
+  await setupMenus();
+  await reinjectOpenYouTubeTabs();
+}
+
 function attachHooks() {
   if (hooksAttached) return;
   hooksAttached = true;
   const api = ext();
   if (!api || !api.runtime) return;
   if (api.runtime.onInstalled) {
-    api.runtime.onInstalled.addListener(setupMenus);
+    api.runtime.onInstalled.addListener(handleInstalledOrStartup);
   }
   if (api.runtime.onStartup) {
     api.runtime.onStartup.addListener(setupMenus);

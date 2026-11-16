@@ -1,7 +1,7 @@
 'use strict';
 
 /* Watch-page segmented pill plus right-click context URL tracking
-   for the Firefox WebExtension content script. */
+   for the WebExtension content script. */
 
 (function () {
   const GROUP_SELECTOR = '[data-ytdl-controls]';
@@ -78,11 +78,14 @@
   let lastPointerDownAt = 0;
   let lastHoveredCard = null;
   let refreshTimer = null;
+  let lastSyncedUrl = null;
   let activePromptUrl = null;
   const PENDING_SELECT_KEY = 'ytdl_pending_playlist_select';
 
   const CHANNEL_PATH_RE =
     /^\/(?:@[^/]+|(?:channel|c|user)\/[^/]+)(?:\/(?:videos|shorts|streams|releases|playlists|featured))?\/?$/i;
+  const CHANNEL_BASE_RE =
+    /^(\/(?:@[^/]+|(?:channel|c|user)\/[^/]+))(?:\/([^/?#]+))?\/?$/i;
   const DURATION_ONLY_RE = /^\d+(?::\d+)+$/;
 
   function ext() {
@@ -121,6 +124,33 @@
     const loc = pageLocation();
     const path = loc.pathname || '';
     return isYouTubeLocation() && path === '/playlist' && Boolean(currentPlaylistId());
+  }
+
+  function channelVideosRedirectUrl() {
+    if (!isChannelRoute()) return null;
+    const loc = pageLocation();
+    const match = (loc.pathname || '').match(CHANNEL_BASE_RE);
+    if (!match) return null;
+    const tab = (match[2] || '').toLowerCase();
+    if (tab === 'videos' || tab === 'shorts' || tab === 'streams') return null;
+    const origin = loc.origin || 'https://www.youtube.com';
+    return `${origin}${match[1]}/videos`;
+  }
+
+  function isHiddenRenderer(el) {
+    if (!el) return true;
+    if (el.hidden === true) return true;
+    if (el.closest && el.closest('[hidden]')) return true;
+    return false;
+  }
+
+  function queryVisibleAll(selector) {
+    return Array.from(document.querySelectorAll(selector)).filter((el) => !isHiddenRenderer(el));
+  }
+
+  function queryVisibleFirst(selector) {
+    const all = queryVisibleAll(selector);
+    return all.length > 0 ? all[0] : null;
   }
 
   function makeIcon(name) {
@@ -324,18 +354,34 @@
 
   function collectPlaylistPanelItems() {
     let sourceKind = 'playlist-panel';
-    let renderers = Array.from(document.querySelectorAll('ytd-playlist-panel-video-renderer'));
-    if (renderers.length === 0) {
-      sourceKind = 'playlist-list';
-      renderers = Array.from(document.querySelectorAll('ytd-playlist-video-renderer'));
-    }
-    if (renderers.length === 0 && isChannelRoute()) {
+    let renderers = [];
+    if (isChannelRoute()) {
       sourceKind = 'channel-grid';
-      let candidates = Array.from(document.querySelectorAll('ytd-rich-item-renderer'));
-      if (candidates.length === 0) {
-        candidates = Array.from(document.querySelectorAll('ytd-grid-video-renderer'));
+      for (const selector of [
+        'ytd-rich-item-renderer',
+        'ytd-grid-video-renderer',
+        'ytd-video-renderer',
+        'yt-lockup-view-model',
+      ]) {
+        const candidates = queryVisibleAll(selector).filter(hasMediaLink);
+        if (candidates.length > 0) {
+          renderers = candidates;
+          break;
+        }
       }
-      renderers = candidates.filter(hasMediaLink);
+    } else if (isPlaylistRoute()) {
+      sourceKind = 'playlist-list';
+      renderers = queryVisibleAll('ytd-playlist-video-renderer');
+      if (renderers.length === 0) {
+        sourceKind = 'playlist-panel';
+        renderers = queryVisibleAll('ytd-playlist-panel-video-renderer');
+      }
+    } else {
+      renderers = queryVisibleAll('ytd-playlist-panel-video-renderer');
+      if (renderers.length === 0) {
+        sourceKind = 'playlist-list';
+        renderers = queryVisibleAll('ytd-playlist-video-renderer');
+      }
     }
     const items = [];
     renderers.forEach((renderer, idx) => {
@@ -368,14 +414,18 @@
     }
     closePlaylistPrompt();
 
-    const metadata = document.querySelector('ytd-watch-metadata');
+    const metadata = queryVisibleFirst('ytd-watch-metadata');
     const topRow = metadata && metadata.querySelector('#top-row');
     const panelItems = collectPlaylistPanelItems();
-    const canAttachWatchDialog = Boolean(metadata && topRow);
+    const canAttachWatchDialog = Boolean(isWatchRoute() && metadata && topRow);
     if (!canAttachWatchDialog && panelItems.length === 0) {
-      markLaunching(triggerButton);
-      triggerDownload(mode);
-      return;
+      if (isChannelRoute()) {
+        writePendingPlaylistSelect(mode, null, { channelVideos: true });
+      } else {
+        markLaunching(triggerButton);
+        triggerDownload(mode);
+        return;
+      }
     }
 
     activePromptUrl = pageLocation().href;
@@ -414,10 +464,21 @@
     closeBtn.setAttribute('type', 'button');
     closeBtn.setAttribute('data-ytdl-dialog-close', 'true');
     closeBtn.textContent = 'Cancel';
-    closeBtn.addEventListener('click', closePlaylistPrompt);
+    closeBtn.addEventListener('click', () => {
+      clearPendingPlaylistSelect();
+      closePlaylistPrompt();
+    });
     header.appendChild(heading);
     header.appendChild(closeBtn);
     dialog.appendChild(header);
+
+    if (panelItems.length === 0 && isChannelRoute()) {
+      const waitNote = document.createElement('p');
+      waitNote.setAttribute('data-ytdl-wait-note', 'true');
+      waitNote.textContent =
+        'Loading channel video checkboxes... You can also enter a yt-dlp range below or click Download channel.';
+      dialog.appendChild(waitNote);
+    }
 
     const actionsRow = document.createElement('div');
     actionsRow.setAttribute('data-ytdl-dialog-actions', 'true');
@@ -498,9 +559,13 @@
       const checkedCount = getCheckedCount();
       let labelText;
       if (totalCount === 0) {
-        labelText = itemsInput.value.trim()
-          ? `Download selected (${modeLabel})`
-          : `Download playlist (${modeLabel})`;
+        if (itemsInput.value.trim()) {
+          labelText = `Download selected (${modeLabel})`;
+        } else if (isChannelRoute()) {
+          labelText = `Download channel (${modeLabel})`;
+        } else {
+          labelText = `Download playlist (${modeLabel})`;
+        }
       } else if (checkedCount === totalCount) {
         labelText = `Download all ${totalCount} (${modeLabel})`;
       } else if (checkedCount > 0) {
@@ -766,6 +831,12 @@
           (action.mode === 'audio' || action.mode === 'video') &&
           (currentPlaylistId() || isChannelRoute() || isPlaylistRoute())
         ) {
+          const videosUrl = channelVideosRedirectUrl();
+          if (videosUrl) {
+            writePendingPlaylistSelect(action.mode, null, { channelVideos: true });
+            pageLocation().href = videosUrl;
+            return;
+          }
           openPlaylistPrompt(button, action.mode);
           return;
         }
@@ -786,12 +857,36 @@
     return null;
   }
 
-  function writePendingPlaylistSelect(mode, playlistId) {
+  function hasPendingPlaylistSelect() {
+    try {
+      if (typeof sessionStorage === 'undefined' || !sessionStorage) return false;
+      return Boolean(sessionStorage.getItem(PENDING_SELECT_KEY));
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function clearPendingPlaylistSelect() {
+    try {
+      if (typeof sessionStorage !== 'undefined' && sessionStorage) {
+        sessionStorage.removeItem(PENDING_SELECT_KEY);
+      }
+    } catch (_error) {
+      // Ignore storage failures.
+    }
+  }
+
+  function writePendingPlaylistSelect(mode, playlistId, options) {
     try {
       if (typeof sessionStorage === 'undefined' || !sessionStorage) return;
       sessionStorage.setItem(
         PENDING_SELECT_KEY,
-        JSON.stringify({ mode, playlistId: playlistId || null, createdAt: nowMs() }),
+        JSON.stringify({
+          mode,
+          playlistId: playlistId || null,
+          channelVideos: Boolean(options && options.channelVideos),
+          createdAt: nowMs(),
+        }),
       );
     } catch (_error) {
       // sessionStorage may be restricted in isolated environments.
@@ -799,7 +894,8 @@
   }
 
   function maybeResumePendingPlaylistSelect() {
-    if (document.querySelector('[data-ytdl-playlist-dialog]')) return;
+    const existingDialog = document.querySelector('[data-ytdl-playlist-dialog]');
+    if (existingDialog && existingDialog.querySelector('[data-ytdl-dialog-item]')) return;
     try {
       if (typeof sessionStorage === 'undefined' || !sessionStorage) return;
       const raw = sessionStorage.getItem(PENDING_SELECT_KEY);
@@ -816,8 +912,10 @@
       }
       const curList = currentPlaylistId();
       if (pending.playlistId && curList !== pending.playlistId) return;
+      if (pending.channelVideos && !isChannelRoute()) return;
       if (collectPlaylistPanelItems().length === 0) return;
       sessionStorage.removeItem(PENDING_SELECT_KEY);
+      if (existingDialog) closePlaylistPrompt();
       openPlaylistPrompt(findTriggerButton(pending.mode), pending.mode);
     } catch (_error) {
       // Ignore storage parsing failures.
@@ -831,21 +929,35 @@
 
   function findBatchControlsHost() {
     return (
-      document.querySelector('yt-flexible-actions-view-model') ||
-      document.querySelector('ytd-playlist-header-renderer') ||
-      document.querySelector('yt-page-header-view-model') ||
-      document.querySelector('#page-header') ||
-      document.querySelector('#tabs-inner-container') ||
-      document.querySelector('ytd-rich-grid-renderer')
+      queryVisibleFirst('yt-flexible-actions-view-model') ||
+      queryVisibleFirst('ytd-playlist-header-renderer') ||
+      queryVisibleFirst('yt-page-header-view-model') ||
+      queryVisibleFirst('#page-header') ||
+      queryVisibleFirst('#tabs-inner-container') ||
+      queryVisibleFirst('ytd-rich-grid-renderer')
     );
   }
 
+  function areControlsMountedForRoute() {
+    if (isWatchRoute()) {
+      const metadata = queryVisibleFirst('ytd-watch-metadata');
+      const topRow = metadata && metadata.querySelector('#top-row');
+      return Boolean(topRow && topRow.querySelector(GROUP_SELECTOR));
+    }
+    if (isChannelRoute() || isPlaylistRoute()) {
+      const host = findBatchControlsHost();
+      return Boolean(host && host.querySelector('[data-ytdl-batch-controls]'));
+    }
+    return !document.querySelector(GROUP_SELECTOR);
+  }
+
   function syncControls() {
-    if (activePromptUrl && activePromptUrl !== pageLocation().href) {
+    const currentHref = pageLocation().href;
+    if (activePromptUrl && activePromptUrl !== currentHref) {
       closePlaylistPrompt();
     }
     if (isWatchRoute()) {
-      const metadata = document.querySelector('ytd-watch-metadata');
+      const metadata = queryVisibleFirst('ytd-watch-metadata');
       const topRow = metadata && metadata.querySelector('#top-row');
       const owner = topRow && topRow.querySelector('#owner');
       const actions = topRow && topRow.querySelector('#actions');
@@ -862,10 +974,12 @@
         if (children[children.indexOf(mounted) + 1] !== actions) {
           topRow.insertBefore(mounted, actions);
         }
+        lastSyncedUrl = currentHref;
         maybeResumePendingPlaylistSelect();
         return;
       }
       topRow.insertBefore(makeGroup({ includeCut: true }), actions);
+      lastSyncedUrl = currentHref;
       maybeResumePendingPlaylistSelect();
       return;
     }
@@ -891,12 +1005,14 @@
           host.appendChild(group);
         }
       }
+      lastSyncedUrl = currentHref;
       maybeResumePendingPlaylistSelect();
       return;
     }
 
-    const keepPrompt = Boolean(activePromptUrl && activePromptUrl === pageLocation().href);
+    const keepPrompt = Boolean(activePromptUrl && activePromptUrl === currentHref);
     removeGroups(keepPrompt);
+    lastSyncedUrl = currentHref;
     maybeResumePendingPlaylistSelect();
   }
 
@@ -1170,6 +1286,21 @@
 
   function resolveGraphicalSelectUrl(message) {
     const playlistId = message && message.playlistId ? String(message.playlistId).trim() : '';
+    const playlistUrl = message && message.playlistUrl ? String(message.playlistUrl).trim() : '';
+    if (playlistId && !playlistId.startsWith('RD')) {
+      if (playlistUrl) {
+        try {
+          const parsed = new URL(playlistUrl, pageLocation().href);
+          if (parsed.pathname === '/playlist') return parsed.href;
+          return `${parsed.origin}/playlist?list=${encodeURIComponent(playlistId)}`;
+        } catch (_error) {
+          // Fall back to constructing canonical playlist URL below.
+        }
+      }
+      const origin = pageLocation().origin || 'https://www.youtube.com';
+      return `${origin}/playlist?list=${encodeURIComponent(playlistId)}`;
+    }
+    if (playlistUrl) return playlistUrl;
     const topVideoUrl = message && message.topVideoUrl ? String(message.topVideoUrl) : '';
     if (topVideoUrl && extractWatchVideoId(topVideoUrl)) {
       try {
@@ -1179,10 +1310,9 @@
         }
         return parsed.href;
       } catch (_error) {
-        // Fall back to playlistUrl below.
+        // Fall back to message.url below.
       }
     }
-    if (message && message.playlistUrl) return message.playlistUrl;
     if (message && message.url) return message.url;
     return null;
   }
@@ -1247,7 +1377,11 @@
     selectBtn.textContent = 'Select items graphically';
     selectBtn.addEventListener('click', () => {
       closeContextModal();
-      const samePlaylist = !playlistId || currentPlaylistId() === playlistId;
+      const samePlaylist = Boolean(
+        playlistId &&
+        currentPlaylistId() === playlistId &&
+        (isPlaylistRoute() || isWatchRoute()),
+      );
       const itemsOnPage = samePlaylist ? collectPlaylistPanelItems() : [];
       if (samePlaylist && itemsOnPage.length > 0) {
         openPlaylistPrompt(findTriggerButton(mode), mode);
@@ -1377,7 +1511,14 @@
   }
 
   function scheduleSync() {
-    if (refreshTimer !== null && typeof clearTimeout === 'function') clearTimeout(refreshTimer);
+    if (refreshTimer !== null) return;
+    if (
+      lastSyncedUrl === pageLocation().href &&
+      !hasPendingPlaylistSelect() &&
+      areControlsMountedForRoute()
+    ) {
+      return;
+    }
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
       syncControls();
@@ -1385,6 +1526,7 @@
   }
 
   function main() {
+    removeGroups(false);
     syncControls();
     document.addEventListener('yt-navigate-finish', syncControls);
     document.addEventListener('yt-page-data-updated', syncControls);

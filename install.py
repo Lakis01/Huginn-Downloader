@@ -16,7 +16,7 @@ BUILD_SCRIPT = ROOT / "scripts/build_xpi.py"
 CHROMIUM_BUILD_SCRIPT = ROOT / "scripts/build_chromium.py"
 APP_NAME = "FirefoxYouTubeDownloader"
 HOST_NAME = "firefox_youtube_downloader"
-EXTENSION_ID = "firefox-youtube-downloader@lakis01.github.io"
+EXTENSION_ID = "huginn-downloader@lakis01.github.io"
 CHROMIUM_EXTENSION_ID = "hlekndcccbgmhlablldcddddmknkjomg"
 
 sys.path.insert(0, str(BIN_SOURCE))
