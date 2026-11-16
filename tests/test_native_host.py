@@ -55,7 +55,7 @@ def run_host(messages, trailing=b""):
 @unittest.skipUnless(HOST is not None, "native messaging host has not been implemented")
 class NativeHostTests(unittest.TestCase):
     def test_version_is_current_and_youtube_only_gate_is_removed(self):
-        self.assertEqual(HOST.VERSION, "2.5.6")
+        self.assertEqual(HOST.VERSION, "2.5.7")
         self.assertFalse(hasattr(HOST, "_is_youtube_url"))
         self.assertFalse(hasattr(HOST, "YOUTUBE_HOSTS"))
 
@@ -82,7 +82,7 @@ class NativeHostTests(unittest.TestCase):
         self.assertEqual(len(responses), 2)
         for response in responses:
             self.assertTrue(response["ok"])
-            self.assertEqual(response["version"], "2.5.6")
+            self.assertEqual(response["version"], "2.5.7")
             self.assertEqual(
                 response["config"],
                 {

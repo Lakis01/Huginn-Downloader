@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover - helper ships alongside the host
         }
 
 
-VERSION = "2.5.6"
+VERSION = "2.5.7"
 MAX_MESSAGE_SIZE = 1024 * 1024
 MODES = {"audio", "video", "cut"}
 

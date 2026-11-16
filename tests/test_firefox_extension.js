@@ -38,7 +38,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'huginn-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.6', 'manifest version is 2.5.6');
+  assert.equal(manifest.version, '2.5.7', 'manifest version is 2.5.7');
   assert.deepEqual(manifest.browser_action.default_icon, {
     16: 'icons/huginn-logo.svg',
     32: 'icons/huginn-logo.svg',
@@ -79,7 +79,7 @@ function testReadmeBrandAndSetupGuidance() {
     assert.ok(fs.existsSync(path.join(ROOT, shot)), `${shot} exists on disk`);
   }
   assert.ok(!readme.includes('predates the v2.5.1 rebrand'), 'stale pre-rebrand screenshot disclaimer is removed');
-  assert.ok(readme.includes('huginn-companion_2.5.6_all.deb'), 'README points Linux package examples to 2.5.6');
+  assert.ok(readme.includes('huginn-companion_2.5.7_all.deb'), 'README points Linux package examples to 2.5.7');
   assert.ok(
     normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
     'README explains that multiple downloads can run in parallel without waiting'
@@ -989,7 +989,7 @@ function createPopupFixture(pingResponse) {
         }
         return pingResponse;
       },
-      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.6' }),
+      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.7' }),
     },
   };
   const context = {
@@ -1733,7 +1733,7 @@ async function testPopupVersionBadgeAndThreads() {
   const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const fx = createPopupFixture({
     ok: true,
-    version: '2.5.6',
+    version: '2.5.7',
     cpu_threads: 12,
     recommended_threads: 10,
     effective_threads: 10,
@@ -1747,7 +1747,7 @@ async function testPopupVersionBadgeAndThreads() {
   fx.triggerReady();
   await tick(30);
 
-  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.6, companion 2.5.6)');
+  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.7, companion 2.5.7)');
   assert.equal(fx.elements.get('ytdlpVersionLine').hidden, false);
   assert.equal(fx.elements.get('ytdlpVersionText').textContent, 'yt-dlp 2026.11.01');
   assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Up to date');
