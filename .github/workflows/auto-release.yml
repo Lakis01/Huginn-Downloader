@@ -62,7 +62,7 @@ jobs:
           bash scripts/build-chromium.sh
           cp dist/huginn-chromium.zip "dist/huginn-chromium-${VERSION}.zip"
 
-      - name: Commit version bump and push tag
+      - name: Commit version bump and tag locally
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -71,8 +71,6 @@ jobs:
             tests/test_firefox_extension.js tests/test_native_host.py README.md
           git commit -m "chore(release): ${{ steps.bump.outputs.tag }} [skip release]"
           git tag -a "${{ steps.bump.outputs.tag }}" -m "${{ steps.bump.outputs.tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.bump.outputs.tag }}"
 
       - name: Build source tarball, Debian .deb, Fedora .rpm, and Arch recipe
         env:
@@ -105,6 +103,8 @@ jobs:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
           AMO_CHANNEL: ${{ vars.AMO_CHANNEL || 'unlisted' }}
+          AMO_WEB_EXT_TIMEOUT: "120000"
+          AMO_POLL_TIMEOUT: "120"
         run: |
           set -euo pipefail
           if [[ -z ${AMO_JWT_ISSUER:-} || -z ${AMO_JWT_SECRET:-} ]]; then
@@ -119,13 +119,13 @@ jobs:
               --source-dir extension \
               --artifacts-dir web-ext-artifacts \
               --channel=listed \
-              --timeout=300000 || echo "AMO listed submission queued for review."
+              --timeout=120000 || echo "AMO listed submission queued for review."
             newest="$(ls -t web-ext-artifacts/*.xpi 2>/dev/null | head -n 1 || true)"
             if [[ -n $newest ]]; then
               cp "$newest" dist/huginn-signed.xpi
             fi
           else
-            bash scripts/sign-xpi.sh
+            bash scripts/sign-xpi.sh || echo "::warning::AMO signing still pending review; proceeding with release."
           fi
 
       - name: Publish GitHub Release
@@ -135,6 +135,8 @@ jobs:
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
+          git push origin HEAD:main
+          git push origin "$TAG"
           assets=(
             "dist/huginn-chromium-${VERSION}.zip"
             "dist/huginn-companion_${VERSION}_all.deb"
