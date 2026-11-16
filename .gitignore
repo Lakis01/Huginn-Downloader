@@ -1,4 +1,14 @@
 .superpowers/
+docs/superpowers/
+.opencode/
+opencode.json
+opencode.jsonc
+instructions.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.gemini/
+.impeccable/
 .worktrees/
 __pycache__/
 *.py[cod]
