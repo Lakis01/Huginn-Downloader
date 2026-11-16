@@ -360,7 +360,7 @@ installs it for the current user. Do not keep both installations active at once.
 
 ```sh
 # From the matching GitHub Release:
-sudo apt install ./huginn-companion_2.5.4_all.deb
+sudo apt install ./huginn-companion_2.5.5_all.deb
 ```
 
 The `.deb` requires Python 3 and suggests `yt-dlp`, FFmpeg, Mutagen, Pillow, and
@@ -399,7 +399,7 @@ extras or `rsgain` unless `--with-rsgain` is supplied.
 
 ```sh
 # From the matching GitHub Release:
-sudo apt install ./huginn-companion_2.5.4_all.deb
+sudo apt install ./huginn-companion_2.5.5_all.deb
 ```
 
 Or use the per-user installer:
@@ -416,11 +416,11 @@ suggested terminal. Install `rsgain` separately only if you use ReplayGain.
 
 ### Fedora
 
-Download `huginn-companion-2.5.4-1.noarch.rpm` from the
+Download `huginn-companion-2.5.5-1.noarch.rpm` from the
 matching release and install it with DNF:
 
 ```sh
-sudo dnf install ./huginn-companion-2.5.4-1.noarch.rpm
+sudo dnf install ./huginn-companion-2.5.5-1.noarch.rpm
 ```
 
 The RPM suggests Fedora's `ffmpeg-free` package, which has a limited codec
@@ -436,7 +436,7 @@ is not automatically submitted to the AUR.
 
 ```sh
 mkdir arch-recipe
-tar -xzf huginn-downloader-2.5.4-arch-pkgbuild.tar.gz -C arch-recipe
+tar -xzf huginn-downloader-2.5.5-arch-pkgbuild.tar.gz -C arch-recipe
 cd arch-recipe
 makepkg -si
 ```

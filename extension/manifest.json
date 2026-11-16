@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Huginn Downloader",
-  "version": "2.5.4",
+  "version": "2.5.5",
   "description": "Send supported media links to yt-dlp for audio, video, or cut downloads.",
   "homepage_url": "https://github.com/Lakis01/Huginn-Downloader",
   "browser_specific_settings": {

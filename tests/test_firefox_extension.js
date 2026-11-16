@@ -38,7 +38,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'firefox-youtube-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.4', 'manifest version is 2.5.4');
+  assert.equal(manifest.version, '2.5.5', 'manifest version is 2.5.5');
   assert.deepEqual(manifest.browser_action.default_icon, {
     16: 'icons/huginn-logo.svg',
     32: 'icons/huginn-logo.svg',
@@ -79,7 +79,7 @@ function testReadmeBrandAndSetupGuidance() {
     assert.ok(fs.existsSync(path.join(ROOT, shot)), `${shot} exists on disk`);
   }
   assert.ok(!readme.includes('predates the v2.5.1 rebrand'), 'stale pre-rebrand screenshot disclaimer is removed');
-  assert.ok(readme.includes('huginn-companion_2.5.4_all.deb'), 'README points Linux package examples to 2.5.4');
+  assert.ok(readme.includes('huginn-companion_2.5.5_all.deb'), 'README points Linux package examples to 2.5.5');
   assert.ok(
     normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
     'README explains that multiple downloads can run in parallel without waiting'
