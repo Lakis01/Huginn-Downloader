@@ -38,7 +38,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'huginn-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.3', 'manifest version is 2.5.3');
+  assert.equal(manifest.version, '2.5.7', 'manifest version is 2.5.7');
   assert.deepEqual(manifest.browser_action.default_icon, {
     16: 'icons/huginn-logo.svg',
     32: 'icons/huginn-logo.svg',
@@ -79,7 +79,7 @@ function testReadmeBrandAndSetupGuidance() {
     assert.ok(fs.existsSync(path.join(ROOT, shot)), `${shot} exists on disk`);
   }
   assert.ok(!readme.includes('predates the v2.5.1 rebrand'), 'stale pre-rebrand screenshot disclaimer is removed');
-  assert.ok(readme.includes('huginn-companion_2.5.3_all.deb'), 'README points Linux package examples to 2.5.3');
+  assert.ok(readme.includes('huginn-companion_2.5.7_all.deb'), 'README points Linux package examples to 2.5.7');
   assert.ok(
     normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
     'README explains that multiple downloads can run in parallel without waiting'
@@ -591,11 +591,12 @@ function createContentFixture(options = {}) {
   document.documentElement.appendChild(document.head);
   document.documentElement.appendChild(document.body);
   document.appendChild(document.documentElement);
+  const initialUrl = new URL(options.href || 'https://www.youtube.com/watch?v=abc123');
   const location = {
-    href: options.href || 'https://www.youtube.com/watch?v=abc123',
-    hostname: 'www.youtube.com',
-    pathname: '/watch',
-    origin: 'https://www.youtube.com',
+    href: initialUrl.href,
+    hostname: initialUrl.hostname,
+    pathname: initialUrl.pathname,
+    origin: initialUrl.origin,
   };
   const metadata = document.createElement('ytd-watch-metadata');
   const topRow = document.createElement('div');
@@ -628,9 +629,9 @@ function createContentFixture(options = {}) {
     location,
     URL,
     sessionStorage,
-    MutationObserver: class { observe() { } },
+    MutationObserver: class { observe() {} },
     setTimeout: (fn) => { fn(); return 0; },
-    clearTimeout: () => { },
+    clearTimeout: () => {},
     browser,
     chrome: undefined,
     console,
@@ -946,13 +947,13 @@ function createPopupFixture(pingResponse) {
         value: '',
         textContent: '',
         dataset: {},
-        classList: { toggle() { }, add() { }, remove() { } },
+        classList: { toggle() {}, add() {}, remove() {} },
         listeners: {},
         addEventListener(type, fn) {
           if (!this.listeners[type]) this.listeners[type] = [];
           this.listeners[type].push(fn);
         },
-        setAttribute() { },
+        setAttribute() {},
         getAttribute() { return null; },
       });
     }
@@ -964,7 +965,7 @@ function createPopupFixture(pingResponse) {
   const document = {
     getElementById: (id) => mockEl(id),
     querySelector: (sel) => {
-      if (sel === '.panel') return { setAttribute() { }, getAttribute() { return null; } };
+      if (sel === '.panel') return { setAttribute() {}, getAttribute() { return null; } };
       return null;
     },
     querySelectorAll: (sel) => {
@@ -974,7 +975,7 @@ function createPopupFixture(pingResponse) {
     addEventListener(type, fn) {
       if (type === 'DOMContentLoaded') document._domReady = fn;
     },
-    body: { appendChild() { } },
+    body: { appendChild() {} },
     _domReady: null,
   };
   const window = { location: { search: '' } };
@@ -988,6 +989,7 @@ function createPopupFixture(pingResponse) {
         }
         return pingResponse;
       },
+      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.7' }),
     },
   };
   const context = {
@@ -1389,7 +1391,7 @@ function testBuildScript() {
   const sh = readFile('scripts/build-xpi.sh');
   assertAsciiNoEmoji('scripts/build-xpi.sh', sh);
   assert.ok(sh.includes('zipfile'), 'uses Python zipfile, not the zip CLI');
-  assert.ok(sh.includes('firefox-youtube-downloader.xpi'), 'builds the xpi artifact');
+  assert.ok(sh.includes('huginn-firefox.xpi'), 'builds the xpi artifact');
   assert.ok(sh.includes('manifest.json'), 'validates manifest at archive root');
   assert.ok(sh.includes('sorted'), 'deterministic sorted entries');
   const stat = fs.statSync(path.join(ROOT, 'scripts', 'build-xpi.sh'));
@@ -1398,7 +1400,7 @@ function testBuildScript() {
   assert.ok(gi.split('\n').some((line) => line.trim() === 'dist/' || line.trim() === 'dist' || line.trim() === '/dist/'), '.gitignore lists dist/');
 
   const source = path.join(EXT, 'popup.js');
-  const archive = path.join(ROOT, 'dist', 'firefox-youtube-downloader.xpi');
+  const archive = path.join(ROOT, 'dist', 'huginn-firefox.xpi');
   const build = () => execFileSync('bash', [path.join(ROOT, 'scripts', 'build-xpi.sh')], { cwd: ROOT, stdio: 'ignore' });
   const digest = () => crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
   const original = fs.statSync(source);
@@ -1590,13 +1592,14 @@ function testContentPlaylistCardsAndWatchPrompt() {
     assert.equal(ctx.playlistId, 'PLhover789');
     assert.equal(ctx.topVideoUrl, 'https://www.youtube.com/watch?v=toppreview1');
 
-    // Single row inside side panel stays non-playlist single-track target.
+    // Row inside playlist panel carrying list= resolves as playlist prompt candidate preserving row track URL.
     fx.setHitStackArr([panelRow]);
     panelRow.dispatchEvent({ type: 'contextmenu', target: panelRow, bubbles: true, clientX: 22, clientY: 28 });
     let rowCtx = null;
     responder({ type: 'ytdl-get-context-url' }, {}, (r) => { rowCtx = r; });
     assert.equal(rowCtx.url, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
-    assert.ok(!rowCtx.isPlaylist, 'individual playlist panel row stays single-track target');
+    assert.equal(rowCtx.isPlaylist, true, 'playlist row carrying list= prompts playlist vs single track');
+    assert.equal(rowCtx.topVideoUrl, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
 
     // Choice modal: "all", "top", and "select" (graphical selection on matching playlist).
     let modalReply = null;
@@ -1608,7 +1611,7 @@ function testContentPlaylistCardsAndWatchPrompt() {
       topVideoUrl: 'https://www.youtube.com/watch?v=topA',
       playlistId: 'PLabc',
     }, {}, (r) => { modalReply = r; });
-    assert.deepEqual(modalReply, { shown: true });
+    assert.equal(modalReply && modalReply.shown, true);
     const modal = fx.document.querySelector('[data-ytdl-context-modal="true"]');
     assert.ok(modal, 'context playlist choice modal rendered');
     const allBtn = modal.querySelector('[data-ytdl-context-action="all"]');
@@ -1624,7 +1627,7 @@ function testContentPlaylistCardsAndWatchPrompt() {
       playlistUrl: 'https://www.youtube.com/playlist?list=PLabc',
       topVideoUrl: 'https://www.youtube.com/watch?v=topA',
       playlistId: 'PLabc',
-    }, {}, () => { });
+    }, {}, () => {});
     const modal2 = fx.document.querySelector('[data-ytdl-context-modal="true"]');
     const topBtn = modal2.querySelector('[data-ytdl-context-action="top"]');
     topBtn.dispatchEvent({ type: 'click', target: topBtn, bubbles: true });
@@ -1640,12 +1643,89 @@ function testContentPlaylistCardsAndWatchPrompt() {
       playlistUrl: 'https://www.youtube.com/playlist?list=PLabc',
       topVideoUrl: 'https://www.youtube.com/watch?v=v1',
       playlistId: 'PLabc',
-    }, {}, () => { });
+    }, {}, () => {});
     const modal3 = fx.document.querySelector('[data-ytdl-context-modal="true"]');
     const selectBtn = modal3.querySelector('[data-ytdl-context-action="select"]');
     selectBtn.dispatchEvent({ type: 'click', target: selectBtn, bubbles: true });
     assert.equal(fx.document.querySelector('[data-ytdl-context-modal]'), null, 'choice modal closes on graphical select');
     assert.ok(fx.document.querySelector('[data-ytdl-playlist-dialog="true"]'), 'graphical playlist dialog opens cleanly');
+  }
+
+  // Channel view: Audio & Video pill (no Cut), card checkboxes with titles, and hover gesture preservation.
+  {
+    const fx = createContentFixture({ href: 'https://www.youtube.com/@dustroadrecordsai/videos' });
+    const header = fx.document.createElement('yt-flexible-actions-view-model');
+    fx.document.body.appendChild(header);
+    const grid = fx.document.createElement('ytd-rich-grid-renderer');
+    const contents = fx.document.createElement('div');
+    contents.id = 'contents';
+    const cardTitles = ['First Song', 'Second Song', 'Third Song'];
+    cardTitles.forEach((songTitle, idx) => {
+      const card = fx.document.createElement('ytd-rich-item-renderer');
+      const lockup = fx.document.createElement('yt-lockup-view-model');
+      const durLink = fx.document.createElement('a');
+      durLink.setAttribute('href', `/watch?v=chan${idx + 1}`);
+      durLink.textContent = `0${idx + 3}:15`;
+      const titleLink = fx.document.createElement('a');
+      titleLink.setAttribute('href', `/watch?v=chan${idx + 1}`);
+      titleLink.textContent = songTitle;
+      lockup.appendChild(durLink);
+      lockup.appendChild(titleLink);
+      card.appendChild(lockup);
+      contents.appendChild(card);
+    });
+    grid.appendChild(contents);
+    fx.document.body.appendChild(grid);
+    grid.dispatchEvent({ type: 'yt-navigate-finish', target: grid, bubbles: true });
+
+    const channelPill = header.querySelector('[data-ytdl-batch-controls="true"]');
+    assert.ok(channelPill, 'channel view mounts [Audio | Video] pill in flexible actions');
+    const pillModes = channelPill.querySelectorAll('button').map((b) => b.getAttribute('data-ytdl-mode'));
+    assert.deepEqual(pillModes, ['audio', 'video'], 'channel pill excludes Cut button');
+
+    channelPill.querySelector('[data-ytdl-mode="audio"]').dispatchEvent({ type: 'click', bubbles: true });
+    assert.equal(fx.sentMessages.length, 0, 'clicking channel Audio opens graphical item selection');
+    const panelBar = contents.querySelector('[data-ytdl-panel-bar="true"]');
+    assert.ok(panelBar, 'channel grid mounts batch toolbar');
+    const channelChecks = contents.querySelectorAll('[data-ytdl-channel-check="true"]');
+    assert.equal(channelChecks.length, 3, 'checkboxes appear next to all channel video cards');
+    const dialogItems = fx.document.querySelectorAll('[data-ytdl-dialog-item="true"]');
+    assert.ok(dialogItems[0].textContent.includes('First Song'), 'skips duration-only links for lockup title');
+
+    const boxes = contents.querySelectorAll('[data-ytdl-side-checkbox="true"]');
+    boxes[1].checked = false;
+    boxes[1].dispatchEvent({ type: 'change', target: boxes[1], bubbles: true });
+    const dlBtn = panelBar.querySelector('[data-ytdl-panel-download="true"]');
+    assert.equal(dlBtn.textContent, 'Download 2 selected (audio)');
+    dlBtn.dispatchEvent({ type: 'click', target: dlBtn, bubbles: true });
+    assert.equal(fx.sentMessages.length, 1);
+    assert.equal(fx.sentMessages[0].mode, 'audio');
+    assert.equal(fx.sentMessages[0].playlist, true);
+    assert.equal(fx.sentMessages[0].playlistItems, '1,3');
+
+    // Hovering a playlist card before #video-preview spawns preserves isPlaylist across preview fade-in.
+    const responder = fx.messageListeners[0];
+    const hoveredPlaylistCard = fx.document.createElement('yt-lockup-view-model');
+    const hoverPlLink = fx.document.createElement('a');
+    hoverPlLink.setAttribute('href', '/playlist?list=PLhoverLockup');
+    hoveredPlaylistCard.appendChild(hoverPlLink);
+    fx.document.body.appendChild(hoveredPlaylistCard);
+    hoveredPlaylistCard.dispatchEvent({ type: 'pointerover', target: hoveredPlaylistCard, bubbles: true });
+
+    const barePreview = fx.document.createElement('ytd-video-preview');
+    const barePrevLink = fx.document.createElement('a');
+    barePrevLink.setAttribute('href', '/watch?v=topOnly');
+    barePreview.appendChild(barePrevLink);
+    fx.document.body.appendChild(barePreview);
+    fx.setHitStackArr([barePreview]);
+    barePreview.dispatchEvent({ type: 'pointerdown', target: barePreview, bubbles: true, button: 2, clientX: 40, clientY: 50 });
+    barePreview.dispatchEvent({ type: 'contextmenu', target: barePreview, bubbles: true, clientX: 40, clientY: 50 });
+
+    let ctx = null;
+    responder({ type: 'ytdl-get-context-url' }, {}, (r) => { ctx = r; });
+    assert.equal(ctx.isPlaylist, true, 'lastHoveredCard rescues playlist context behind #video-preview');
+    assert.equal(ctx.playlistId, 'PLhoverLockup');
+    assert.equal(ctx.topVideoUrl, 'https://www.youtube.com/watch?v=topOnly');
   }
 }
 
@@ -1653,7 +1733,7 @@ async function testPopupVersionBadgeAndThreads() {
   const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const fx = createPopupFixture({
     ok: true,
-    version: '2.5.6',
+    version: '2.5.7',
     cpu_threads: 12,
     recommended_threads: 10,
     effective_threads: 10,
@@ -1667,7 +1747,7 @@ async function testPopupVersionBadgeAndThreads() {
   fx.triggerReady();
   await tick(30);
 
-  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.6, companion 2.5.6)');
+  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.7, companion 2.5.7)');
   assert.equal(fx.elements.get('ytdlpVersionLine').hidden, false);
   assert.equal(fx.elements.get('ytdlpVersionText').textContent, 'yt-dlp 2026.11.01');
   assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Up to date');
@@ -1758,7 +1838,7 @@ function testChannelRedirectHiddenSpaAndPlaylistTarget() {
       playlistUrl: 'https://www.youtube.com/playlist?list=PL998877',
       topVideoUrl: 'https://www.youtube.com/watch?v=trackOne&list=PL998877',
       playlistId: 'PL998877',
-    }, {}, () => { });
+    }, {}, () => {});
     const selectBtn = fx.document.querySelector('[data-ytdl-context-action="select"]');
     selectBtn.dispatchEvent({ type: 'click', target: selectBtn, bubbles: true });
     assert.equal(
@@ -1870,7 +1950,7 @@ async function testChromiumBuildAndBackground() {
     contextMenus: {
       removeAll() { return Promise.resolve(); },
       create(item) { created.push(item); return Promise.resolve(); },
-      onClicked: { addListener() { } },
+      onClicked: { addListener() {} },
       update() { return Promise.resolve(); },
     },
     tabs: {
@@ -1883,8 +1963,8 @@ async function testChromiumBuildAndBackground() {
         return Promise.resolve({ ok: true, launched: true });
       },
       onMessage: { addListener(fn) { messageListener = fn; } },
-      onInstalled: { addListener() { } },
-      onStartup: { addListener() { } },
+      onInstalled: { addListener() {} },
+      onStartup: { addListener() {} },
       getURL(p) { return `chrome-extension://hlekndcccbgmhlablldcddddmknkjomg/${p}`; },
     },
   };
@@ -1937,6 +2017,7 @@ async function main() {
   await testPopupVideoFolderIsIndependentFromAudioFolder();
   await testPopupVerboseOutputToggleDefaultsOffAndPersists();
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
+  await testPopupVersionBadgeAndThreads();
   testChannelRedirectHiddenSpaAndPlaylistTarget();
   testSignScript();
   testBuildScript();
