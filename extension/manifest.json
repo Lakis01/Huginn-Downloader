@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Huginn Downloader",
-  "version": "2.5.7",
+  "version": "2.5.8",
   "description": "yt-dlp Browser Extension frontend with custom post-processing pipeline",
   "homepage_url": "https://github.com/Lakis01/Huginn-Downloader",
   "browser_specific_settings": {
