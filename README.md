@@ -4,9 +4,10 @@
   <img src="docs/logo/huginn-logo.webp" alt="Huginn Downloader raven logo" width="160">
 </p>
 
-**One click to save music and videos from YouTube (and hundreds of other sites)
-straight to your Music and Videos folders — with zero ads, zero shady
-"YouTube-to-MP3" websites, and original audio quality.**
+**One click to save music and videos from YouTube, Dailymotion, Vimeo, Instagram,
+Reddit (and hundreds of other sites) straight to your Music and Videos folders
+with zero ads, zero shady "YouTube-to-MP3" websites, and original audio quality
+at native download speed. Configure your default format and post-processing pipeline.**
 
 ### Why Huginn Downloader?
 
