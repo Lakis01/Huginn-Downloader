@@ -38,7 +38,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'huginn-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.8', 'manifest version is 2.5.8');
+  assert.equal(manifest.version, '2.5.9', 'manifest version is 2.5.9');
   assert.deepEqual(manifest.browser_action.default_icon, {
     16: 'icons/huginn-logo.svg',
     32: 'icons/huginn-logo.svg',
@@ -79,7 +79,7 @@ function testReadmeBrandAndSetupGuidance() {
     assert.ok(fs.existsSync(path.join(ROOT, shot)), `${shot} exists on disk`);
   }
   assert.ok(!readme.includes('predates the v2.5.1 rebrand'), 'stale pre-rebrand screenshot disclaimer is removed');
-  assert.ok(readme.includes('huginn-companion_2.5.8_all.deb'), 'README points Linux package examples to 2.5.8');
+  assert.ok(readme.includes('huginn-companion_2.5.9_all.deb'), 'README points Linux package examples to 2.5.9');
   assert.ok(
     normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
     'README explains that multiple downloads can run in parallel without waiting'
@@ -1012,7 +1012,7 @@ function createPopupFixture(pingResponse) {
         }
         return pingResponse;
       },
-      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.8' }),
+      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.9' }),
     },
   };
   const context = {
@@ -1790,7 +1790,7 @@ async function testPopupVersionBadgeAndThreads() {
   const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const fx = createPopupFixture({
     ok: true,
-    version: '2.5.8',
+    version: '2.5.9',
     cpu_threads: 12,
     recommended_threads: 10,
     effective_threads: 10,
@@ -1804,7 +1804,7 @@ async function testPopupVersionBadgeAndThreads() {
   fx.triggerReady();
   await tick(30);
 
-  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.8, companion 2.5.8)');
+  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.9, companion 2.5.9)');
   assert.equal(fx.elements.get('ytdlpVersionLine').hidden, false);
   assert.equal(fx.elements.get('ytdlpVersionText').textContent, 'yt-dlp 2026.11.01');
   assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Up to date');
@@ -2156,7 +2156,7 @@ async function testPopupSimpleAdvancedDedicatedVideosAndShowCut() {
   }
   const fx = createPopupFixture({
     ok: true,
-    version: '2.5.8',
+    version: '2.5.9',
     config: { audio_format: 'best', auto_tag: true, rsgain: false },
     deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
     yt_dlp_status: { outdated: false },
