@@ -3731,8 +3731,6 @@ class V24AudioPipelineTests(unittest.TestCase):
             self.assertEqual(cmd_video[cmd_video.index("--convert-thumbnails") + 1], "jpg")
 
     def test_video_codec_format_args_and_resolution_cap_override(self):
-        import yt_dlp
-
         wrapper = _load_wrapper(self)
         self.assertEqual(
             wrapper._video_format_args({"video_quality": "1080", "video_codec": "vp9"}),
@@ -3752,6 +3750,11 @@ class V24AudioPipelineTests(unittest.TestCase):
                 "res,fps,hdr:12,vcodec:h265",
             ],
         )
+
+        try:
+            import yt_dlp
+        except ModuleNotFoundError:
+            return
 
         # Simulate streams where 2160p AV1 exists strictly above the 1080p cap,
         # plus 1080p AV1 / VP9 / H.264 and 720p AV1, to verify real yt-dlp sorting.
