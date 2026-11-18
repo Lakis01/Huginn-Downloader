@@ -250,6 +250,121 @@ def parse_audio(url):
     return meta
 
 
+def _formats_command(url, browser=None):
+    command = ["yt-dlp"]
+    if browser:
+        command.extend(["--cookies-from-browser", browser])
+    if is_youtube_url(url):
+        command.extend(["--ies", "youtube,youtube:tab"])
+    command.extend(["--dump-json", "--no-warnings"])
+    if is_playlist_url(url):
+        command.extend(["--playlist-items", "1"])
+    else:
+        command.append("--no-playlist")
+    command.extend(["--", url])
+    return command
+
+
+def _fetch_formats_info(url):
+    command = _formats_command(url)
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        if not _is_auth_error(error):
+            raise _YtDlpError(_yt_dlp_error_text(error)) from None
+        try:
+            result = subprocess.run(
+                _formats_command(url, "firefox"),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception as retry_error:
+            raise _YtDlpError(_yt_dlp_error_text(retry_error)) from None
+    except Exception as error:
+        raise _YtDlpError(_yt_dlp_error_text(error)) from None
+
+    first_line = next(
+        (line.strip() for line in result.stdout.splitlines() if line.strip()),
+        "",
+    )
+    if not first_line:
+        raise _YtDlpError("yt-dlp did not return format metadata")
+    try:
+        return json.loads(first_line)
+    except Exception as error:
+        raise _YtDlpError(f"yt-dlp returned invalid format metadata: {error}") from None
+
+
+def list_formats_for_url(url):
+    """Return normalized available video/audio streams for graphical selection."""
+    info = _fetch_formats_info(url)
+    raw_formats = info.get("formats") or []
+    formats = []
+    for fmt in raw_formats:
+        if not isinstance(fmt, dict):
+            continue
+        format_id = str(fmt.get("format_id") or "").strip()
+        if not format_id:
+            continue
+        ext = str(fmt.get("ext") or "").strip().lower()
+        protocol = str(fmt.get("protocol") or "").strip().lower()
+        vcodec = str(fmt.get("vcodec") or "none").strip()
+        acodec = str(fmt.get("acodec") or "none").strip()
+        has_video = bool(vcodec and vcodec.lower() != "none")
+        has_audio = bool(acodec and acodec.lower() != "none")
+        if ext == "mhtml" or protocol == "mhtml" or (not has_video and not has_audio):
+            continue
+        if has_video and has_audio:
+            kind = "combined"
+        elif has_video:
+            kind = "video_only"
+        else:
+            kind = "audio_only"
+        height = fmt.get("height")
+        width = fmt.get("width")
+        resolution = fmt.get("resolution")
+        if not resolution:
+            if width and height:
+                resolution = f"{width}x{height}"
+            elif height:
+                resolution = f"{height}p"
+            elif not has_video:
+                resolution = "audio only"
+        formats.append(
+            {
+                "format_id": format_id,
+                "ext": ext,
+                "kind": kind,
+                "vcodec": vcodec if has_video else "none",
+                "acodec": acodec if has_audio else "none",
+                "resolution": resolution,
+                "height": height if isinstance(height, int) else None,
+                "width": width if isinstance(width, int) else None,
+                "fps": fmt.get("fps"),
+                "abr": fmt.get("abr"),
+                "vbr": fmt.get("vbr"),
+                "tbr": fmt.get("tbr"),
+                "asr": fmt.get("asr"),
+                "audio_channels": fmt.get("audio_channels"),
+                "filesize": fmt.get("filesize") or fmt.get("filesize_approx"),
+                "format_note": str(fmt.get("format_note") or "").strip(),
+                "dynamic_range": str(fmt.get("dynamic_range") or "").strip(),
+            }
+        )
+    return {
+        "title": str(info.get("title") or "").strip() or None,
+        "id": str(info.get("id") or "").strip() or None,
+        "duration": info.get("duration"),
+        "formats": formats,
+    }
+
+
 def parse_time(time_str):
     parts = time_str.strip().split(":")
     parts.reverse()
@@ -672,10 +787,14 @@ def finalize_audio_download(
         # thumbnail_jpg=True forces JPEG across all containers for legacy players;
         # otherwise tag_audio_file picks WebP for Opus/Ogg/MP3/FLAC and JPEG for M4A.
         prefer_webp = False if thumbnail_jpg else None
-        tag_audio_file(
-            str(temp_path), meta, str(thumbnail_path) if thumbnail_path else None,
-            prefer_webp=prefer_webp,
-        )
+        try:
+            tag_audio_file(
+                str(temp_path), meta, str(thumbnail_path) if thumbnail_path else None,
+                prefer_webp=prefer_webp,
+            )
+        except ValueError as error:
+            if "Unsupported audio container" not in str(error):
+                raise
         final_path = _commit_tagged_file(temp_path, media_path, target_path)
     except Exception:
         temp_path.unlink(missing_ok=True)
@@ -858,6 +977,107 @@ def _ensure_audio_properties(
         raise _YtDlpError(
             "FFmpeg could not preserve the audio stream(s), metadata, and attached artwork "
             f"while converting '{media_path}' ({container_name}, {source_codec}): {detail}"
+        ) from None
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+_CONVERT_FORMAT_TABLE = {
+    "mp3": (".mp3", "libmp3lame"),
+    "flac": (".flac", "flac"),
+    "wav": (".wav", "pcm_s16le"),
+    "alac": (".m4a", "alac"),
+    "aiff": (".aiff", "pcm_s16be"),
+    "opus": (".opus", "libopus"),
+    "m4a": (".m4a", "aac"),
+    "ogg": (".ogg", "libvorbis"),
+    "ac3": (".ac3", "ac3"),
+}
+
+
+def _convert_audio_ffmpeg(
+    media_path,
+    *,
+    convert_format,
+    convert_bitrate=None,
+    convert_sample_rate=None,
+    convert_channels=None,
+    convert_bit_depth=None,
+):
+    """Transcode downloaded audio to an arbitrary target format and parameters via FFmpeg."""
+    fmt = str(convert_format or "").strip().lower()
+    if fmt not in _CONVERT_FORMAT_TABLE:
+        raise _YtDlpError(f"Unsupported target audio format: {convert_format!r}")
+    output_suffix, encoder = _CONVERT_FORMAT_TABLE[fmt]
+    bit_depth = str(convert_bit_depth or "").strip().lower()
+    if fmt == "wav":
+        encoder = {"24": "pcm_s24le", "32f": "pcm_f32le"}.get(bit_depth, "pcm_s16le")
+    elif fmt == "aiff":
+        encoder = {"24": "pcm_s24be", "32f": "pcm_f32be"}.get(bit_depth, "pcm_s16be")
+
+    media_path = Path(media_path).expanduser()
+    target_path = media_path.with_suffix(output_suffix)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".yt-dlp-convert-", suffix=output_suffix, dir=media_path.parent
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    temporary_path.unlink(missing_ok=True)
+
+    command = [
+        "ffmpeg", "-y", "-v", "error", "-i", str(media_path),
+        "-vn", "-map", "0:a:0", "-map_metadata", "0",
+        "-c:a", encoder,
+    ]
+    if fmt == "flac" and bit_depth in {"16", "24"}:
+        command.extend(["-sample_fmt", "s16" if bit_depth == "16" else "s32"])
+    elif fmt == "alac" and bit_depth in {"16", "24"}:
+        command.extend(["-sample_fmt", "s16p" if bit_depth == "16" else "s32p"])
+
+    bitrate = str(convert_bitrate or "").strip()
+    if fmt == "mp3":
+        if bitrate in {"V0", "V2", "V5"}:
+            command.extend(["-q:a", {"V0": "0", "V2": "2", "V5": "5"}[bitrate]])
+        elif bitrate:
+            command.extend(["-b:a", bitrate])
+        else:
+            command.extend(["-q:a", "0"])
+    elif fmt == "ogg":
+        if bitrate in {"V0", "V2", "V5"}:
+            command.extend(["-q:a", {"V0": "6", "V2": "5", "V5": "3"}[bitrate]])
+        elif bitrate:
+            command.extend(["-b:a", bitrate])
+        else:
+            command.extend(["-q:a", "6"])
+    elif fmt in {"opus", "m4a", "ac3"}:
+        default_br = {"opus": "160k", "m4a": "256k", "ac3": "384k"}[fmt]
+        command.extend(["-b:a", bitrate or default_br])
+
+    if convert_sample_rate is not None:
+        sr = int(convert_sample_rate)
+        if fmt == "opus":
+            sr = 48000
+        elif fmt == "ac3" and sr > 48000:
+            sr = 48000
+        command.extend(["-ar", str(sr)])
+    if convert_channels in (1, 2):
+        command.extend(["-ac", str(convert_channels)])
+
+    command.append(str(temporary_path))
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
+            raise _YtDlpError(f"FFmpeg produced no output while converting '{media_path}'")
+        if target_path == media_path:
+            os.replace(temporary_path, media_path)
+            return media_path
+        final_path = _move_collision_safe(temporary_path, target_path)
+        media_path.unlink()
+        return final_path
+    except subprocess.CalledProcessError as error:
+        detail = _yt_dlp_error_text(error)
+        raise _YtDlpError(
+            f"FFmpeg failed converting '{media_path}' to {fmt}: {detail}"
         ) from None
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -1280,11 +1500,28 @@ def _remove_temp_file(path):
         pass
 
 
-def download_audio(url, config=None, *, playlist=None, playlist_items=None):
+def download_audio(
+    url,
+    config=None,
+    *,
+    playlist=None,
+    playlist_items=None,
+    format_selector=None,
+    convert_format=None,
+    convert_bitrate=None,
+    convert_sample_rate=None,
+    convert_channels=None,
+    convert_bit_depth=None,
+):
     config_was_live = config is None
     cfg = dict(config) if config is not None else load_config()
-    cfg["channel_mode"] = _choose_channel_mode(cfg)
+    if convert_channels in (1, 2):
+        cfg["channel_mode"] = "mono" if convert_channels == 1 else "stereo"
+    else:
+        cfg["channel_mode"] = _choose_channel_mode(cfg)
     cfg.pop("mono_audio", None)
+    if convert_format == "native":
+        convert_format = None
     auto_tag = cfg.get("auto_tag", True)
     embed_thumbnail = cfg.get("embed_thumbnail", True)
     thumbnail_jpg = cfg.get("thumbnail_jpg", False)
@@ -1329,10 +1566,16 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
                 extras.append("--embed-thumbnail")
                 if thumbnail_jpg:
                     extras.extend(["--convert-thumbnails", "jpg"])
+        if convert_format:
+            format_args = ["-f", format_selector or "bestaudio/best", "-x", "--audio-format", "best"]
+        elif format_selector:
+            format_args = ["-f", format_selector, "-x", "--audio-format", "best"]
+        else:
+            format_args = _audio_format_args(cfg)
         command = [
             "yt-dlp",
             *extras,
-            *_audio_format_args(cfg),
+            *format_args,
             *_yt_dlp_output_args(cfg),
             *playlist_args,
             *progress_args,
@@ -1347,10 +1590,28 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
         total_tracks = len(filepaths)
         if total_tracks == 0:
             return None
+
+        def _prepare_audio_file(filepath, local_cfg):
+            if convert_format:
+                channels = convert_channels if convert_channels in (1, 2) else (
+                    1 if local_cfg.get("channel_mode") == "mono" else None
+                )
+                return _convert_audio_ffmpeg(
+                    filepath,
+                    convert_format=convert_format,
+                    convert_bitrate=convert_bitrate,
+                    convert_sample_rate=convert_sample_rate,
+                    convert_channels=channels,
+                    convert_bit_depth=convert_bit_depth,
+                )
+            if format_selector and local_cfg.get("channel_mode") != "mono":
+                return filepath
+            return _ensure_audio_properties(filepath, local_cfg)
+
         if total_tracks == 1:
             filepath = filepaths[0]
             original_filepath = filepath
-            filepath = _ensure_audio_properties(filepath, cfg)
+            filepath = _prepare_audio_file(filepath, cfg)
             if Path(filepath) != Path(original_filepath):
                 _move_audio_sidecar(original_filepath, filepath)
             duration = durations[0] if durations else None
@@ -1370,7 +1631,7 @@ def download_audio(url, config=None, *, playlist=None, playlist_items=None):
         def _finalize_one(index, filepath):
             original_filepath = filepath
             local_cfg = dict(cfg)
-            filepath = _ensure_audio_properties(filepath, local_cfg)
+            filepath = _prepare_audio_file(filepath, local_cfg)
             if Path(filepath) != Path(original_filepath):
                 _move_audio_sidecar(original_filepath, filepath)
             duration = durations[index] if index < len(durations) else None
@@ -1434,14 +1695,33 @@ def _video_format_args(config: Mapping[str, Any] | None = None) -> list[str]:
     if quality.endswith("p"):
         quality = quality[:-1]
     if quality in {"2160", "1440", "1080", "720", "480"}:
-        return [
+        args = [
             "-f",
             f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best",
         ]
-    return ["-f", "bestvideo+bestaudio/best"]
+    else:
+        args = ["-f", "bestvideo+bestaudio/best"]
+
+    raw_codec = cfg.get("video_codec", "auto")
+    codec = str(raw_codec if raw_codec is not None else "auto").strip().lower()
+    codec = {"av01": "av1", "hevc": "h265", "avc": "h264", "avc1": "h264"}.get(codec, codec)
+    if codec in {"av1", "vp9", "h265", "h264", "vp8"}:
+        # Keep resolution cap (-f) and resolution sorting (res,fps,hdr:12)
+        # ahead of vcodec so higher-compression streams above max resolution
+        # never override the chosen ceiling.
+        args.extend(["-S", f"res,fps,hdr:12,vcodec:{codec}"])
+    return args
 
 
-def download_video(url, config=None, *, playlist=None, playlist_items=None):
+def download_video(
+    url,
+    config=None,
+    *,
+    playlist=None,
+    playlist_items=None,
+    format_selector=None,
+    video_container=None,
+):
     cfg = dict(config) if config is not None else load_config()
     effective_dir = effective_video_download_dir(cfg)
     print("[1/2] Downloading video & audio streams...")
@@ -1467,19 +1747,26 @@ def download_video(url, config=None, *, playlist=None, playlist_items=None):
         if is_batch_video
         else ["--progress"]
     )
+    format_args = ["-f", format_selector] if format_selector else _video_format_args(cfg)
+    container = video_container if video_container in {"mkv", "mp4", "webm"} else "mkv"
+    if container == "mp4":
+        thumb_args = ["--embed-thumbnail", "--convert-thumbnails", "jpg"]
+    elif container == "webm":
+        thumb_args = []
+    else:
+        thumb_args = ["--embed-thumbnail", "--convert-thumbnails", "webp"]
     command = [
         "yt-dlp",
         *extras,
-        *_video_format_args(cfg),
-        "--merge-output-format", "mkv",
-        "--embed-thumbnail",
-        "--convert-thumbnails", "webp",
+        *format_args,
+        "--merge-output-format", container,
+        *thumb_args,
         "--embed-metadata",
         *_yt_dlp_output_args(cfg),
         *playlist_args,
         *progress_args,
         "--print",
-        "post_process:[Stage] Merging video + audio into MKV & embedding thumbnail/metadata...",
+        f"post_process:[Stage] Merging video + audio into {container.upper()} & embedding thumbnail/metadata...",
         "-o", "%(title)s.%(ext)s",
         "--", url,
     ]
@@ -1703,7 +1990,26 @@ def main(argv=None):
     raw_args = list(argv[1:])
     wait_keypress = False
     playlist = None
-    playlist_items = None
+    opts: dict[str, str | None] = {
+        "playlist_items": None,
+        "format_selector": None,
+        "convert_format": None,
+        "convert_bitrate": None,
+        "convert_sample_rate": None,
+        "convert_channels": None,
+        "convert_bit_depth": None,
+        "video_container": None,
+    }
+    flag_to_key = {
+        "--playlist-items": "playlist_items",
+        "--format-selector": "format_selector",
+        "--convert-format": "convert_format",
+        "--convert-bitrate": "convert_bitrate",
+        "--convert-sample-rate": "convert_sample_rate",
+        "--convert-channels": "convert_channels",
+        "--convert-bit-depth": "convert_bit_depth",
+        "--video-container": "video_container",
+    }
     args = []
     index = 0
     while index < len(raw_args):
@@ -1714,16 +2020,18 @@ def main(argv=None):
             playlist = True
         elif arg == "--no-playlist":
             playlist = False
-        elif arg == "--playlist-items":
+        elif arg in flag_to_key:
             if index + 1 >= len(raw_args):
-                print("Missing value for --playlist-items.", file=sys.stderr)
+                print(f"Missing value for {arg}.", file=sys.stderr)
                 return 1
-            playlist_items = raw_args[index + 1]
+            opts[flag_to_key[arg]] = raw_args[index + 1]
             index += 1
-        elif arg.startswith("--playlist-items="):
-            playlist_items = arg.split("=", 1)[1]
         else:
-            args.append(arg)
+            matched_eq = next((flag for flag in flag_to_key if arg.startswith(f"{flag}=")), None)
+            if matched_eq:
+                opts[flag_to_key[matched_eq]] = arg.split("=", 1)[1]
+            else:
+                args.append(arg)
         index += 1
     if os.environ.get("YTDL_WAIT_KEYPRESS") == "1":
         wait_keypress = True
@@ -1744,23 +2052,27 @@ def main(argv=None):
             _print_update_notice(status)
         try:
             if mode == "audio":
-                if playlist is None and playlist_items is None:
-                    download_audio(url)
-                else:
-                    download_audio(
-                        url,
-                        playlist=playlist,
-                        playlist_items=playlist_items,
-                    )
+                audio_kwargs = {}
+                if playlist is not None:
+                    audio_kwargs["playlist"] = playlist
+                for key in (
+                    "playlist_items", "format_selector", "convert_format",
+                    "convert_bitrate", "convert_bit_depth",
+                ):
+                    if opts[key] is not None:
+                        audio_kwargs[key] = opts[key]
+                for int_key in ("convert_sample_rate", "convert_channels"):
+                    if opts[int_key] is not None:
+                        audio_kwargs[int_key] = int(opts[int_key])
+                download_audio(url, **audio_kwargs)
             elif mode == "video":
-                if playlist is None and playlist_items is None:
-                    download_video(url)
-                else:
-                    download_video(
-                        url,
-                        playlist=playlist,
-                        playlist_items=playlist_items,
-                    )
+                video_kwargs = {}
+                if playlist is not None:
+                    video_kwargs["playlist"] = playlist
+                for key in ("playlist_items", "format_selector", "video_container"):
+                    if opts[key] is not None:
+                        video_kwargs[key] = opts[key]
+                download_video(url, **video_kwargs)
             elif mode == "cut":
                 interactive_cut(url)
             else:

@@ -80,6 +80,8 @@
   let refreshTimer = null;
   let lastSyncedUrl = null;
   let activePromptUrl = null;
+  let uiMode = 'simple';
+  let showCutButton = true;
   const PENDING_SELECT_KEY = 'ytdl_pending_playlist_select';
 
   const CHANNEL_PATH_RE =
@@ -273,7 +275,7 @@
   }
 
   function triggerDownload(mode, options) {
-    dispatchTriggerDownload(mode, pageLocation().href, options);
+    dispatchOrPromptAdvancedDownload(mode, pageLocation().href, options);
   }
 
   function markLaunching(button) {
@@ -285,9 +287,10 @@
   }
 
   function setCutButtonsHidden(isHidden) {
+    const effectiveHidden = Boolean(isHidden) || !showCutButton;
     for (const cutBtn of document.querySelectorAll('[data-ytdl-mode="cut"]')) {
-      cutBtn.hidden = Boolean(isHidden);
-      if (isHidden) {
+      cutBtn.hidden = effectiveHidden;
+      if (effectiveHidden) {
         cutBtn.setAttribute('hidden', '');
       } else {
         cutBtn.removeAttribute('hidden');
@@ -352,6 +355,22 @@
     return false;
   }
 
+  function isExcludedPlaylistNode(el) {
+    if (!el || !el.closest) return false;
+    return Boolean(
+      el.closest('yt-page-header-renderer') ||
+      el.closest('yt-page-header-view-model') ||
+      el.closest('ytd-playlist-header-renderer') ||
+      el.closest('ytd-miniplayer') ||
+      el.closest('[data-ytdl-playlist-dialog]'),
+    );
+  }
+
+  function queryVisibleInRoot(root, selector) {
+    const scope = root || document;
+    return Array.from(scope.querySelectorAll(selector)).filter((el) => !isHiddenRenderer(el));
+  }
+
   function collectPlaylistPanelItems() {
     let sourceKind = 'playlist-panel';
     let renderers = [];
@@ -363,15 +382,35 @@
         'ytd-video-renderer',
         'yt-lockup-view-model',
       ]) {
-        const candidates = queryVisibleAll(selector).filter(hasMediaLink);
+        const candidates = queryVisibleAll(selector).filter(
+          (el) => !isExcludedPlaylistNode(el) && hasMediaLink(el),
+        );
         if (candidates.length > 0) {
           renderers = candidates;
           break;
         }
       }
     } else if (isPlaylistRoute()) {
+      const browseRoot = queryVisibleFirst('ytd-browse');
       sourceKind = 'playlist-list';
-      renderers = queryVisibleAll('ytd-playlist-video-renderer');
+      renderers = queryVisibleInRoot(browseRoot, 'ytd-playlist-video-renderer');
+      if (renderers.length === 0) {
+        sourceKind = 'playlist-lockup';
+        for (const selector of [
+          'yt-lockup-view-model',
+          'ytd-rich-item-renderer',
+          'ytd-grid-video-renderer',
+          'ytd-video-renderer',
+        ]) {
+          const candidates = queryVisibleInRoot(browseRoot, selector).filter(
+            (el) => !isExcludedPlaylistNode(el) && hasMediaLink(el),
+          );
+          if (candidates.length > 0) {
+            renderers = candidates;
+            break;
+          }
+        }
+      }
       if (renderers.length === 0) {
         sourceKind = 'playlist-panel';
         renderers = queryVisibleAll('ytd-playlist-panel-video-renderer');
@@ -401,7 +440,12 @@
         }
       }
       const title = extractRendererTitle(renderer, itemIndex);
-      items.push({ renderer, itemIndex, title, isGridCard: sourceKind === 'channel-grid' });
+      items.push({
+        renderer,
+        itemIndex,
+        title,
+        isGridCard: sourceKind === 'channel-grid' || sourceKind === 'playlist-lockup',
+      });
     });
     return items;
   }
@@ -419,8 +463,8 @@
     const panelItems = collectPlaylistPanelItems();
     const canAttachWatchDialog = Boolean(isWatchRoute() && metadata && topRow);
     if (!canAttachWatchDialog && panelItems.length === 0) {
-      if (isChannelRoute()) {
-        writePendingPlaylistSelect(mode, null, { channelVideos: true });
+      if (isChannelRoute() || isPlaylistRoute()) {
+        writePendingPlaylistSelect(mode, currentPlaylistId(), { channelVideos: isChannelRoute() });
       } else {
         markLaunching(triggerButton);
         triggerDownload(mode);
@@ -472,11 +516,12 @@
     header.appendChild(closeBtn);
     dialog.appendChild(header);
 
-    if (panelItems.length === 0 && isChannelRoute()) {
+    if (panelItems.length === 0 && (isChannelRoute() || isPlaylistRoute())) {
       const waitNote = document.createElement('p');
       waitNote.setAttribute('data-ytdl-wait-note', 'true');
-      waitNote.textContent =
-        'Loading channel video checkboxes... You can also enter a yt-dlp range below or click Download channel.';
+      waitNote.textContent = isChannelRoute()
+        ? 'Loading channel video checkboxes... You can also enter a yt-dlp range below or click Download channel.'
+        : 'Loading playlist item checkboxes... You can also enter a yt-dlp range below or click Download playlist.';
       dialog.appendChild(waitNote);
     }
 
@@ -699,8 +744,9 @@
       panelBar.appendChild(panelCloseBtn);
       const firstParent = panelItems[0].renderer.parentNode;
       if (
-        firstParent.tagName === 'YTD-RICH-GRID-ROW' &&
-        firstParent.parentNode
+        firstParent.parentNode &&
+        (firstParent.tagName === 'YTD-RICH-GRID-ROW' ||
+          (firstParent.parentNode.id === 'contents' && firstParent.id !== 'contents'))
       ) {
         firstParent.parentNode.insertBefore(panelBar, firstParent);
       } else {
@@ -822,6 +868,10 @@
       button.setAttribute('data-ytdl-mode', action.mode);
       button.setAttribute('aria-label', action.aria);
       button.setAttribute('title', action.aria);
+      if (action.mode === 'cut' && !showCutButton) {
+        button.hidden = true;
+        button.setAttribute('hidden', '');
+      }
       button.appendChild(makeIcon(action.icon));
       const label = document.createElement('span');
       label.textContent = action.label;
@@ -895,7 +945,13 @@
 
   function maybeResumePendingPlaylistSelect() {
     const existingDialog = document.querySelector('[data-ytdl-playlist-dialog]');
-    if (existingDialog && existingDialog.querySelector('[data-ytdl-dialog-item]')) return;
+    if (
+      existingDialog &&
+      existingDialog.querySelector('[data-ytdl-dialog-item]') &&
+      document.querySelectorAll('[data-ytdl-side-check]').length > 0
+    ) {
+      return;
+    }
     try {
       if (typeof sessionStorage === 'undefined' || !sessionStorage) return;
       const raw = sessionStorage.getItem(PENDING_SELECT_KEY);
@@ -961,7 +1017,10 @@
       const topRow = metadata && metadata.querySelector('#top-row');
       const owner = topRow && topRow.querySelector('#owner');
       const actions = topRow && topRow.querySelector('#actions');
-      if (!topRow || !owner || !actions) return;
+      if (!topRow || !owner || !actions) {
+        maybeResumePendingPlaylistSelect();
+        return;
+      }
       const groups = Array.from(document.querySelectorAll(GROUP_SELECTOR));
       const mounted = groups.find(
         (group) => group.parentNode === topRow && !group.hasAttribute('data-ytdl-batch-controls'),
@@ -974,6 +1033,7 @@
         if (children[children.indexOf(mounted) + 1] !== actions) {
           topRow.insertBefore(mounted, actions);
         }
+        setCutButtonsHidden(Boolean(document.querySelector('[data-ytdl-playlist-dialog]')));
         lastSyncedUrl = currentHref;
         maybeResumePendingPlaylistSelect();
         return;
@@ -986,26 +1046,27 @@
 
     if (isChannelRoute() || isPlaylistRoute()) {
       const host = findBatchControlsHost();
-      if (!host) return;
-      const groups = Array.from(document.querySelectorAll(GROUP_SELECTOR));
-      const mounted = groups.find(
-        (group) => group.parentNode === host && group.hasAttribute('data-ytdl-batch-controls'),
-      );
-      for (const group of groups) {
-        if (group !== mounted) group.remove();
-      }
-      if (!mounted) {
-        const group = makeGroup({ includeCut: false });
-        if (
-          host.matches &&
-          (host.matches('ytd-rich-grid-renderer') || host.matches('#tabs-inner-container'))
-        ) {
-          host.insertBefore(group, host.children[0] || null);
-        } else {
-          host.appendChild(group);
+      if (host) {
+        const groups = Array.from(document.querySelectorAll(GROUP_SELECTOR));
+        const mounted = groups.find(
+          (group) => group.parentNode === host && group.hasAttribute('data-ytdl-batch-controls'),
+        );
+        for (const group of groups) {
+          if (group !== mounted) group.remove();
         }
+        if (!mounted) {
+          const group = makeGroup({ includeCut: false });
+          if (
+            host.matches &&
+            (host.matches('ytd-rich-grid-renderer') || host.matches('#tabs-inner-container'))
+          ) {
+            host.insertBefore(group, host.children[0] || null);
+          } else {
+            host.appendChild(group);
+          }
+        }
+        lastSyncedUrl = currentHref;
       }
-      lastSyncedUrl = currentHref;
       maybeResumePendingPlaylistSelect();
       return;
     }
@@ -1028,6 +1089,19 @@
       return null;
     }
     return null;
+  }
+
+  function stripPlaylistParams(rawUrl) {
+    if (typeof rawUrl !== 'string' || !rawUrl) return rawUrl;
+    try {
+      const url = new URL(rawUrl, pageLocation().href);
+      url.searchParams.delete('list');
+      url.searchParams.delete('index');
+      url.searchParams.delete('start_radio');
+      return url.href;
+    } catch (_error) {
+      return rawUrl;
+    }
   }
 
   function isPreviewCard(card) {
@@ -1072,24 +1146,25 @@
       }
     }
 
-    const isItemRow = Boolean(card.matches && card.matches(PLAYLIST_ITEM_SELECTOR));
-    if (isItemRow && !explicitPlaylistUrl) {
-      if (watchWithListUrl && watchListId) {
-        const isMix = watchListId.startsWith('RD');
-        const canonicalPlaylistUrl = isMix
-          ? watchWithListUrl
-          : `${origin || 'https://www.youtube.com'}/playlist?list=${encodeURIComponent(watchListId)}`;
-        return {
-          url: watchWithListUrl,
-          isPlaylist: true,
-          playlistId: watchListId,
-          playlistUrl: canonicalPlaylistUrl,
-          topVideoUrl: watchWithListUrl,
-        };
-      }
-      const trackUrl = watchUrl || shortsUrl || null;
+    const inPlaylistContainer = Boolean(
+      isPlaylistRoute() ||
+      (card.matches && card.matches(PLAYLIST_ITEM_SELECTOR)) ||
+      (card.closest &&
+        card.closest('ytd-playlist-panel-renderer, ytd-playlist-video-list-renderer, ytmusic-playlist-shelf-renderer')),
+    );
+    const isPlaylistCard = Boolean(card.matches && card.matches(PLAYLIST_CARD_SELECTOR));
+    if (inPlaylistContainer && !isPlaylistCard && !isExcludedPlaylistNode(card) && !explicitPlaylistUrl) {
+      const rawTrackUrl = watchWithListUrl || watchUrl || shortsUrl || null;
+      const trackUrl = rawTrackUrl ? stripPlaylistParams(rawTrackUrl) : null;
       return trackUrl
-        ? { url: trackUrl, isPlaylist: false, playlistId: null, playlistUrl: null, topVideoUrl: trackUrl }
+        ? {
+            url: trackUrl,
+            isPlaylist: false,
+            playlistId: null,
+            playlistUrl: null,
+            topVideoUrl: trackUrl,
+            singleItem: true,
+          }
         : null;
     }
 
@@ -1218,7 +1293,12 @@
       const playlistEntry = inspected.find(
         (entry) => !isPreviewCard(entry.card) && entry.info.isPlaylist,
       );
-      if (playlistEntry && (isPreviewCard(first.card) || !first.info.isPlaylist)) {
+      const singleItemEntry = isPreviewCard(first.card)
+        ? inspected.find((entry) => !isPreviewCard(entry.card) && entry.info.singleItem)
+        : null;
+      if (singleItemEntry) {
+        info = singleItemEntry.info;
+      } else if (playlistEntry && (isPreviewCard(first.card) || !first.info.isPlaylist)) {
         info = {
           ...playlistEntry.info,
           topVideoUrl: playlistEntry.info.topVideoUrl || first.info.topVideoUrl || first.info.url,
@@ -1262,6 +1342,46 @@
     }
   }
 
+  function closeFormatModal() {
+    for (const modal of document.querySelectorAll('[data-ytdl-format-modal]')) {
+      modal.remove();
+    }
+  }
+
+  function makeEl(tag, attrs, text) {
+    const el = document.createElement(tag);
+    if (attrs) {
+      for (const [key, value] of Object.entries(attrs)) {
+        if (value !== undefined && value !== null) el.setAttribute(key, String(value));
+      }
+    }
+    if (text !== undefined && text !== null) el.textContent = String(text);
+    return el;
+  }
+
+  function formatBytes(bytes) {
+    if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return '';
+    const units = ['B', 'KiB', 'MiB', 'GiB'];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    return `${value >= 10 || idx === 0 ? Math.round(value) : value.toFixed(1)} ${units[idx]}`;
+  }
+
+  function extractPlaylistIdFromUrl(value) {
+    if (typeof value !== 'string' || !value) return null;
+    try {
+      const parsed = new URL(value, pageLocation().href);
+      const list = parsed.searchParams.get('list');
+      return list && list.trim() ? list.trim() : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
   function dispatchTriggerDownload(mode, url, options) {
     const api = ext();
     if (!api || !api.runtime) return;
@@ -1276,12 +1396,577 @@
     if (options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
       message.playlistItems = options.playlistItems.trim();
     }
+    if (options && typeof options.fallbacks !== 'undefined') {
+      message.fallbacks = options.fallbacks;
+    }
+    if (options) {
+      const passthroughKeys = [
+        'formatSelector', 'convertFormat', 'convertBitrate',
+        'convertSampleRate', 'convertChannels', 'convertBitDepth', 'videoContainer',
+      ];
+      for (const key of passthroughKeys) {
+        if (options[key] !== undefined && options[key] !== null && options[key] !== '') {
+          message[key] = options[key];
+        }
+      }
+    }
     try {
       const result = api.runtime.sendMessage(message);
       if (result && typeof result.catch === 'function') result.catch(() => {});
     } catch (_error) {
       // Background may be unreachable.
     }
+  }
+
+  function dispatchOrPromptAdvancedDownload(mode, url, options) {
+    if (uiMode === 'advanced' && (mode === 'audio' || mode === 'video')) {
+      openAdvancedFormatModal({
+        mode,
+        url: url || pageLocation().href,
+        fallbacks: options && options.fallbacks ? options.fallbacks : [],
+        playlist: options && typeof options.playlist === 'boolean' ? options.playlist : undefined,
+        playlistItems: options && options.playlistItems ? options.playlistItems : undefined,
+      });
+      return;
+    }
+    dispatchTriggerDownload(mode, url, options);
+  }
+
+  function openAdvancedFormatModal(request) {
+    closeFormatModal();
+    const host = document.body || document.documentElement;
+    if (!host) return false;
+
+    const mode = request && request.mode === 'video' ? 'video' : 'audio';
+    const targetUrl = (request && request.url) || pageLocation().href;
+    const fallbacks = (request && request.fallbacks) || [];
+
+    const modal = makeEl('div', {
+      'data-ytdl-format-modal': 'true',
+      role: 'dialog',
+      'aria-modal': 'true',
+      'aria-label': `Advanced ${mode} format selector`,
+    });
+    const card = makeEl('div', { 'data-ytdl-format-card': 'true' });
+
+    const header = makeEl('div', { 'data-ytdl-format-header': 'true' });
+    const title = makeEl(
+      'h2',
+      { 'data-ytdl-format-title': 'true' },
+      mode === 'audio' ? 'Advanced Audio Format & Pipeline' : 'Advanced Video Stream & Container',
+    );
+    const closeBtn = makeEl('button', { type: 'button', 'data-ytdl-format-close': 'true' }, 'Cancel');
+    closeBtn.addEventListener('click', closeFormatModal);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+
+    const statusLine = makeEl(
+      'p',
+      { 'data-ytdl-format-status': 'true' },
+      'Inspecting available streams via yt-dlp...',
+    );
+    card.appendChild(statusLine);
+
+    const body = makeEl('div', { 'data-ytdl-format-body': 'true' });
+    card.appendChild(body);
+
+    const selectorInput = makeEl('input', {
+      type: 'text',
+      'data-ytdl-fmt-custom': 'true',
+      'aria-label': 'yt-dlp format selector expression',
+      value: mode === 'audio' ? 'bestaudio/best' : 'bestvideo+bestaudio/best',
+    });
+
+    let activeAudioTab = 'direct';
+    let selectedAudioStream = 'bestaudio/best';
+    let selectedVideoStream = 'bestvideo';
+    let selectedAudioPair = 'bestaudio';
+    let cachedFormats = [];
+
+    let convSourceSel = null;
+    let convFmtSel = null;
+    let convBitrateSel = null;
+    let convBitrateWrap = null;
+    let convBitDepthSel = null;
+    let convBitDepthWrap = null;
+    let convSampleRateSel = null;
+    let convChannelsSel = null;
+    let convPreview = null;
+    let vidAudioSel = null;
+    let vidContainerSel = null;
+
+    const BITRATE_OPTIONS = {
+      mp3: [
+        ['V0', 'V0 (~245 kbps VBR - Recommended)'],
+        ['320k', '320 kbps CBR'],
+        ['V2', 'V2 (~190 kbps VBR)'],
+        ['256k', '256 kbps CBR'],
+        ['192k', '192 kbps CBR'],
+        ['V5', 'V5 (~130 kbps VBR)'],
+        ['128k', '128 kbps CBR'],
+      ],
+      ogg: [
+        ['V0', 'V0 (~192 kbps VBR - Recommended)'],
+        ['256k', '256 kbps'],
+        ['192k', '192 kbps'],
+        ['160k', '160 kbps'],
+        ['128k', '128 kbps'],
+      ],
+      opus: [
+        ['160k', '160 kbps (Recommended)'],
+        ['256k', '256 kbps'],
+        ['192k', '192 kbps'],
+        ['128k', '128 kbps'],
+        ['96k', '96 kbps'],
+        ['64k', '64 kbps'],
+      ],
+      m4a: [
+        ['256k', '256 kbps AAC (Recommended)'],
+        ['320k', '320 kbps AAC'],
+        ['192k', '192 kbps AAC'],
+        ['160k', '160 kbps AAC'],
+        ['128k', '128 kbps AAC'],
+      ],
+      ac3: [
+        ['384k', '384 kbps AC3'],
+        ['448k', '448 kbps AC3'],
+        ['640k', '640 kbps AC3'],
+        ['256k', '256 kbps AC3'],
+        ['192k', '192 kbps AC3'],
+      ],
+    };
+
+    function updateVideoSelectorExpression() {
+      const foundVideo = cachedFormats.find((f) => f.format_id === selectedVideoStream);
+      const isCombined = Boolean(foundVideo && foundVideo.kind === 'combined');
+      if (selectedAudioPair === 'none') {
+        selectorInput.value = selectedVideoStream;
+      } else if (isCombined && selectedAudioPair === 'bestaudio') {
+        selectorInput.value = selectedVideoStream;
+      } else {
+        selectorInput.value = `${selectedVideoStream}+${selectedAudioPair}/best`;
+      }
+    }
+
+    function updateConvertControls() {
+      if (!convFmtSel) return;
+      const fmt = convFmtSel.value;
+      const bitrates = BITRATE_OPTIONS[fmt];
+      if (convBitrateWrap && convBitrateSel) {
+        convBitrateWrap.hidden = !bitrates;
+        if (bitrates) {
+          const prev = convBitrateSel.value;
+          convBitrateSel.textContent = '';
+          for (const [val, label] of bitrates) {
+            const opt = makeEl('option', { value: val }, label);
+            convBitrateSel.appendChild(opt);
+          }
+          convBitrateSel.value = bitrates.some(([val]) => val === prev) ? prev : bitrates[0][0];
+        }
+      }
+      const supportsBitDepth = fmt === 'flac' || fmt === 'wav' || fmt === 'alac' || fmt === 'aiff';
+      if (convBitDepthWrap && convBitDepthSel) {
+        convBitDepthWrap.hidden = !supportsBitDepth;
+        if (supportsBitDepth) {
+          const prevBd = convBitDepthSel.value;
+          convBitDepthSel.textContent = '';
+          convBitDepthSel.appendChild(makeEl('option', { value: '16' }, '16-bit'));
+          convBitDepthSel.appendChild(makeEl('option', { value: '24' }, '24-bit'));
+          if (fmt === 'wav' || fmt === 'aiff') {
+            convBitDepthSel.appendChild(makeEl('option', { value: '32f' }, '32-bit float'));
+          }
+          convBitDepthSel.value =
+            prevBd && Array.from(convBitDepthSel.options).some((o) => o.value === prevBd)
+              ? prevBd
+              : '16';
+        }
+      }
+      if (convPreview) {
+        const src = (convSourceSel && convSourceSel.value) || 'bestaudio/best';
+        const parts = [`yt-dlp -f ${src} && ffmpeg`];
+        parts.push(`format=${fmt}`);
+        if (bitrates && convBitrateSel && convBitrateSel.value) parts.push(`q=${convBitrateSel.value}`);
+        if (supportsBitDepth && convBitDepthSel && convBitDepthSel.value) {
+          parts.push(`depth=${convBitDepthSel.value}`);
+        }
+        if (convSampleRateSel && convSampleRateSel.value) parts.push(`ar=${convSampleRateSel.value}Hz`);
+        if (convChannelsSel && convChannelsSel.value) parts.push(`ac=${convChannelsSel.value}`);
+        convPreview.textContent = parts.join(' ');
+      }
+    }
+
+    function renderAudioBody(formats) {
+      body.textContent = '';
+      const tabRow = makeEl('div', { 'data-ytdl-fmt-tabs': 'true' });
+      const directBtn = makeEl('button', {
+        type: 'button',
+        'data-ytdl-fmt-tab': 'direct',
+        'data-active': activeAudioTab === 'direct' ? 'true' : 'false',
+      }, 'Direct stream (yt-dlp -f)');
+      const convBtn = makeEl('button', {
+        type: 'button',
+        'data-ytdl-fmt-tab': 'convert',
+        'data-active': activeAudioTab === 'convert' ? 'true' : 'false',
+      }, 'Convert / Custom FFmpeg');
+      tabRow.appendChild(directBtn);
+      tabRow.appendChild(convBtn);
+      body.appendChild(tabRow);
+
+      const directPane = makeEl('div', { 'data-ytdl-fmt-pane': 'direct' });
+      const convertPane = makeEl('div', { 'data-ytdl-fmt-pane': 'convert' });
+      directPane.hidden = activeAudioTab !== 'direct';
+      convertPane.hidden = activeAudioTab !== 'convert';
+
+      const syncTabUI = () => {
+        directBtn.setAttribute('data-active', activeAudioTab === 'direct' ? 'true' : 'false');
+        convBtn.setAttribute('data-active', activeAudioTab === 'convert' ? 'true' : 'false');
+        directPane.hidden = activeAudioTab !== 'direct';
+        convertPane.hidden = activeAudioTab !== 'convert';
+      };
+      directBtn.addEventListener('click', () => {
+        activeAudioTab = 'direct';
+        syncTabUI();
+      });
+      convBtn.addEventListener('click', () => {
+        activeAudioTab = 'convert';
+        syncTabUI();
+        updateConvertControls();
+      });
+
+      const list = makeEl('div', { 'data-ytdl-fmt-list': 'audio' });
+      const audioStreams = formats
+        .filter((f) => f.kind === 'audio_only')
+        .sort((a, b) => (Number(b.abr || b.tbr || 0) - Number(a.abr || a.tbr || 0)));
+      const combinedStreams = formats.filter((f) => f.kind === 'combined');
+      const entries = [
+        {
+          format_id: 'bestaudio/best',
+          ext: 'native',
+          acodec: 'best available',
+          abr: null,
+          asr: null,
+          audio_channels: null,
+          filesize: null,
+          format_note: 'Direct pass-through',
+          kind: 'audio_only',
+        },
+        ...audioStreams,
+        ...combinedStreams,
+      ];
+      for (const fmt of entries) {
+        const row = makeEl('label', { 'data-ytdl-fmt-row': 'true' });
+        const radio = makeEl('input', {
+          type: 'radio',
+          name: 'ytdl-audio-stream',
+          value: fmt.format_id,
+        });
+        radio.checked = selectedAudioStream === fmt.format_id;
+        radio.addEventListener('change', () => {
+          selectedAudioStream = fmt.format_id;
+          selectorInput.value = fmt.format_id;
+        });
+        const badge = makeEl('span', { 'data-ytdl-fmt-id': 'true' }, fmt.format_id);
+        const metaParts = [fmt.ext ? fmt.ext.toUpperCase() : '', fmt.acodec && fmt.acodec !== 'none' ? fmt.acodec : ''];
+        if (fmt.abr || fmt.tbr) metaParts.push(`${Math.round(fmt.abr || fmt.tbr)} kbps`);
+        if (fmt.asr) metaParts.push(`${(fmt.asr / 1000).toFixed(1).replace(/\.0$/, '')} kHz`);
+        if (fmt.audio_channels) metaParts.push(`${fmt.audio_channels}ch`);
+        const sizeText = formatBytes(fmt.filesize);
+        if (sizeText) metaParts.push(sizeText);
+        if (fmt.format_note) metaParts.push(fmt.format_note);
+        if (fmt.kind === 'combined') metaParts.push('(muxed stream - extracts audio)');
+        const details = makeEl(
+          'span',
+          { 'data-ytdl-fmt-details': 'true' },
+          metaParts.filter(Boolean).join(' | '),
+        );
+        row.appendChild(radio);
+        row.appendChild(badge);
+        row.appendChild(details);
+        list.appendChild(row);
+      }
+      directPane.appendChild(list);
+
+      const selWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      selWrap.appendChild(makeEl('label', null, 'yt-dlp -f expression:'));
+      selWrap.appendChild(selectorInput);
+      directPane.appendChild(selWrap);
+
+      const srcWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      srcWrap.appendChild(makeEl('label', null, 'Source stream (for FFmpeg input):'));
+      convSourceSel = makeEl('select', { 'data-ytdl-conv-source': 'true' });
+      convSourceSel.appendChild(makeEl('option', { value: 'bestaudio/best' }, 'bestaudio/best (Recommended)'));
+      for (const fmt of audioStreams) {
+        const label = `${fmt.format_id} (${fmt.ext}, ${fmt.acodec}${fmt.abr ? ` ${Math.round(fmt.abr)}k` : ''})`;
+        convSourceSel.appendChild(makeEl('option', { value: fmt.format_id }, label));
+      }
+      convSourceSel.value = 'bestaudio/best';
+      convSourceSel.addEventListener('change', updateConvertControls);
+      srcWrap.appendChild(convSourceSel);
+      convertPane.appendChild(srcWrap);
+
+      const fmtWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      fmtWrap.appendChild(makeEl('label', null, 'Target audio format:'));
+      convFmtSel = makeEl('select', { 'data-ytdl-conv-format': 'true' });
+      for (const [val, label] of [
+        ['mp3', 'MP3 (libmp3lame)'],
+        ['flac', 'FLAC (Lossless)'],
+        ['wav', 'WAV (Uncompressed PCM)'],
+        ['alac', 'ALAC (Apple Lossless M4A)'],
+        ['aiff', 'AIFF (Uncompressed PCM)'],
+        ['opus', 'Opus (libopus)'],
+        ['m4a', 'M4A / AAC'],
+        ['ogg', 'Ogg Vorbis'],
+        ['ac3', 'AC3 (Dolby Digital)'],
+      ]) {
+        convFmtSel.appendChild(makeEl('option', { value: val }, label));
+      }
+      convFmtSel.value = 'mp3';
+      convFmtSel.addEventListener('change', updateConvertControls);
+      fmtWrap.appendChild(convFmtSel);
+      convertPane.appendChild(fmtWrap);
+
+      convBitrateWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      convBitrateWrap.appendChild(makeEl('label', null, 'Bitrate / quality:'));
+      convBitrateSel = makeEl('select', { 'data-ytdl-conv-bitrate': 'true' });
+      convBitrateSel.addEventListener('change', updateConvertControls);
+      convBitrateWrap.appendChild(convBitrateSel);
+      convertPane.appendChild(convBitrateWrap);
+
+      convBitDepthWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      convBitDepthWrap.appendChild(makeEl('label', null, 'Sample bit depth:'));
+      convBitDepthSel = makeEl('select', { 'data-ytdl-conv-bitdepth': 'true' });
+      convBitDepthSel.addEventListener('change', updateConvertControls);
+      convBitDepthWrap.appendChild(convBitDepthSel);
+      convertPane.appendChild(convBitDepthWrap);
+
+      const srWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      srWrap.appendChild(makeEl('label', null, 'Sample rate:'));
+      convSampleRateSel = makeEl('select', { 'data-ytdl-conv-samplerate': 'true' });
+      for (const [val, label] of [
+        ['', 'Keep native sample rate'],
+        ['48000', '48 kHz'],
+        ['44100', '44.1 kHz (CD)'],
+        ['96000', '96 kHz (Hi-Res)'],
+      ]) {
+        convSampleRateSel.appendChild(makeEl('option', { value: val }, label));
+      }
+      convSampleRateSel.value = '';
+      convSampleRateSel.addEventListener('change', updateConvertControls);
+      srWrap.appendChild(convSampleRateSel);
+      convertPane.appendChild(srWrap);
+
+      const chWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      chWrap.appendChild(makeEl('label', null, 'Channels:'));
+      convChannelsSel = makeEl('select', { 'data-ytdl-conv-channels': 'true' });
+      for (const [val, label] of [
+        ['', 'Use configured channel setting'],
+        ['2', 'Stereo (2 channels)'],
+        ['1', 'Mono (1 channel)'],
+      ]) {
+        convChannelsSel.appendChild(makeEl('option', { value: val }, label));
+      }
+      convChannelsSel.value = '';
+      convChannelsSel.addEventListener('change', updateConvertControls);
+      chWrap.appendChild(convChannelsSel);
+      convertPane.appendChild(chWrap);
+
+      convPreview = makeEl('code', { 'data-ytdl-fmt-preview': 'true' }, '');
+      convertPane.appendChild(convPreview);
+
+      body.appendChild(directPane);
+      body.appendChild(convertPane);
+      updateConvertControls();
+    }
+
+    function renderVideoBody(formats) {
+      body.textContent = '';
+      const videoStreams = formats
+        .filter((f) => f.kind === 'video_only' || f.kind === 'combined')
+        .sort((a, b) => {
+          const hDiff = Number(b.height || 0) - Number(a.height || 0);
+          if (hDiff !== 0) return hDiff;
+          const fDiff = Number(b.fps || 0) - Number(a.fps || 0);
+          if (fDiff !== 0) return fDiff;
+          return Number(b.vbr || b.tbr || 0) - Number(a.vbr || a.tbr || 0);
+        });
+      const audioStreams = formats
+        .filter((f) => f.kind === 'audio_only')
+        .sort((a, b) => Number(b.abr || b.tbr || 0) - Number(a.abr || a.tbr || 0));
+
+      const list = makeEl('div', { 'data-ytdl-fmt-list': 'video' });
+      const entries = [
+        {
+          format_id: 'bestvideo',
+          ext: 'auto',
+          resolution: 'Best available',
+          fps: null,
+          vcodec: 'auto',
+          acodec: 'none',
+          vbr: null,
+          tbr: null,
+          filesize: null,
+          dynamic_range: '',
+          format_note: 'Highest quality stream',
+          kind: 'video_only',
+        },
+        ...videoStreams,
+      ];
+      for (const fmt of entries) {
+        const row = makeEl('label', { 'data-ytdl-fmt-row': 'true' });
+        const radio = makeEl('input', {
+          type: 'radio',
+          name: 'ytdl-video-stream',
+          value: fmt.format_id,
+        });
+        radio.checked = selectedVideoStream === fmt.format_id;
+        radio.addEventListener('change', () => {
+          selectedVideoStream = fmt.format_id;
+          updateVideoSelectorExpression();
+        });
+        const badge = makeEl('span', { 'data-ytdl-fmt-id': 'true' }, fmt.format_id);
+        const parts = [fmt.resolution || '', fmt.fps ? `${fmt.fps}fps` : '', fmt.ext ? fmt.ext.toUpperCase() : ''];
+        if (fmt.vcodec && fmt.vcodec !== 'none') parts.push(fmt.vcodec);
+        if (fmt.dynamic_range && fmt.dynamic_range !== 'SDR') parts.push(fmt.dynamic_range);
+        if (fmt.vbr || fmt.tbr) parts.push(`${Math.round(fmt.vbr || fmt.tbr)} kbps`);
+        const sizeText = formatBytes(fmt.filesize);
+        if (sizeText) parts.push(sizeText);
+        if (fmt.kind === 'combined') parts.push('(video+audio)');
+        if (fmt.format_note) parts.push(fmt.format_note);
+        const details = makeEl(
+          'span',
+          { 'data-ytdl-fmt-details': 'true' },
+          parts.filter(Boolean).join(' | '),
+        );
+        row.appendChild(radio);
+        row.appendChild(badge);
+        row.appendChild(details);
+        list.appendChild(row);
+      }
+      body.appendChild(list);
+
+      const audioPairWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      audioPairWrap.appendChild(makeEl('label', null, 'Audio track to pair:'));
+      vidAudioSel = makeEl('select', { 'data-ytdl-vid-audio': 'true' });
+      vidAudioSel.appendChild(makeEl('option', { value: 'bestaudio' }, 'bestaudio (Recommended)'));
+      for (const fmt of audioStreams) {
+        const label = `${fmt.format_id} (${fmt.ext}, ${fmt.acodec}${fmt.abr ? ` ${Math.round(fmt.abr)}k` : ''})`;
+        vidAudioSel.appendChild(makeEl('option', { value: fmt.format_id }, label));
+      }
+      vidAudioSel.appendChild(makeEl('option', { value: 'none' }, 'None (video only)'));
+      vidAudioSel.value = selectedAudioPair;
+      vidAudioSel.addEventListener('change', () => {
+        selectedAudioPair = vidAudioSel.value;
+        updateVideoSelectorExpression();
+      });
+      audioPairWrap.appendChild(vidAudioSel);
+      body.appendChild(audioPairWrap);
+
+      const containerWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      containerWrap.appendChild(makeEl('label', null, 'Output container:'));
+      vidContainerSel = makeEl('select', { 'data-ytdl-vid-container': 'true' });
+      for (const [val, label] of [
+        ['mkv', 'MKV (Recommended, keeps all codecs)'],
+        ['mp4', 'MP4'],
+        ['webm', 'WebM'],
+      ]) {
+        vidContainerSel.appendChild(makeEl('option', { value: val }, label));
+      }
+      vidContainerSel.value = 'mkv';
+      containerWrap.appendChild(vidContainerSel);
+      body.appendChild(containerWrap);
+
+      const selWrap = makeEl('div', { 'data-ytdl-fmt-field': 'true' });
+      selWrap.appendChild(makeEl('label', null, 'yt-dlp -f expression:'));
+      selWrap.appendChild(selectorInput);
+      body.appendChild(selWrap);
+    }
+
+    const renderBody = (formats) => {
+      cachedFormats = Array.isArray(formats) ? formats : [];
+      if (mode === 'audio') renderAudioBody(cachedFormats);
+      else renderVideoBody(cachedFormats);
+    };
+
+    renderBody([]);
+
+    const footer = makeEl('div', { 'data-ytdl-format-footer': 'true' });
+    const downloadBtn = makeEl('button', { type: 'button', 'data-ytdl-fmt-submit': 'true' }, 'Download');
+    downloadBtn.addEventListener('click', () => {
+      const options = {
+        fallbacks,
+        playlist: request && typeof request.playlist === 'boolean' ? request.playlist : undefined,
+        playlistItems: request && request.playlistItems ? request.playlistItems : undefined,
+      };
+      if (mode === 'audio') {
+        if (activeAudioTab === 'convert' && convFmtSel) {
+          options.formatSelector = (convSourceSel && convSourceSel.value) || 'bestaudio/best';
+          options.convertFormat = convFmtSel.value;
+          if (convBitrateWrap && !convBitrateWrap.hidden && convBitrateSel && convBitrateSel.value) {
+            options.convertBitrate = convBitrateSel.value;
+          }
+          if (convBitDepthWrap && !convBitDepthWrap.hidden && convBitDepthSel && convBitDepthSel.value) {
+            options.convertBitDepth = convBitDepthSel.value;
+          }
+          if (convSampleRateSel && convSampleRateSel.value) {
+            options.convertSampleRate = Number.parseInt(convSampleRateSel.value, 10);
+          }
+          if (convChannelsSel && convChannelsSel.value) {
+            options.convertChannels = Number.parseInt(convChannelsSel.value, 10);
+          }
+        } else {
+          const expr = selectorInput.value.trim();
+          if (expr && expr !== 'bestaudio/best') options.formatSelector = expr;
+        }
+      } else {
+        const expr = selectorInput.value.trim();
+        if (expr && expr !== 'bestvideo+bestaudio/best') options.formatSelector = expr;
+        if (vidContainerSel && vidContainerSel.value) {
+          options.videoContainer = vidContainerSel.value;
+        }
+      }
+      closeFormatModal();
+      dispatchTriggerDownload(mode, targetUrl, options);
+    });
+    footer.appendChild(downloadBtn);
+    card.appendChild(footer);
+
+    modal.appendChild(card);
+    modal.addEventListener('click', (evt) => {
+      if (evt && evt.target === modal) closeFormatModal();
+    });
+    host.appendChild(modal);
+
+    const api = ext();
+    if (api && api.runtime && typeof api.runtime.sendMessage === 'function') {
+      try {
+        Promise.resolve(api.runtime.sendMessage({
+          type: 'ytdl-list-formats',
+          url: targetUrl,
+          fallbacks,
+        })).then((resp) => {
+          if (!modal.parentNode) return;
+          if (resp && resp.ok && Array.isArray(resp.formats)) {
+            statusLine.textContent = resp.title
+              ? `${resp.title} (${resp.formats.length} streams found)`
+              : `${resp.formats.length} streams found`;
+            renderBody(resp.formats);
+          } else {
+            statusLine.textContent =
+              (resp && resp.error)
+                ? `Could not list formats (${resp.error}). You can still choose a custom yt-dlp -f selector or FFmpeg conversion below.`
+                : 'Could not list formats. You can still choose a custom yt-dlp -f selector or FFmpeg conversion below.';
+          }
+        }, () => {
+          if (modal.parentNode) {
+            statusLine.textContent = 'Format inspection failed. You can still use a custom selector or FFmpeg pipeline.';
+          }
+        });
+      } catch (_error) {
+        statusLine.textContent = 'Format inspection unavailable. Use default or custom selector below.';
+      }
+    }
+    return true;
   }
 
   function resolveGraphicalSelectUrl(message) {
@@ -1355,7 +2040,7 @@
     allBtn.textContent = 'Download entire playlist';
     allBtn.addEventListener('click', () => {
       closeContextModal();
-      dispatchTriggerDownload(mode, playlistUrl, { playlist: true });
+      dispatchOrPromptAdvancedDownload(mode, playlistUrl, { playlist: true });
     });
 
     const topBtn = document.createElement('button');
@@ -1365,9 +2050,9 @@
     topBtn.addEventListener('click', () => {
       closeContextModal();
       if (topVideoUrl && extractWatchVideoId(topVideoUrl)) {
-        dispatchTriggerDownload(mode, topVideoUrl, { playlist: false });
+        dispatchOrPromptAdvancedDownload(mode, topVideoUrl, { playlist: false });
       } else {
-        dispatchTriggerDownload(mode, playlistUrl, { playlist: true, playlistItems: '1' });
+        dispatchOrPromptAdvancedDownload(mode, playlistUrl, { playlist: true, playlistItems: '1' });
       }
     });
 
@@ -1387,9 +2072,13 @@
         openPlaylistPrompt(findTriggerButton(mode), mode);
         return;
       }
+      if (samePlaylist) {
+        openPlaylistPrompt(findTriggerButton(mode), mode);
+        return;
+      }
       const targetUrl = resolveGraphicalSelectUrl(message);
       if (targetUrl && /^https?:\/\//i.test(targetUrl)) {
-        writePendingPlaylistSelect(mode, playlistId);
+        writePendingPlaylistSelect(mode, playlistId || extractPlaylistIdFromUrl(targetUrl));
         pageLocation().href = targetUrl;
       }
     });
@@ -1416,6 +2105,37 @@
 
     host.appendChild(modal);
     return true;
+  }
+
+  function applyStateUpdate(cfg) {
+    if (!cfg || typeof cfg !== 'object') return;
+    if (typeof cfg.ui_mode === 'string') {
+      uiMode = cfg.ui_mode === 'advanced' ? 'advanced' : 'simple';
+    }
+    if (typeof cfg.show_cut_button === 'boolean') {
+      showCutButton = cfg.show_cut_button;
+      setCutButtonsHidden(Boolean(document.querySelector('[data-ytdl-playlist-dialog]')));
+    }
+  }
+
+  function syncExtensionState() {
+    const api = ext();
+    if (
+      !api ||
+      !api.runtime ||
+      typeof api.runtime.sendMessage !== 'function' ||
+      typeof api.runtime.getURL !== 'function'
+    ) {
+      return;
+    }
+    try {
+      const result = api.runtime.sendMessage({ type: 'ytdl-get-extension-state' });
+      if (result && typeof result.then === 'function') {
+        result.then(applyStateUpdate, () => {});
+      }
+    } catch (_error) {
+      // Background may be unavailable.
+    }
   }
 
   function handlePointerOver(event) {
@@ -1445,7 +2165,7 @@
     if (!event || event.button !== 2) return;
     const info = captureContextInfo(event);
     const now = nowMs();
-    if ((!info || !info.isPlaylist) && lastPointerInfo && now - lastPointerDownAt < 80) {
+    if ((!info || (!info.isPlaylist && !info.singleItem)) && lastPointerInfo && now - lastPointerDownAt < 80) {
       if (lastPointerInfo.isPlaylist || !info) {
         const merged =
           lastPointerInfo.isPlaylist && info && info.topVideoUrl && !lastPointerInfo.topVideoUrl
@@ -1465,7 +2185,7 @@
 
   function handleContextMenu(event) {
     let info = captureContextInfo(event);
-    if ((!info || !info.isPlaylist) && lastPointerInfo && nowMs() - lastPointerAt < 500) {
+    if ((!info || (!info.isPlaylist && !info.singleItem)) && lastPointerInfo && nowMs() - lastPointerAt < 500) {
       if (lastPointerInfo.isPlaylist || !info) {
         info =
           lastPointerInfo.isPlaylist && info && info.topVideoUrl && !lastPointerInfo.topVideoUrl
@@ -1489,9 +2209,14 @@
             playlistId: lastContextInfo.playlistId || null,
             playlistUrl: lastContextInfo.playlistUrl || lastContextInfo.url,
             topVideoUrl: lastContextInfo.topVideoUrl || null,
+            singleItem: false,
           });
         } else {
-          sendResponse({ url: lastContextUrl });
+          sendResponse({
+            url: lastContextUrl,
+            isPlaylist: false,
+            singleItem: Boolean(lastContextInfo && lastContextInfo.singleItem),
+          });
         }
       }
       return true;
@@ -1501,12 +2226,30 @@
       if (typeof sendResponse === 'function') sendResponse({ shown });
       return true;
     }
+    if (message && message.type === 'ytdl-prompt-advanced-format') {
+      uiMode = 'advanced';
+      const shown = openAdvancedFormatModal({
+        mode: message.mode,
+        url: message.url,
+        fallbacks: message.fallbacks || [],
+        playlist: typeof message.playlist === 'boolean' ? message.playlist : undefined,
+        playlistItems: message.playlistItems || undefined,
+      });
+      if (typeof sendResponse === 'function') sendResponse({ shown });
+      return true;
+    }
+    if (message && message.type === 'ytdl-config-updated') {
+      applyStateUpdate(message.config);
+      if (typeof sendResponse === 'function') sendResponse({ ok: true });
+      return true;
+    }
     return undefined;
   }
 
   function handleKeyDown(event) {
     if (event && event.key === 'Escape') {
       closeContextModal();
+      closeFormatModal();
     }
   }
 
@@ -1527,6 +2270,7 @@
 
   function main() {
     removeGroups(false);
+    syncExtensionState();
     syncControls();
     document.addEventListener('yt-navigate-finish', syncControls);
     document.addEventListener('yt-page-data-updated', syncControls);

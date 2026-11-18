@@ -75,6 +75,44 @@ function presetKeyFor(downloadDir, presets = PRESETS) {
   return 'custom';
 }
 
+function applyUiMode(mode) {
+  const normalized = mode === 'advanced' ? 'advanced' : 'simple';
+  const panel = document.querySelector('.panel');
+  if (panel) panel.setAttribute('data-ui-mode', normalized);
+
+  const simpleBtn = $('uiModeSimple');
+  const advancedBtn = $('uiModeAdvanced');
+  if (simpleBtn) {
+    simpleBtn.classList.toggle('is-active', normalized === 'simple');
+    simpleBtn.setAttribute('aria-pressed', normalized === 'simple' ? 'true' : 'false');
+  }
+  if (advancedBtn) {
+    advancedBtn.classList.toggle('is-active', normalized === 'advanced');
+    advancedBtn.setAttribute('aria-pressed', normalized === 'advanced' ? 'true' : 'false');
+  }
+
+  for (const el of document.querySelectorAll('[data-advanced-only="true"]')) {
+    el.hidden = normalized !== 'advanced';
+  }
+}
+
+function notifyExtensionConfig(config) {
+  const api = ext();
+  if (!api || !api.runtime || typeof api.runtime.sendMessage !== 'function') return;
+  try {
+    const res = api.runtime.sendMessage({
+      type: 'ytdl-config-updated',
+      config: {
+        ui_mode: config && config.ui_mode === 'advanced' ? 'advanced' : 'simple',
+        show_cut_button: Boolean(config && config.show_cut_button),
+      },
+    });
+    if (res && typeof res.catch === 'function') res.catch(() => {});
+  } catch (_error) {
+    // Background may not be listening during isolated popup tests.
+  }
+}
+
 function updateDownloadPresets(response) {
   const directories = response.user_download_directories || {};
   for (const [key, value] of Object.entries(directories)) {
@@ -93,6 +131,34 @@ function updateDownloadPresets(response) {
     if (!select || !select.options) continue;
     const option = Array.from(select.options).find((item) => item.value === value);
     if (option) option.textContent = label;
+  }
+}
+
+const VIDEO_CODEC_LABELS = {
+  auto: 'best compression (AV1 > VP9 > H.265 > H.264)',
+  av1: 'AV1',
+  vp9: 'VP9',
+  h265: 'H.265 / HEVC',
+  h264: 'H.264 / AVC',
+  vp8: 'VP8',
+};
+
+function updateVideoQualityNote() {
+  const note = $('videoQualityNote');
+  if (!note) return;
+  const qEl = $('videoQuality');
+  const cEl = $('videoCodec');
+  const quality = qEl && qEl.value ? qEl.value : 'best';
+  const codec = cEl && cEl.value ? cEl.value : 'auto';
+  const codecLabel = VIDEO_CODEC_LABELS[codec] || VIDEO_CODEC_LABELS.auto;
+  if (quality === 'best') {
+    note.textContent = codec === 'auto'
+      ? `Picks highest resolution available, preferring ${codecLabel}.`
+      : `Picks highest resolution available, preferring ${codecLabel} within that resolution.`;
+  } else {
+    note.textContent = codec === 'auto'
+      ? `Prefers ${codecLabel} up to ${quality}p; streams above ${quality}p are excluded.`
+      : `Prefers ${codecLabel} up to ${quality}p; streams above ${quality}p override codec preference.`;
   }
 }
 
@@ -123,6 +189,20 @@ function updateMp3Row() {
   row.hidden = !select || select.value !== 'mp3';
 }
 
+function updateVideoFolderRow() {
+  const row = $('videoFolderRow');
+  if (!row) return;
+  const enabled = $('videoFolderEnabled');
+  row.hidden = !enabled || !enabled.checked;
+}
+
+function updateLongAudioRow() {
+  const row = $('longAudioRow');
+  if (!row) return;
+  const enabled = $('longAudioEnabled');
+  row.hidden = !enabled || !enabled.checked;
+}
+
 function pushConfig() {
   const audioEl = $('audioFormat');
   const qualityEl = $('mp3Quality');
@@ -146,13 +226,6 @@ function pushConfig() {
   });
 }
 
-function updateLongAudioRow() {
-  const row = $('longAudioRow');
-  if (!row) return;
-  const enabled = $('longAudioEnabled');
-  row.hidden = !enabled || !enabled.checked;
-}
-
 function renderUpdateNote(status) {
   const versionLine = $('ytdlpVersionLine');
   const versionText = $('ytdlpVersionText');
@@ -161,9 +234,10 @@ function renderUpdateNote(status) {
     if (status && status.installed) {
       versionLine.hidden = false;
       if (versionText) {
-        versionText.textContent = status.outdated && status.latest
-          ? `yt-dlp ${status.installed} (latest ${status.latest})`
-          : `yt-dlp ${status.installed}`;
+        versionText.textContent = `yt-dlp ${status.installed}`;
+      }
+      if (status.outdated && status.latest && typeof versionLine.setAttribute === 'function') {
+        versionLine.setAttribute('title', `Installed ${status.installed}, latest ${status.latest}`);
       }
       if (versionBadge) {
         versionBadge.hidden = false;
@@ -254,22 +328,30 @@ function renderConnected(response) {
   $('statusText').textContent =
     `Connected (extension ${extensionVersion}, companion ${companionVersion})`;
   const config = response.config || {};
+  applyUiMode(config.ui_mode);
+  notifyExtensionConfig(config);
+
   $('autoTag').checked = config.auto_tag !== false;
   $('rsgain').checked = config.rsgain === true;
   if ($('verboseOutput')) $('verboseOutput').checked = config.verbose_output === true;
+  if ($('showCutButton')) $('showCutButton').checked = config.show_cut_button === true;
   if ($('audioFormat')) $('audioFormat').value = config.audio_format || 'best';
   if ($('mp3Quality')) $('mp3Quality').value = config.mp3_quality || 'V0';
   if ($('videoQuality')) $('videoQuality').value = config.video_quality || 'best';
+  if ($('videoCodec')) $('videoCodec').value = config.video_codec || 'auto';
   if ($('channelMode')) {
     $('channelMode').value = config.channel_mode || 'stereo';
   }
   if ($('embedThumbnail')) $('embedThumbnail').checked = config.embed_thumbnail !== false;
   if ($('thumbnailJpg')) $('thumbnailJpg').checked = config.thumbnail_jpg === true;
+  if ($('videoFolderEnabled')) $('videoFolderEnabled').checked = config.video_dir_enabled === true;
   if ($('longAudioEnabled')) $('longAudioEnabled').checked = config.long_audio_enabled === true;
   if ($('longAudioMinutes')) $('longAudioMinutes').value = String(config.long_audio_minutes || 30);
   if ($('longAudioDir')) $('longAudioDir').value = config.long_audio_dir || '~/Podcasts';
   updateMp3Row();
   updateFormatNote();
+  updateVideoQualityNote();
+  updateVideoFolderRow();
   updateLongAudioRow();
   updateThreadsControl(response);
   const missingNote = $('rsgainMissingNote');
@@ -394,6 +476,19 @@ function main() {
   if (onboarding) document.querySelector('.panel').setAttribute('data-view', 'onboarding');
   if (onboarding) renderDisconnected();
 
+  if ($('uiModeSimple')) {
+    $('uiModeSimple').addEventListener('click', () => {
+      applyUiMode('simple');
+      saveConfig({ ui_mode: 'simple' });
+    });
+  }
+  if ($('uiModeAdvanced')) {
+    $('uiModeAdvanced').addEventListener('click', () => {
+      applyUiMode('advanced');
+      saveConfig({ ui_mode: 'advanced' });
+    });
+  }
+
   $('autoTag').addEventListener('change', (event) => {
     saveConfig({ auto_tag: event.target.checked });
   });
@@ -411,6 +506,11 @@ function main() {
     if (rsgainMissingNoteEl && lastDeps && lastDeps.rsgain === true) rsgainMissingNoteEl.hidden = true;
     saveConfig({ rsgain: rsgainEl.checked });
   });
+  if ($('showCutButton')) {
+    $('showCutButton').addEventListener('change', (event) => {
+      saveConfig({ show_cut_button: event.target.checked });
+    });
+  }
   if ($('verboseOutput')) {
     $('verboseOutput').addEventListener('change', (event) => {
       saveConfig({ verbose_output: event.target.checked });
@@ -440,7 +540,15 @@ function main() {
   const videoQualityEl = $('videoQuality');
   if (videoQualityEl) {
     videoQualityEl.addEventListener('change', () => {
+      updateVideoQualityNote();
       saveConfig({ video_quality: videoQualityEl.value || 'best' });
+    });
+  }
+  const videoCodecEl = $('videoCodec');
+  if (videoCodecEl) {
+    videoCodecEl.addEventListener('change', () => {
+      updateVideoQualityNote();
+      saveConfig({ video_codec: videoCodecEl.value || 'auto' });
     });
   }
   for (const id of ['embedThumbnail', 'thumbnailJpg', 'longAudioEnabled']) {
@@ -451,6 +559,12 @@ function main() {
         pushConfig();
       });
     }
+  }
+  if ($('videoFolderEnabled')) {
+    $('videoFolderEnabled').addEventListener('change', (event) => {
+      updateVideoFolderRow();
+      saveConfig({ video_dir_enabled: event.target.checked });
+    });
   }
   const channelModeEl = $('channelMode');
   if (channelModeEl) {

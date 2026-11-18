@@ -3626,3 +3626,164 @@ class V24AudioPipelineTests(unittest.TestCase):
         })
         self.assertEqual(episode_title["artist"], "")
         self.assertEqual(episode_title["title"], "Episode 4 - How to Build a Guitar")
+
+    def test_list_formats_for_url_normalizes_audio_video_and_filters_storyboards(self):
+        wrapper = _load_wrapper(self)
+        sample_info = {
+            "title": "Demo Video",
+            "id": "demo123",
+            "duration": 95,
+            "formats": [
+                {"format_id": "sb0", "ext": "mhtml", "protocol": "mhtml", "vcodec": "none", "acodec": "none"},
+                {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus", "abr": 160, "asr": 48000, "audio_channels": 2, "filesize": 2048000, "format_note": "medium"},
+                {"format_id": "313", "ext": "webm", "vcodec": "vp9", "acodec": "none", "width": 3840, "height": 2160, "fps": 60, "vbr": 18000, "dynamic_range": "SDR"},
+                {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a.40.2", "width": 640, "height": 360, "fps": 30, "tbr": 600},
+            ],
+        }
+        fake_res = mock.Mock(stdout=json.dumps(sample_info) + "\n")
+        with mock.patch.object(wrapper.subprocess, "run", return_value=fake_res):
+            result = wrapper.list_formats_for_url("https://www.youtube.com/watch?v=demo123")
+
+        self.assertEqual(result["title"], "Demo Video")
+        self.assertEqual([f["format_id"] for f in result["formats"]], ["251", "313", "18"])
+        self.assertEqual(result["formats"][0]["kind"], "audio_only")
+        self.assertEqual(result["formats"][1]["kind"], "video_only")
+        self.assertEqual(result["formats"][1]["resolution"], "3840x2160")
+        self.assertEqual(result["formats"][2]["kind"], "combined")
+
+    def test_convert_audio_ffmpeg_wav_and_tag_audio_file(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "track.opus"
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "0.2", "-c:a", "libopus", str(src)],
+                check=True,
+            )
+            converted = wrapper._convert_audio_ffmpeg(
+                src,
+                convert_format="wav",
+                convert_sample_rate=44100,
+                convert_channels=1,
+                convert_bit_depth="24",
+            )
+            self.assertEqual(Path(converted).suffix, ".wav")
+            self.assertTrue(Path(converted).is_file())
+            self.assertFalse(src.exists())
+
+            tag_audio_file(str(converted), {"title": "Test Song", "artist": "Test Artist"})
+            from mutagen.wave import WAVE
+            wave = WAVE(str(converted))
+            self.assertEqual(str(wave.tags.get("TIT2")), "Test Song")
+            self.assertEqual(str(wave.tags.get("TPE1")), "Test Artist")
+
+    def test_download_audio_and_video_respect_advanced_format_and_container_flags(self):
+        wrapper = _load_wrapper(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            downloaded_opus = Path(tmp) / "Song.opus"
+            downloaded_opus.write_bytes(b"opus")
+            (Path(tmp) / "Song.info.json").write_text(
+                json.dumps({"title": "Song", "uploader": "Artist"}), encoding="utf-8"
+            )
+            captured_cmds = []
+
+            def fake_run_audio(cmd):
+                captured_cmds.append(cmd)
+                pf = cmd[cmd.index("--print-to-file") + 2]
+                df = cmd[cmd.index("--print-to-file", cmd.index("--print-to-file") + 1) + 2]
+                Path(pf).write_text(str(downloaded_opus) + "\n", encoding="utf-8")
+                Path(df).write_text("120\n", encoding="utf-8")
+
+            converted_wav = Path(tmp) / "Song.wav"
+            with mock.patch.object(wrapper, "_run_with_auth_retry", side_effect=fake_run_audio), \
+                 mock.patch.object(wrapper, "_convert_audio_ffmpeg", side_effect=lambda p, **kw: (converted_wav.write_bytes(b"wav"), Path(p).unlink(), converted_wav)[2]) as conv_mock, \
+                 mock.patch.object(wrapper, "finalize_audio_download", return_value=str(converted_wav)) as fin_mock:
+                res = wrapper.download_audio(
+                    "https://www.youtube.com/watch?v=x1",
+                    {"download_dir": tmp, "auto_tag": True},
+                    format_selector="140",
+                    convert_format="wav",
+                    convert_sample_rate=44100,
+                    convert_channels=1,
+                    convert_bit_depth="24",
+                )
+
+            self.assertEqual(res, str(converted_wav))
+            cmd_audio = captured_cmds[0]
+            self.assertEqual(cmd_audio[cmd_audio.index("-f") + 1], "140")
+            self.assertEqual(conv_mock.call_args.kwargs["convert_format"], "wav")
+            self.assertEqual(conv_mock.call_args.kwargs["convert_sample_rate"], 44100)
+            self.assertEqual(conv_mock.call_args.kwargs["convert_channels"], 1)
+            self.assertEqual(conv_mock.call_args.kwargs["convert_bit_depth"], "24")
+            self.assertTrue((Path(tmp) / "Song.info.json").is_file())
+            fin_mock.assert_called_once()
+
+            video_cmds = []
+            with mock.patch.object(wrapper, "_run_with_auth_retry", side_effect=lambda cmd: video_cmds.append(cmd)):
+                wrapper.download_video(
+                    "https://www.youtube.com/watch?v=x2",
+                    {"video_download_dir": tmp},
+                    format_selector="313+251/best",
+                    video_container="mp4",
+                )
+            cmd_video = video_cmds[0]
+            self.assertEqual(cmd_video[cmd_video.index("-f") + 1], "313+251/best")
+            self.assertEqual(cmd_video[cmd_video.index("--merge-output-format") + 1], "mp4")
+            self.assertEqual(cmd_video[cmd_video.index("--convert-thumbnails") + 1], "jpg")
+
+    def test_video_codec_format_args_and_resolution_cap_override(self):
+        import yt_dlp
+
+        wrapper = _load_wrapper(self)
+        self.assertEqual(
+            wrapper._video_format_args({"video_quality": "1080", "video_codec": "vp9"}),
+            [
+                "-f",
+                "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                "-S",
+                "res,fps,hdr:12,vcodec:vp9",
+            ],
+        )
+        self.assertEqual(
+            wrapper._video_format_args({"video_quality": "best", "video_codec": "h265"}),
+            [
+                "-f",
+                "bestvideo+bestaudio/best",
+                "-S",
+                "res,fps,hdr:12,vcodec:h265",
+            ],
+        )
+
+        # Simulate streams where 2160p AV1 exists strictly above the 1080p cap,
+        # plus 1080p AV1 / VP9 / H.264 and 720p AV1, to verify real yt-dlp sorting.
+        synthetic_formats = [
+            {"format_id": "251", "url": "https://example.com/251", "ext": "webm", "acodec": "opus", "vcodec": "none", "abr": 160, "tbr": 160},
+            {"format_id": "137", "url": "https://example.com/137", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none", "width": 1920, "height": 1080, "fps": 30, "tbr": 4000},
+            {"format_id": "248", "url": "https://example.com/248", "ext": "webm", "vcodec": "vp9", "acodec": "none", "width": 1920, "height": 1080, "fps": 30, "tbr": 2500},
+            {"format_id": "399", "url": "https://example.com/399", "ext": "mp4", "vcodec": "av01.0.08M.08", "acodec": "none", "width": 1920, "height": 1080, "fps": 30, "tbr": 1800},
+            {"format_id": "401", "url": "https://example.com/401", "ext": "mp4", "vcodec": "av01.0.12M.08", "acodec": "none", "width": 3840, "height": 2160, "fps": 30, "tbr": 12000},
+            {"format_id": "398", "url": "https://example.com/398", "ext": "mp4", "vcodec": "av01.0.05M.08", "acodec": "none", "width": 1280, "height": 720, "fps": 30, "tbr": 900},
+        ]
+
+        def pick_video_id(cfg, fmts=synthetic_formats):
+            args = wrapper._video_format_args(cfg)
+            fmt_spec = args[args.index("-f") + 1]
+            opts = {"format": fmt_spec, "quiet": True}
+            if "-S" in args:
+                opts["format_sort"] = args[args.index("-S") + 1].split(",")
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = {"id": "test", "title": "test", "formats": [dict(f) for f in fmts]}
+                ydl.sort_formats(info)
+                selector = ydl.build_format_selector(fmt_spec)
+                chosen = next(selector({"formats": info["formats"]}))
+                return chosen["requested_formats"][0]["format_id"]
+
+        # Default Auto (AV1 > VP9 > H.265 > H.264) capped at 1080p: excludes 2160p AV1, picks 1080p AV1.
+        self.assertEqual(pick_video_id({"video_quality": "1080", "video_codec": "auto"}), "399")
+        # Even when preferred codec (AV1) only exists at 2160p and 720p, 1080p cap + resolution overrides it -> picks 1080p VP9 over both 2160p AV1 and 720p AV1.
+        no_1080_av1 = [f for f in synthetic_formats if f["format_id"] != "399"]
+        self.assertEqual(pick_video_id({"video_quality": "1080", "video_codec": "av1"}, no_1080_av1), "248")
+        # Explicit VP9 at 1080p prefers 248 over 399 (AV1) and 137 (H.264).
+        self.assertEqual(pick_video_id({"video_quality": "1080", "video_codec": "vp9"}), "248")
+        # Explicit H.264 at 1080p prefers 137.
+        self.assertEqual(pick_video_id({"video_quality": "1080", "video_codec": "h264"}), "137")
+

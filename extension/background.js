@@ -22,6 +22,9 @@ const MENU_CONTEXTS = ['page', 'frame', 'link', 'image', 'video', 'audio', 'sele
 // Guards so repeated setup runs never attach duplicate listeners.
 let listenersAttached = false;
 let hooksAttached = false;
+let currentConfig = { ui_mode: 'simple', show_cut_button: false };
+let configLoaded = false;
+let configHydratePromise = null;
 
 function ext() {
   if (typeof browser !== 'undefined' && browser) return browser;
@@ -139,6 +142,7 @@ async function queryContextInfo(tabId, tabUrl) {
         playlistId: typeof response.playlistId === 'string' ? response.playlistId : null,
         playlistUrl: typeof response.playlistUrl === 'string' ? response.playlistUrl : null,
         topVideoUrl: typeof response.topVideoUrl === 'string' ? response.topVideoUrl : null,
+        singleItem: Boolean(response.singleItem),
       };
     }
     return null;
@@ -157,14 +161,11 @@ async function queryContextInfo(tabId, tabUrl) {
   return null;
 }
 
-async function promptPlaylistChoice(tabId, payload, tabUrl) {
+async function sendTabPrompt(tabId, messagePayload, tabUrl) {
   const api = ext();
   if (!api || !tabId) return false;
   const sendOnce = async () => {
-    const response = await api.tabs.sendMessage(tabId, {
-      type: 'ytdl-prompt-playlist-choice',
-      ...payload,
-    });
+    const response = await api.tabs.sendMessage(tabId, messagePayload);
     return Boolean(response && response.shown);
   };
   try {
@@ -181,11 +182,84 @@ async function promptPlaylistChoice(tabId, payload, tabUrl) {
   }
 }
 
+async function promptPlaylistChoice(tabId, payload, tabUrl) {
+  return sendTabPrompt(tabId, {
+    type: 'ytdl-prompt-playlist-choice',
+    ...payload,
+  }, tabUrl);
+}
+
 async function openOnboarding() {
   const api = ext();
   if (!api) return;
   const url = api.runtime.getURL(ONBOARDING_URL);
   await api.tabs.create({ url });
+}
+
+async function syncCutMenuVisibility(showCut) {
+  const menus = menusApi();
+  if (!menus || typeof menus.update !== 'function') return;
+  try {
+    await menus.update('ytdl-cut', { visible: Boolean(showCut) });
+  } catch (_error) {
+    // Menu item may not exist yet or host browser may ignore visible updates.
+  }
+}
+
+function applyExtensionConfig(config) {
+  if (!config || typeof config !== 'object') return;
+  currentConfig = {
+    ui_mode: config.ui_mode === 'advanced' ? 'advanced' : 'simple',
+    show_cut_button: Boolean(config.show_cut_button),
+  };
+  configLoaded = true;
+  syncCutMenuVisibility(currentConfig.show_cut_button);
+}
+
+async function hydrateConfigFromHost() {
+  if (configLoaded) return currentConfig;
+  if (configHydratePromise) return configHydratePromise;
+  const api = ext();
+  if (!api || !api.runtime || typeof api.runtime.sendNativeMessage !== 'function') {
+    return currentConfig;
+  }
+  configHydratePromise = Promise.resolve()
+    .then(() => api.runtime.sendNativeMessage(HOST_ID, { action: 'get_config' }))
+    .then((response) => {
+      if (response && response.ok && response.config) {
+        applyExtensionConfig(response.config);
+      }
+      return currentConfig;
+    })
+    .catch(() => currentConfig)
+    .finally(() => {
+      configHydratePromise = null;
+    });
+  return configHydratePromise;
+}
+
+async function broadcastConfigToYouTubeTabs() {
+  const api = ext();
+  if (!api || !api.tabs || typeof api.tabs.query !== 'function') return;
+  let tabs;
+  try {
+    tabs = await api.tabs.query({ url: ['*://*.youtube.com/*', '*://youtube.com/*'] });
+  } catch (_error) {
+    return;
+  }
+  if (!Array.isArray(tabs)) return;
+  for (const tab of tabs) {
+    if (!tab || !tab.id) continue;
+    try {
+      const result = api.tabs.sendMessage(tab.id, {
+        type: 'ytdl-config-updated',
+        config: { ...currentConfig },
+      });
+      if (result && typeof result.catch === 'function') result.catch(() => {});
+    } catch (_error) {
+      // Ignore tabs without active content script.
+    }
+  }
 }
 
 async function sendDownload(mode, primaryUrl, fallbacks, options) {
@@ -207,6 +281,26 @@ async function sendDownload(mode, primaryUrl, fallbacks, options) {
   if (mode !== 'cut' && options && typeof options.playlistItems === 'string' && options.playlistItems.trim()) {
     payload.playlist_items = options.playlistItems.trim();
   }
+  if (mode !== 'cut' && options) {
+    const optionalStringKeys = [
+      ['formatSelector', 'format_selector'],
+      ['convertFormat', 'convert_format'],
+      ['convertBitrate', 'convert_bitrate'],
+      ['convertBitDepth', 'convert_bit_depth'],
+      ['videoContainer', 'video_container'],
+    ];
+    for (const [optKey, payloadKey] of optionalStringKeys) {
+      if (typeof options[optKey] === 'string' && options[optKey].trim()) {
+        payload[payloadKey] = options[optKey].trim();
+      }
+    }
+    if (options.convertSampleRate !== undefined && options.convertSampleRate !== null && options.convertSampleRate !== '') {
+      payload.convert_sample_rate = Number(options.convertSampleRate);
+    }
+    if (options.convertChannels !== undefined && options.convertChannels !== null && options.convertChannels !== '') {
+      payload.convert_channels = Number(options.convertChannels);
+    }
+  }
   try {
     const response = await api.runtime.sendNativeMessage(HOST_ID, payload);
     // A non-OK reply is a download failure from a connected companion,
@@ -215,6 +309,23 @@ async function sendDownload(mode, primaryUrl, fallbacks, options) {
     return response || { ok: false, error: 'companion did not respond' };
   } catch (_error) {
     await openOnboarding();
+    return { ok: false, error: 'companion missing' };
+  }
+}
+
+async function listFormats(primaryUrl, fallbacks) {
+  const api = ext();
+  if (!api) return { ok: false, error: 'extension API unavailable' };
+  const candidates = dedupeUrls([primaryUrl, ...(fallbacks || [])]);
+  const url = candidates[0] || null;
+  try {
+    const response = await api.runtime.sendNativeMessage(HOST_ID, {
+      action: 'list_formats',
+      url,
+      fallbacks: candidates.slice(1),
+    });
+    return response || { ok: false, error: 'companion did not respond' };
+  } catch (_error) {
     return { ok: false, error: 'companion missing' };
   }
 }
@@ -237,8 +348,12 @@ async function handleMenuClick(info, tab) {
     (candidate) => candidate !== primaryUrl,
   );
 
-  const playlistId = (contextInfo && contextInfo.playlistId) || extractPlaylistId(primaryUrl);
-  const isPlaylistTarget = Boolean((contextInfo && contextInfo.isPlaylist) || isYouTubePlaylistUrl(primaryUrl));
+  const singleItem = Boolean(contextInfo && contextInfo.singleItem);
+  const effectiveFallbacks = singleItem ? [] : fallbacks;
+  const playlistId = singleItem ? null : (contextInfo && contextInfo.playlistId) || extractPlaylistId(primaryUrl);
+  const isPlaylistTarget = singleItem
+    ? false
+    : Boolean((contextInfo && contextInfo.isPlaylist) || isYouTubePlaylistUrl(primaryUrl));
   const playlistUrl =
     (contextInfo && contextInfo.playlistUrl) ||
     (playlistId && !playlistId.startsWith('RD')
@@ -251,7 +366,7 @@ async function handleMenuClick(info, tab) {
     null;
 
   if (mode === 'cut' && isPlaylistTarget) {
-    await sendDownload(mode, topVideoUrl || primaryUrl, fallbacks, { playlist: false });
+    await sendDownload(mode, topVideoUrl || primaryUrl, effectiveFallbacks, { playlist: false });
     return;
   }
 
@@ -270,21 +385,59 @@ async function handleMenuClick(info, tab) {
       );
       if (shown) return;
     }
-    await sendDownload(mode, playlistUrl || primaryUrl, fallbacks, { playlist: true });
+    await sendDownload(mode, playlistUrl || primaryUrl, effectiveFallbacks, { playlist: true });
     return;
   }
 
-  await sendDownload(mode, primaryUrl, fallbacks);
+  if ((mode === 'audio' || mode === 'video') && currentConfig.ui_mode === 'advanced' && tabId) {
+    const shown = await sendTabPrompt(
+      tabId,
+      {
+        type: 'ytdl-prompt-advanced-format',
+        mode,
+        url: primaryUrl,
+        fallbacks: effectiveFallbacks,
+        playlist: singleItem ? false : undefined,
+      },
+      tabUrl,
+    );
+    if (shown) return;
+  }
+
+  await sendDownload(mode, primaryUrl, effectiveFallbacks, singleItem ? { playlist: false } : undefined);
 }
 
 function handlePillMessage(message, _sender, sendResponse) {
-  if (!message || message.type !== 'ytdl-trigger-download') return undefined;
-  const mode = message.mode;
-  if (mode !== 'audio' && mode !== 'video' && mode !== 'cut') return undefined;
-  const result = sendDownload(mode, message.url || null, message.fallbacks || [], {
-    playlist: mode === 'cut' ? false : message.playlist,
-    playlistItems: mode === 'cut' ? undefined : message.playlistItems,
-  });
+  if (!message || typeof message !== 'object') return undefined;
+  let result;
+  if (message.type === 'ytdl-trigger-download') {
+    const mode = message.mode;
+    if (mode !== 'audio' && mode !== 'video' && mode !== 'cut') return undefined;
+    result = sendDownload(mode, message.url || null, message.fallbacks || [], {
+      playlist: mode === 'cut' ? false : message.playlist,
+      playlistItems: mode === 'cut' ? undefined : message.playlistItems,
+      formatSelector: mode === 'cut' ? undefined : message.formatSelector,
+      convertFormat: mode === 'cut' ? undefined : message.convertFormat,
+      convertBitrate: mode === 'cut' ? undefined : message.convertBitrate,
+      convertSampleRate: mode === 'cut' ? undefined : message.convertSampleRate,
+      convertChannels: mode === 'cut' ? undefined : message.convertChannels,
+      convertBitDepth: mode === 'cut' ? undefined : message.convertBitDepth,
+      videoContainer: mode === 'cut' ? undefined : message.videoContainer,
+    });
+  } else if (message.type === 'ytdl-list-formats') {
+    result = listFormats(message.url || null, message.fallbacks || []);
+  } else if (message.type === 'ytdl-get-extension-state') {
+    result = hydrateConfigFromHost().then((cfg) => ({
+      ok: true,
+      ui_mode: cfg.ui_mode,
+      show_cut_button: cfg.show_cut_button,
+    }));
+  } else if (message.type === 'ytdl-config-updated') {
+    applyExtensionConfig(message.config);
+    result = broadcastConfigToYouTubeTabs().then(() => ({ ok: true }));
+  } else {
+    return undefined;
+  }
   if (typeof sendResponse === 'function' && (typeof browser === 'undefined' || !browser)) {
     Promise.resolve(result).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
@@ -326,6 +479,7 @@ async function setupMenus() {
       parentId: 'ytdl-root',
       title: 'Cut Audio',
       contexts: MENU_CONTEXTS.slice(),
+      visible: Boolean(currentConfig.show_cut_button),
       icons: { 16: 'icons/cut.svg', 32: 'icons/cut.svg' },
     },
   ];
@@ -356,6 +510,25 @@ async function setupMenus() {
   }
 }
 
+function handleTabUpdated(tabId, changeInfo, tab) {
+  if (!changeInfo || changeInfo.status !== 'complete') return;
+  const tabUrl = (tab && tab.url) || changeInfo.url || '';
+  if (!isYouTubeUrl(tabUrl)) return;
+  const api = ext();
+  if (!api || !api.tabs || typeof api.tabs.sendMessage !== 'function') return;
+  hydrateConfigFromHost().then((cfg) => {
+    try {
+      const res = api.tabs.sendMessage(tabId, {
+        type: 'ytdl-config-updated',
+        config: { ...cfg },
+      });
+      if (res && typeof res.catch === 'function') res.catch(() => {});
+    } catch (_error) {
+      // Tab may not have content script ready yet.
+    }
+  });
+}
+
 function attachListeners() {
   if (listenersAttached) return;
   listenersAttached = true;
@@ -366,6 +539,9 @@ function attachListeners() {
   const api = ext();
   if (api && api.runtime && api.runtime.onMessage) {
     api.runtime.onMessage.addListener(handlePillMessage);
+  }
+  if (api && api.tabs && api.tabs.onUpdated) {
+    api.tabs.onUpdated.addListener(handleTabUpdated);
   }
 }
 
@@ -383,12 +559,27 @@ async function reinjectOpenYouTubeTabs() {
     if (!tab || !tab.id) continue;
     if (tab.url && !isYouTubeUrl(tab.url)) continue;
     await ensureContentScriptLoaded(tab.id).catch(() => false);
+    try {
+      const res = api.tabs.sendMessage(tab.id, {
+        type: 'ytdl-config-updated',
+        config: { ...currentConfig },
+      });
+      if (res && typeof res.catch === 'function') res.catch(() => {});
+    } catch (_error) {
+      // Ignore unreachable tabs.
+    }
   }
 }
 
 async function handleInstalledOrStartup() {
   await setupMenus();
+  await hydrateConfigFromHost();
   await reinjectOpenYouTubeTabs();
+}
+
+async function handleStartupOnly() {
+  await setupMenus();
+  await hydrateConfigFromHost();
 }
 
 function attachHooks() {
@@ -400,7 +591,7 @@ function attachHooks() {
     api.runtime.onInstalled.addListener(handleInstalledOrStartup);
   }
   if (api.runtime.onStartup) {
-    api.runtime.onStartup.addListener(setupMenus);
+    api.runtime.onStartup.addListener(handleStartupOnly);
   }
 }
 

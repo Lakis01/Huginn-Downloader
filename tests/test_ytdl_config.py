@@ -497,6 +497,80 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 save_config({"postprocess_threads": 99}, env)
 
+    def test_ui_mode_show_cut_button_and_video_dir_enabled_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            baseline = load_config(env)
+            self.assertNotIn("ui_mode", baseline)
+            self.assertNotIn("show_cut_button", baseline)
+            self.assertNotIn("video_dir_enabled", baseline)
+
+            save_config(
+                {
+                    "ui_mode": "advanced",
+                    "show_cut_button": True,
+                    "video_dir_enabled": False,
+                    "download_dir": "~/Music/Main",
+                    "video_download_dir": "~/Videos/Separate",
+                },
+                env,
+            )
+            loaded = load_config(env)
+            self.assertEqual(loaded["ui_mode"], "advanced")
+            self.assertTrue(loaded["show_cut_button"])
+            self.assertIs(loaded["video_dir_enabled"], False)
+            self.assertEqual(
+                ytdl_config.effective_video_download_dir(loaded, env),
+                str(Path(tmp) / "Music/Main"),
+            )
+
+            save_config(
+                {
+                    "ui_mode": "simple",
+                    "show_cut_button": False,
+                    "video_dir_enabled": True,
+                    "download_dir": "~/Music/Main",
+                    "video_download_dir": "~/Videos/Separate",
+                },
+                env,
+            )
+            reloaded = load_config(env)
+            self.assertNotIn("ui_mode", reloaded)
+            self.assertNotIn("show_cut_button", reloaded)
+            self.assertIs(reloaded["video_dir_enabled"], True)
+            self.assertEqual(
+                ytdl_config.effective_video_download_dir(reloaded, env),
+                str(Path(tmp) / "Videos/Separate"),
+            )
+
+            for bad_cfg, exc in (
+                ({"ui_mode": "expert"}, ValueError),
+                ({"ui_mode": 123}, TypeError),
+                ({"show_cut_button": "yes"}, TypeError),
+                ({"video_dir_enabled": "no"}, TypeError),
+                ({"video_codec": "divx"}, ValueError),
+                ({"video_codec": 42}, TypeError),
+            ):
+                with self.subTest(bad_cfg=bad_cfg), self.assertRaises(exc):
+                    save_config(bad_cfg, env)
+
+    def test_video_codec_preference_round_trip_and_aliases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"HOME": tmp}
+            baseline = load_config(env)
+            self.assertNotIn("video_codec", baseline)
+
+            save_config({"video_codec": "hevc"}, env)
+            self.assertEqual(load_config(env)["video_codec"], "h265")
+            save_config({"video_codec": "AV01"}, env)
+            self.assertEqual(load_config(env)["video_codec"], "av1")
+            save_config({"video_codec": "avc1"}, env)
+            self.assertEqual(load_config(env)["video_codec"], "h264")
+            save_config({"video_codec": "vp9"}, env)
+            self.assertEqual(load_config(env)["video_codec"], "vp9")
+            save_config({"video_codec": "auto"}, env)
+            self.assertNotIn("video_codec", load_config(env))
+
 
 if __name__ == "__main__":
     unittest.main()

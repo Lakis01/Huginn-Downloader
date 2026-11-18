@@ -491,6 +491,9 @@ function createContentFixture(options = {}) {
     set className(v) { this.setAttribute('class', v); }
     get href() { return this.getAttribute('href') || ''; }
     set href(v) { this.setAttribute('href', v); }
+    get value() { return this._hasValue ? this._value : (this.getAttribute('value') || ''); }
+    set value(v) { this._hasValue = true; this._value = String(v); }
+    get options() { return this.children.filter((c) => c.tagName === 'OPTION'); }
     get textContent() { return this.childNodes.map((c) => c.textContent || '').join(''); }
     set textContent(v) {
       for (const c of this.childNodes) c.parentNode = null;
@@ -613,7 +616,14 @@ function createContentFixture(options = {}) {
   const messageListeners = [];
   const browser = {
     runtime: {
-      sendMessage(msg) { sentMessages.push(msg); return Promise.resolve({ ok: true }); },
+      sendMessage(msg) {
+        sentMessages.push(msg);
+        if (typeof options.sendMessage === 'function') {
+          return Promise.resolve(options.sendMessage(msg));
+        }
+        return Promise.resolve({ ok: true });
+      },
+      ...(options.enableGetUrl ? { getURL: (p) => `moz-extension://test/${p}` } : {}),
       onMessage: { addListener(fn) { messageListeners.push(fn); } },
     },
   };
@@ -959,16 +969,29 @@ function createPopupFixture(pingResponse) {
     }
     return elements.get(id);
   }
-  for (const id of ['statusText', 'statusDot', 'ytdlpVersionLine', 'ytdlpVersionText', 'ytdlpVersionBadge', 'connectedView', 'setupView', 'autoTag', 'rsgain', 'rsgainMissingNote', 'postprocessThreads', 'threadsNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'videoQuality', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
+  for (const id of ['statusText', 'statusDot', 'ytdlpVersionLine', 'ytdlpVersionText', 'ytdlpVersionBadge', 'connectedView', 'setupView', 'uiModeSimple', 'uiModeAdvanced', 'advancedModeNote', 'videoCodecGroup', 'videoCodec', 'videoCodecNote', 'channelGroup', 'advancedPipelineSection', 'showCutButton', 'autoTag', 'rsgain', 'rsgainMissingNote', 'postprocessThreads', 'threadsNote', 'verboseOutput', 'audioFormat', 'mp3Quality', 'mp3QualityRow', 'formatNote', 'embedThumbnail', 'thumbnailJpg', 'channelMode', 'videoFolderEnabled', 'videoFolderRow', 'longAudioEnabled', 'longAudioRow', 'longAudioMinutes', 'longAudioDir', 'downloadFolder', 'customDir', 'effectiveDir', 'videoDownloadFolder', 'customVideoDir', 'effectiveVideoDir', 'videoQuality', 'videoQualityNote', 'depsLine', 'installCmd', 'copyBtn', 'retryBtn', 'copyNote', 'ytdlpUpdateNote', 'ytdlpUpdateText', 'ytdlpUpdateHint']) {
     mockEl(id);
   }
+  const panelAttrs = new Map();
+  const panelMock = {
+    setAttribute(k, v) { panelAttrs.set(k, String(v)); },
+    getAttribute(k) { return panelAttrs.has(k) ? panelAttrs.get(k) : null; },
+  };
   const document = {
     getElementById: (id) => mockEl(id),
     querySelector: (sel) => {
-      if (sel === '.panel') return { setAttribute() {}, getAttribute() { return null; } };
+      if (sel === '.panel') return panelMock;
       return null;
     },
     querySelectorAll: (sel) => {
+      if (sel === '[data-advanced-only="true"]') {
+        return [
+          mockEl('advancedModeNote'),
+          mockEl('videoCodecGroup'),
+          mockEl('channelGroup'),
+          mockEl('advancedPipelineSection'),
+        ];
+      }
       return [];
     },
     createElement: (tag) => mockEl(`created-${tag}-${elements.size}`),
@@ -997,7 +1020,7 @@ function createPopupFixture(pingResponse) {
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(EXT, 'popup.js'), 'utf8'), context, { filename: 'popup.js' });
-  return { document, elements, nativeCalls, triggerReady: () => { if (document._domReady) document._domReady(); } };
+  return { document, elements, nativeCalls, panel: panelMock, triggerReady: () => { if (document._domReady) document._domReady(); } };
 }
 
 async function testPopupUpdateNote() {
@@ -1592,14 +1615,48 @@ function testContentPlaylistCardsAndWatchPrompt() {
     assert.equal(ctx.playlistId, 'PLhover789');
     assert.equal(ctx.topVideoUrl, 'https://www.youtube.com/watch?v=toppreview1');
 
-    // Row inside playlist panel carrying list= resolves as playlist prompt candidate preserving row track URL.
+    // Row inside right-hand playlist panel resolves directly as a single item (without prompting playlist vs single track).
     fx.setHitStackArr([panelRow]);
     panelRow.dispatchEvent({ type: 'contextmenu', target: panelRow, bubbles: true, clientX: 22, clientY: 28 });
     let rowCtx = null;
     responder({ type: 'ytdl-get-context-url' }, {}, (r) => { rowCtx = r; });
-    assert.equal(rowCtx.url, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
-    assert.equal(rowCtx.isPlaylist, true, 'playlist row carrying list= prompts playlist vs single track');
-    assert.equal(rowCtx.topVideoUrl, 'https://www.youtube.com/watch?v=v4&list=PLabc&index=4');
+    assert.equal(rowCtx.url, 'https://www.youtube.com/watch?v=v4');
+    assert.equal(rowCtx.isPlaylist, false, 'playlist panel row downloads single item directly');
+    assert.equal(rowCtx.singleItem, true);
+
+    // Item row inside /playlist?list=... total view also resolves as singleItem: true, while header keeps isPlaylist: true.
+    {
+      const plFx = createContentFixture({ href: 'https://www.youtube.com/playlist?list=PLfull9' });
+      const plResponder = plFx.messageListeners[0];
+      const plBrowse = plFx.document.createElement('ytd-browse');
+      const plHeader = plFx.document.createElement('ytd-playlist-header-renderer');
+      const plHeaderTitle = plFx.document.createElement('span');
+      plHeader.appendChild(plHeaderTitle);
+      plBrowse.appendChild(plHeader);
+      const plList = plFx.document.createElement('ytd-playlist-video-list-renderer');
+      const plLockup = plFx.document.createElement('yt-lockup-view-model');
+      const plRowLink = plFx.document.createElement('a');
+      plRowLink.setAttribute('href', '/watch?v=item77&list=PLfull9&index=3');
+      plLockup.appendChild(plRowLink);
+      plList.appendChild(plLockup);
+      plBrowse.appendChild(plList);
+      plFx.document.body.appendChild(plBrowse);
+
+      plFx.setHitStackArr([plRowLink, plLockup]);
+      plLockup.dispatchEvent({ type: 'contextmenu', target: plRowLink, bubbles: true, clientX: 12, clientY: 18 });
+      let itemCtx = null;
+      plResponder({ type: 'ytdl-get-context-url' }, {}, (r) => { itemCtx = r; });
+      assert.equal(itemCtx.url, 'https://www.youtube.com/watch?v=item77');
+      assert.equal(itemCtx.isPlaylist, false, '/playlist row right-click downloads single item directly');
+      assert.equal(itemCtx.singleItem, true);
+
+      plFx.setHitStackArr([plHeaderTitle, plHeader]);
+      plHeader.dispatchEvent({ type: 'contextmenu', target: plHeaderTitle, bubbles: true, clientX: 12, clientY: 8 });
+      let hdrCtx = null;
+      plResponder({ type: 'ytdl-get-context-url' }, {}, (r) => { hdrCtx = r; });
+      assert.equal(hdrCtx.isPlaylist, true, '/playlist header still prompts playlist choices');
+      assert.equal(hdrCtx.playlistId, 'PLfull9');
+    }
 
     // Choice modal: "all", "top", and "select" (graphical selection on matching playlist).
     let modalReply = null;
@@ -1765,6 +1822,7 @@ async function testPopupVersionBadgeAndThreads() {
 
   const vqEl = fx.elements.get('videoQuality');
   assert.equal(vqEl.value, 'best', 'videoQuality defaults to best');
+  assert.ok(fx.elements.get('videoQualityNote').textContent.includes('AV1 > VP9'), 'explains compression hierarchy');
   vqEl.value = '1080';
   for (const fn of vqEl.listeners.change || []) await fn({ target: vqEl });
   await tick(10);
@@ -1773,6 +1831,20 @@ async function testPopupVersionBadgeAndThreads() {
   );
   assert.ok(vqSaved, 'videoQuality change sends set_config');
   assert.equal(vqSaved.msg.config.video_quality, '1080');
+  assert.ok(fx.elements.get('videoQualityNote').textContent.includes('1080p'), 'note reflects selected max resolution cap');
+
+  const vcEl = fx.elements.get('videoCodec');
+  assert.equal(vcEl.value, 'auto', 'videoCodec defaults to auto');
+  vcEl.value = 'vp9';
+  for (const fn of vcEl.listeners.change || []) await fn({ target: vcEl });
+  assert.ok(fx.elements.get('videoQualityNote').textContent.includes('override codec preference'), 'communicates resolution cap overrides codec preference');
+  await tick(10);
+  const vcSaved = [...fx.nativeCalls].reverse().find(
+    (call) => call.msg && call.msg.action === 'set_config' && call.msg.config && 'video_codec' in call.msg.config,
+  );
+  assert.ok(vcSaved, 'videoCodec change sends set_config');
+  assert.equal(vcSaved.msg.config.video_codec, 'vp9');
+  assert.ok(fx.elements.get('videoQualityNote').textContent.includes('VP9'), 'note reflects selected codec');
 }
 
 function testChannelRedirectHiddenSpaAndPlaylistTarget() {
@@ -1908,6 +1980,27 @@ async function testBackgroundPlaylistContextPromptAndCutGuard() {
   assert.equal(calls.nativeMessages[0].msg.mode, 'cut');
   assert.equal(calls.nativeMessages[0].msg.url, 'https://www.youtube.com/watch?v=topctx1&list=PLctx1');
   assert.equal(calls.nativeMessages[0].msg.playlist, false);
+
+  // Single item clicked inside a playlist view downloads directly without playlist prompt.
+  setTabMessageResponse({
+    url: 'https://www.youtube.com/watch?v=item77',
+    isPlaylist: false,
+    singleItem: true,
+    shown: true,
+  });
+  await handlers.clicked(
+    {
+      menuItemId: 'ytdl-audio',
+      linkUrl: 'https://www.youtube.com/watch?v=item77&list=PLctx1&index=3',
+      pageUrl: 'https://www.youtube.com/playlist?list=PLctx1',
+    },
+    { id: 19, url: 'https://www.youtube.com/playlist?list=PLctx1' },
+  );
+  assert.equal(calls.nativeMessages.length, 2, 'single playlist item dispatches immediately without modal prompt');
+  assert.equal(calls.nativeMessages[1].msg.mode, 'audio');
+  assert.equal(calls.nativeMessages[1].msg.url, 'https://www.youtube.com/watch?v=item77');
+  assert.equal(calls.nativeMessages[1].msg.playlist, false);
+  assert.equal(calls.nativeMessages[1].msg.fallbacks.length, 0);
 }
 
 async function testChromiumBuildAndBackground() {
@@ -1990,6 +2083,221 @@ async function testChromiumBuildAndBackground() {
   assert.equal(nativeCalls.length, 1);
 }
 
+function testModernPlaylistLockupGraphicalSelection() {
+  const sharedStorage = new Map();
+  sharedStorage.set('ytdl_pending_playlist_select', JSON.stringify({
+    mode: 'audio',
+    playlistId: 'PLmodern1',
+    channelVideos: false,
+    createdAt: Date.now(),
+  }));
+  const fx = createContentFixture({
+    href: 'https://www.youtube.com/playlist?list=PLmodern1',
+    storage: sharedStorage,
+  });
+
+  const browse = fx.document.createElement('ytd-browse');
+  const pageHeader = fx.document.createElement('yt-page-header-renderer');
+  const headerLockup = fx.document.createElement('yt-lockup-view-model');
+  const headerLink = fx.document.createElement('a');
+  headerLink.setAttribute('href', '/watch?v=hdr1&list=PLmodern1');
+  headerLockup.appendChild(headerLink);
+  pageHeader.appendChild(headerLockup);
+  browse.appendChild(pageHeader);
+
+  const section = fx.document.createElement('yt-item-section-renderer');
+  const contents = fx.document.createElement('div');
+  contents.id = 'contents';
+  for (let i = 1; i <= 3; i += 1) {
+    const rowWrap = fx.document.createElement('div');
+    const lockup = fx.document.createElement('yt-lockup-view-model');
+    const link = fx.document.createElement('a');
+    link.setAttribute('href', `/watch?v=vid${i}&list=PLmodern1`);
+    link.textContent = `Playlist Entry ${i}`;
+    lockup.appendChild(link);
+    rowWrap.appendChild(lockup);
+    contents.appendChild(rowWrap);
+  }
+  section.appendChild(contents);
+  browse.appendChild(section);
+  fx.document.body.appendChild(browse);
+
+  browse.dispatchEvent({ type: 'yt-navigate-finish', target: browse, bubbles: true });
+
+  assert.equal(sharedStorage.has('ytdl_pending_playlist_select'), false, 'pending playlist selection consumed on modern lockup DOM');
+  const panelBar = contents.querySelector('[data-ytdl-panel-bar="true"]');
+  assert.ok(panelBar, 'panelBar mounts directly inside div#contents before item wrappers');
+  assert.equal(headerLockup.querySelectorAll('[data-ytdl-side-checkbox]').length, 0, 'header lockup is excluded');
+  const boxes = contents.querySelectorAll('[data-ytdl-side-checkbox="true"]');
+  assert.equal(boxes.length, 3, 'checkboxes mount on all 3 yt-lockup-view-model playlist items');
+
+  const noneBtn = panelBar.querySelector('[data-ytdl-panel-select="none"]');
+  const allBtn = panelBar.querySelector('[data-ytdl-panel-select="all"]');
+  noneBtn.dispatchEvent({ type: 'click', target: noneBtn, bubbles: true });
+  assert.ok(boxes.every((b) => b.checked === false), 'Deselect all unchecks modern playlist checkboxes');
+  allBtn.dispatchEvent({ type: 'click', target: allBtn, bubbles: true });
+  assert.ok(boxes.every((b) => b.checked === true), 'Select all re-checks modern playlist checkboxes');
+
+  boxes[1].checked = false;
+  boxes[1].dispatchEvent({ type: 'change', target: boxes[1], bubbles: true });
+  const dlBtn = panelBar.querySelector('[data-ytdl-panel-download="true"]');
+  assert.equal(dlBtn.textContent, 'Download 2 selected (audio)');
+  dlBtn.dispatchEvent({ type: 'click', target: dlBtn, bubbles: true });
+  assert.equal(fx.sentMessages.length, 1);
+  assert.equal(fx.sentMessages[0].playlist, true);
+  assert.equal(fx.sentMessages[0].playlistItems, '1,3');
+}
+
+async function testPopupSimpleAdvancedDedicatedVideosAndShowCut() {
+  const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function fire(el, type) {
+    const fns = (el.listeners && el.listeners[type]) || [];
+    for (const fn of fns) await fn({ target: el });
+  }
+  const fx = createPopupFixture({
+    ok: true,
+    version: '2.5.8',
+    config: { audio_format: 'best', auto_tag: true, rsgain: false },
+    deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
+    yt_dlp_status: { outdated: false },
+  });
+  fx.triggerReady();
+  await tick(30);
+
+  assert.equal(fx.panel.getAttribute('data-ui-mode'), 'simple', 'Simple mode active by default');
+  assert.equal(fx.elements.get('advancedPipelineSection').hidden, true, 'Advanced section hidden in Simple mode');
+  assert.equal(fx.elements.get('videoCodecGroup').hidden, true, 'Preferred video codec hidden in Simple mode');
+  assert.equal(fx.elements.get('channelGroup').hidden, true, 'Channels hidden in Simple mode');
+  assert.equal(fx.elements.get('videoFolderEnabled').checked, false, 'Dedicated videos folder off by default');
+  assert.equal(fx.elements.get('videoFolderRow').hidden, true, 'Video folder row hidden by default');
+  assert.equal(fx.elements.get('longAudioEnabled').checked, false, 'Long audio off by default');
+  assert.equal(fx.elements.get('longAudioRow').hidden, true, 'Long audio row hidden by default');
+  assert.equal(fx.elements.get('showCutButton').checked, false, 'Show Cut button off by default');
+
+  fx.nativeCalls.length = 0;
+  const videoToggle = fx.elements.get('videoFolderEnabled');
+  videoToggle.checked = true;
+  await fire(videoToggle, 'change');
+  await tick(10);
+  assert.equal(fx.elements.get('videoFolderRow').hidden, false, 'Toggling Dedicated videos folder reveals folder picker');
+  const videoSaved = [...fx.nativeCalls].reverse().find((c) => c.msg && c.msg.action === 'set_config');
+  assert.equal(videoSaved.msg.config.video_dir_enabled, true);
+
+  fx.nativeCalls.length = 0;
+  await fire(fx.elements.get('uiModeAdvanced'), 'click');
+  await tick(10);
+  assert.equal(fx.panel.getAttribute('data-ui-mode'), 'advanced', 'Clicking Advanced activates advanced mode');
+  assert.equal(fx.elements.get('advancedPipelineSection').hidden, false, 'Advanced section becomes visible');
+  assert.equal(fx.elements.get('videoCodecGroup').hidden, false, 'Preferred video codec becomes visible');
+  assert.equal(fx.elements.get('channelGroup').hidden, false, 'Channels becomes visible');
+  const modeSaved = [...fx.nativeCalls].reverse().find((c) => c.msg && c.msg.action === 'set_config');
+  assert.equal(modeSaved.msg.config.ui_mode, 'advanced');
+
+  fx.nativeCalls.length = 0;
+  const cutToggle = fx.elements.get('showCutButton');
+  cutToggle.checked = true;
+  await fire(cutToggle, 'change');
+  await tick(10);
+  const cutSaved = [...fx.nativeCalls].reverse().find((c) => c.msg && c.msg.action === 'set_config');
+  assert.equal(cutSaved.msg.config.show_cut_button, true);
+}
+
+async function testCutButtonVisibilityAndAdvancedFormatPicker() {
+  // 1. Background keeps ytdl-cut menu hidden by default and toggles visible via ytdl-config-updated.
+  const bg = runBackgroundFixture();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const cutItem = bg.created.find((item) => item.id === 'ytdl-cut');
+  assert.equal(cutItem.visible, false, 'ytdl-cut context menu item starts hidden by default');
+  await bg.handlers.message({
+    type: 'ytdl-config-updated',
+    config: { ui_mode: 'advanced', show_cut_button: true },
+  });
+  const cutUpdate = [...bg.calls.updates].reverse().find((u) => u.id === 'ytdl-cut');
+  assert.ok(cutUpdate && cutUpdate.props.visible === true, 'ytdl-cut menu visibility updates to true');
+  const state = await bg.handlers.message({ type: 'ytdl-get-extension-state' });
+  assert.equal(state.ui_mode, 'advanced');
+  assert.equal(state.show_cut_button, true);
+
+  // 2. Content script syncs Cut button visibility and opens graphical Advanced Audio/Video format picker.
+  const sampleFormats = [
+    { format_id: '251', ext: 'webm', kind: 'audio_only', acodec: 'opus', abr: 160, asr: 48000, audio_channels: 2, filesize: 3145728, format_note: 'medium' },
+    { format_id: '140', ext: 'm4a', kind: 'audio_only', acodec: 'mp4a.40.2', abr: 128, asr: 44100, audio_channels: 2, filesize: 2097152, format_note: 'medium' },
+    { format_id: '313', ext: 'webm', kind: 'video_only', vcodec: 'vp9', resolution: '3840x2160', height: 2160, fps: 60, vbr: 15000, filesize: 52428800 },
+  ];
+  const fx = createContentFixture({
+    href: 'https://www.youtube.com/watch?v=adv123',
+    enableGetUrl: true,
+    sendMessage(msg) {
+      if (msg.type === 'ytdl-get-extension-state') {
+        return { ok: true, ui_mode: 'simple', show_cut_button: false };
+      }
+      if (msg.type === 'ytdl-list-formats') {
+        return { ok: true, title: 'Adv Song', formats: sampleFormats };
+      }
+      return { ok: true };
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const cutBtn = fx.document.querySelector('[data-ytdl-mode="cut"]');
+  assert.equal(cutBtn.hidden, true, 'Cut pill button hidden when show_cut_button is false');
+
+  const listener = fx.messageListeners[0];
+  listener({ type: 'ytdl-config-updated', config: { ui_mode: 'advanced', show_cut_button: true } }, {}, () => {});
+  assert.equal(cutBtn.hidden, false, 'Cut pill button shown when show_cut_button becomes true');
+
+  const audioBtn = fx.document.querySelector('[data-ytdl-mode="audio"]');
+  audioBtn.dispatchEvent({ type: 'click', target: audioBtn, bubbles: true });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const modal = fx.document.querySelector('[data-ytdl-format-modal="true"]');
+  assert.ok(modal, 'Advanced mode opens graphical stream & codec selector modal');
+
+  const convTab = modal.querySelector('[data-ytdl-fmt-tab="convert"]');
+  convTab.dispatchEvent({ type: 'click', target: convTab, bubbles: true });
+  const convFmt = modal.querySelector('[data-ytdl-conv-format="true"]');
+  convFmt.value = 'wav';
+  convFmt.dispatchEvent({ type: 'change', target: convFmt, bubbles: true });
+  const convBd = modal.querySelector('[data-ytdl-conv-bitdepth="true"]');
+  convBd.value = '24';
+  const convSr = modal.querySelector('[data-ytdl-conv-samplerate="true"]');
+  convSr.value = '48000';
+  const convCh = modal.querySelector('[data-ytdl-conv-channels="true"]');
+  convCh.value = '1';
+  const submitAudioBtn = modal.querySelector('[data-ytdl-fmt-submit="true"]');
+  submitAudioBtn.dispatchEvent({ type: 'click', target: submitAudioBtn, bubbles: true });
+
+  const audioTrigger = [...fx.sentMessages].reverse().find((m) => m.type === 'ytdl-trigger-download');
+  assert.ok(audioTrigger, 'Audio modal submits download trigger');
+  assert.equal(audioTrigger.mode, 'audio');
+  assert.equal(audioTrigger.convertFormat, 'wav');
+  assert.equal(audioTrigger.convertBitDepth, '24');
+  assert.equal(audioTrigger.convertSampleRate, 48000);
+  assert.equal(audioTrigger.convertChannels, 1);
+
+  // Test Video graphical picker with custom stream + container.
+  const videoBtn = fx.document.querySelector('[data-ytdl-mode="video"]');
+  videoBtn.dispatchEvent({ type: 'click', target: videoBtn, bubbles: true });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const vModal = fx.document.querySelector('[data-ytdl-format-modal="true"]');
+  assert.ok(vModal, 'Advanced video opens format modal');
+  const vRadios = vModal.querySelectorAll('[name="ytdl-video-stream"]');
+  const radio313 = vRadios.find((r) => r.value === '313');
+  assert.ok(radio313, 'Video modal lists 2160p stream 313');
+  radio313.checked = true;
+  radio313.dispatchEvent({ type: 'change', target: radio313, bubbles: true });
+  const vAudioSel = vModal.querySelector('[data-ytdl-vid-audio="true"]');
+  vAudioSel.value = '251';
+  vAudioSel.dispatchEvent({ type: 'change', target: vAudioSel, bubbles: true });
+  const vContainerSel = vModal.querySelector('[data-ytdl-vid-container="true"]');
+  vContainerSel.value = 'mp4';
+  const submitVideoBtn = vModal.querySelector('[data-ytdl-fmt-submit="true"]');
+  submitVideoBtn.dispatchEvent({ type: 'click', target: submitVideoBtn, bubbles: true });
+
+  const videoTrigger = [...fx.sentMessages].reverse().find((m) => m.type === 'ytdl-trigger-download');
+  assert.equal(videoTrigger.mode, 'video');
+  assert.equal(videoTrigger.formatSelector, '313+251/best');
+  assert.equal(videoTrigger.videoContainer, 'mp4');
+}
+
 async function main() {
   testManifest();
   testReadmeBrandAndSetupGuidance();
@@ -2010,6 +2318,7 @@ async function main() {
   testContentPlaylistCardsAndWatchPrompt();
   await testContentGestureState();
   testContentPillMountsOnce();
+  testModernPlaylistLockupGraphicalSelection();
   testPopup();
   await testPopupUpdateNote();
   await testPopupAudioFormatAndRsgainGuard();
@@ -2018,6 +2327,8 @@ async function main() {
   await testPopupVerboseOutputToggleDefaultsOffAndPersists();
   await testPopupNormalizesInvalidLongAudioMinutesInBatchedSaves();
   await testPopupVersionBadgeAndThreads();
+  await testPopupSimpleAdvancedDedicatedVideosAndShowCut();
+  await testCutButtonVisibilityAndAdvancedFormatPicker();
   testChannelRedirectHiddenSpaAndPlaylistTarget();
   testSignScript();
   testBuildScript();

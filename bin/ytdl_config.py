@@ -15,7 +15,23 @@ ALT_FRESH_DOWNLOAD_DIR = "~/Downloads/Youtube"
 SUPPORTED_AUDIO_FORMATS = ("best", "opus", "mp3", "m4a", "ogg", "flac")
 SUPPORTED_MP3_QUALITIES = ("V0", "320k", "V2", "V5")
 SUPPORTED_VIDEO_QUALITIES = ("best", "2160", "1440", "1080", "720", "480")
+SUPPORTED_VIDEO_CODECS = ("auto", "av1", "vp9", "h265", "h264", "vp8")
+SUPPORTED_UI_MODES = ("simple", "advanced")
 LEGACY_MP3_QUALITY_ALIASES = {"128k": "V5"}
+LEGACY_VIDEO_CODEC_ALIASES = {"av01": "av1", "hevc": "h265", "avc": "h264", "avc1": "h264"}
+
+
+def _validate_video_codec(value: Any) -> str:
+    """Validate and normalize the preferred video codec hierarchy override."""
+    if value is None or value == "":
+        return "auto"
+    if not isinstance(value, str):
+        raise TypeError("video_codec must be a string")
+    text = value.strip().lower()
+    text = LEGACY_VIDEO_CODEC_ALIASES.get(text, text)
+    if text not in SUPPORTED_VIDEO_CODECS:
+        raise ValueError(f"video_codec must be one of {SUPPORTED_VIDEO_CODECS}")
+    return text
 
 
 def _validate_video_quality(value: Any) -> str:
@@ -324,6 +340,23 @@ def load_config(
             validated_quality = "best"
         if validated_quality != "best":
             config["video_quality"] = validated_quality
+    raw_video_codec = stored.get("video_codec")
+    if raw_video_codec is not None:
+        try:
+            validated_codec = _validate_video_codec(raw_video_codec)
+        except (TypeError, ValueError):
+            validated_codec = "auto"
+        if validated_codec != "auto":
+            config["video_codec"] = validated_codec
+    ui_mode = stored.get("ui_mode")
+    if isinstance(ui_mode, str) and ui_mode in SUPPORTED_UI_MODES and ui_mode != "simple":
+        config["ui_mode"] = ui_mode
+    show_cut_button = stored.get("show_cut_button")
+    if show_cut_button is True:
+        config["show_cut_button"] = True
+    video_dir_enabled = stored.get("video_dir_enabled")
+    if isinstance(video_dir_enabled, bool):
+        config["video_dir_enabled"] = video_dir_enabled
     config["download_dir"] = _normalize_legacy_default(
         config["download_dir"], "audio", env, platform_name
     )
@@ -411,6 +444,30 @@ def save_config(
         video_quality = _validate_video_quality(config["video_quality"])
         if video_quality != "best":
             normalized["video_quality"] = video_quality
+    if "video_codec" in config:
+        video_codec = _validate_video_codec(config["video_codec"])
+        if video_codec != "auto":
+            normalized["video_codec"] = video_codec
+    if "ui_mode" in config:
+        value = config["ui_mode"]
+        if not isinstance(value, str):
+            raise TypeError("ui_mode must be a string")
+        normalized_ui = value.strip().lower()
+        if normalized_ui not in SUPPORTED_UI_MODES:
+            raise ValueError(f"ui_mode must be one of {SUPPORTED_UI_MODES}")
+        if normalized_ui != "simple":
+            normalized["ui_mode"] = normalized_ui
+    if "show_cut_button" in config:
+        value = config["show_cut_button"]
+        if not isinstance(value, bool):
+            raise TypeError("show_cut_button must be a bool")
+        if value:
+            normalized["show_cut_button"] = True
+    if "video_dir_enabled" in config:
+        value = config["video_dir_enabled"]
+        if not isinstance(value, bool):
+            raise TypeError("video_dir_enabled must be a bool")
+        normalized["video_dir_enabled"] = value
 
     destination = config_path(env, platform_name)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -456,7 +513,9 @@ def effective_video_download_dir(
     env: Mapping[str, str] | None = None,
     platform_name: str | None = None,
 ) -> str | None:
-    """Resolve the video override, or use yt-dlp's configured paths when selected."""
+    """Resolve the video override, or fall back to main/yt-dlp paths when disabled."""
+    if config.get("video_dir_enabled") is False:
+        return effective_download_dir(config, env, platform_name)
     download_dir = config.get("video_download_dir", DEFAULT_VIDEO_DOWNLOAD_DIR)
     if download_dir is not None:
         download_dir = _normalize_legacy_default(

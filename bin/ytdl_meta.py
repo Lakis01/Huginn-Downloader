@@ -936,7 +936,7 @@ def _strip_language_tags_from_audio(audio, suffix):
                 removed = True
         return removed
 
-    if suffix == ".mp3":
+    if suffix in {".mp3", ".wav", ".aiff", ".aif"}:
         tags = audio.tags
         if tags is None:
             return False
@@ -985,6 +985,14 @@ def strip_language_tags(filepath: str) -> None:
         from mutagen.mp3 import MP3
 
         audio = MP3(filepath)
+    elif suffix == ".wav":
+        from mutagen.wave import WAVE
+
+        audio = WAVE(filepath)
+    elif suffix in {".aiff", ".aif"}:
+        from mutagen.aiff import AIFF
+
+        audio = AIFF(filepath)
     elif suffix in {".m4a", ".mp4", ".m4b"}:
         from mutagen.mp4 import MP4
 
@@ -1004,7 +1012,7 @@ def tag_audio_file(filepath, meta, thumbnail_path=None, prefer_webp=None) -> Non
     cover = None
     if thumbnail_path:
         if prefer_webp is None:
-            prefer_webp = suffix in {".opus", ".ogg", ".mp3", ".flac"}
+            prefer_webp = suffix in {".opus", ".ogg", ".mp3", ".flac", ".wav", ".aiff", ".aif"}
         cover = _cover_image_bytes(
             thumbnail_path,
             bool((meta or {}).get("is_tagged")),
@@ -1049,6 +1057,18 @@ def tag_audio_file(filepath, meta, thumbnail_path=None, prefer_webp=None) -> Non
         from mutagen.mp3 import MP3
 
         audio = MP3(filepath)
+        _tag_id3_frames(audio, meta or {}, cover)
+        audio.save()
+    elif suffix == ".wav":
+        from mutagen.wave import WAVE
+
+        audio = WAVE(filepath)
+        _tag_id3_frames(audio, meta or {}, cover)
+        audio.save()
+    elif suffix in {".aiff", ".aif"}:
+        from mutagen.aiff import AIFF
+
+        audio = AIFF(filepath)
         _tag_id3_frames(audio, meta or {}, cover)
         audio.save()
     else:

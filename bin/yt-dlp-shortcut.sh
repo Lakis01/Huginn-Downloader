@@ -34,6 +34,8 @@ usage() {
 }
 
 PLAYLIST_ARGS=()
+WRAPPER_ARGS=()
+FMT_SELECTOR_RE='^[]A-Za-z0-9_+./:<=>^,*\[-]+$'
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -60,6 +62,125 @@ while [[ $# -gt 0 ]]; do
                 exit 2
             fi
             PLAYLIST_ARGS+=(--playlist-items "$2")
+            shift 2
+            ;;
+        --format-selector=*)
+            val=${1#*=}
+            if [[ -z $val || $val == -* || ! $val =~ $FMT_SELECTOR_RE ]]; then
+                printf 'Invalid format selector: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--format-selector "$val")
+            shift
+            ;;
+        --format-selector)
+            if [[ $# -lt 2 || -z $2 || $2 == -* || ! $2 =~ $FMT_SELECTOR_RE ]]; then
+                printf 'Invalid format selector.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--format-selector "$2")
+            shift 2
+            ;;
+        --convert-format=*)
+            val=${1#*=}
+            if [[ ! $val =~ ^(native|mp3|flac|wav|alac|aiff|opus|m4a|ogg|ac3)$ ]]; then
+                printf 'Invalid convert format: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-format "$val")
+            shift
+            ;;
+        --convert-format)
+            if [[ $# -lt 2 || ! $2 =~ ^(native|mp3|flac|wav|alac|aiff|opus|m4a|ogg|ac3)$ ]]; then
+                printf 'Invalid convert format.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-format "$2")
+            shift 2
+            ;;
+        --convert-bitrate=*)
+            val=${1#*=}
+            if [[ ! $val =~ ^(V0|V2|V5|[0-9]{2,4}k)$ ]]; then
+                printf 'Invalid convert bitrate: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-bitrate "$val")
+            shift
+            ;;
+        --convert-bitrate)
+            if [[ $# -lt 2 || ! $2 =~ ^(V0|V2|V5|[0-9]{2,4}k)$ ]]; then
+                printf 'Invalid convert bitrate.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-bitrate "$2")
+            shift 2
+            ;;
+        --convert-sample-rate=*)
+            val=${1#*=}
+            if [[ ! $val =~ ^(44100|48000|96000)$ ]]; then
+                printf 'Invalid sample rate: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-sample-rate "$val")
+            shift
+            ;;
+        --convert-sample-rate)
+            if [[ $# -lt 2 || ! $2 =~ ^(44100|48000|96000)$ ]]; then
+                printf 'Invalid sample rate.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-sample-rate "$2")
+            shift 2
+            ;;
+        --convert-channels=*)
+            val=${1#*=}
+            if [[ ! $val =~ ^[12]$ ]]; then
+                printf 'Invalid channels value: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-channels "$val")
+            shift
+            ;;
+        --convert-channels)
+            if [[ $# -lt 2 || ! $2 =~ ^[12]$ ]]; then
+                printf 'Invalid channels value.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-channels "$2")
+            shift 2
+            ;;
+        --convert-bit-depth=*)
+            val=${1#*=}
+            if [[ ! $val =~ ^(16|24|32f)$ ]]; then
+                printf 'Invalid bit depth: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-bit-depth "$val")
+            shift
+            ;;
+        --convert-bit-depth)
+            if [[ $# -lt 2 || ! $2 =~ ^(16|24|32f)$ ]]; then
+                printf 'Invalid bit depth.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--convert-bit-depth "$2")
+            shift 2
+            ;;
+        --video-container=*)
+            val=${1#*=}
+            if [[ ! $val =~ ^(mkv|mp4|webm)$ ]]; then
+                printf 'Invalid video container: %s\n' "$val" >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--video-container "$val")
+            shift
+            ;;
+        --video-container)
+            if [[ $# -lt 2 || ! $2 =~ ^(mkv|mp4|webm)$ ]]; then
+                printf 'Invalid video container.\n' >&2
+                exit 2
+            fi
+            WRAPPER_ARGS+=(--video-container "$2")
             shift 2
             ;;
         *)
@@ -319,13 +440,13 @@ fi
 
 case ${terminal_name##*/} in
     konsole|tilix|alacritty|kitty|xterm|x-terminal-emulator)
-        exec "$terminal_name" -e "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} "$MODE" "$URL"
+        exec "$terminal_name" -e "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} ${WRAPPER_ARGS[@]+"${WRAPPER_ARGS[@]}"} "$MODE" "$URL"
         ;;
     xfce4-terminal)
-        exec "$terminal_name" -x "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} "$MODE" "$URL"
+        exec "$terminal_name" -x "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} ${WRAPPER_ARGS[@]+"${WRAPPER_ARGS[@]}"} "$MODE" "$URL"
         ;;
     ptyxis|kgx|gnome-terminal|mate-terminal)
-        exec "$terminal_name" -- "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} "$MODE" "$URL"
+        exec "$terminal_name" -- "$WRAPPER" --wait-keypress ${PLAYLIST_ARGS[@]+"${PLAYLIST_ARGS[@]}"} ${WRAPPER_ARGS[@]+"${WRAPPER_ARGS[@]}"} "$MODE" "$URL"
         ;;
     *)
         printf 'Unsupported terminal emulator: %s\n' "$terminal_name" >&2

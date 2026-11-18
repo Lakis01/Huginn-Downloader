@@ -452,6 +452,90 @@ class NativeHostPresenceTests(unittest.TestCase):
         check.assert_any_call(allow_network=False)
         check.assert_any_call(allow_network=True)
 
+    def test_list_formats_action_returns_streams_and_rejects_unsafe_urls(self):
+        fake_wrapper = mock.Mock()
+        fake_wrapper.list_formats_for_url.return_value = {
+            "title": "Sample Track",
+            "id": "abc123",
+            "duration": 180,
+            "formats": [
+                {"format_id": "251", "ext": "webm", "kind": "audio_only", "acodec": "opus", "abr": 160}
+            ],
+        }
+        with mock.patch.object(HOST, "_load_wrapper_module", return_value=fake_wrapper):
+            responses = run_host([
+                {"action": "list_formats", "url": "https://www.youtube.com/watch?v=abc123"},
+                {"action": "list_formats", "url": "file:///etc/passwd"},
+            ])
+
+        self.assertTrue(responses[0]["ok"])
+        self.assertEqual(responses[0]["title"], "Sample Track")
+        self.assertEqual(responses[0]["formats"][0]["format_id"], "251")
+        self.assertFalse(responses[1]["ok"])
+        fake_wrapper.list_formats_for_url.assert_called_once_with(
+            "https://www.youtube.com/watch?v=abc123"
+        )
+
+    def test_download_forwards_advanced_format_and_ffmpeg_conversion_options(self):
+        with mock.patch.dict(os.environ, {"YTDL_SHORTCUT": "/tmp/fake-shortcut"}), mock.patch.object(
+            HOST.subprocess, "Popen"
+        ) as popen:
+            responses = run_host([
+                {
+                    "action": "download",
+                    "mode": "audio",
+                    "url": "https://www.youtube.com/watch?v=x1",
+                    "format_selector": "bestaudio/best",
+                    "convert_format": "wav",
+                    "convert_sample_rate": 48000,
+                    "convert_channels": 2,
+                    "convert_bit_depth": "24",
+                },
+                {
+                    "action": "download",
+                    "mode": "video",
+                    "url": "https://www.youtube.com/watch?v=x2",
+                    "format_selector": "313+251/best",
+                    "video_container": "mp4",
+                },
+                {
+                    "action": "download",
+                    "mode": "audio",
+                    "url": "https://www.youtube.com/watch?v=x3",
+                    "format_selector": "251;rm -rf /",
+                },
+            ])
+
+        self.assertTrue(responses[0]["ok"])
+        self.assertEqual(responses[0]["convert_format"], "wav")
+        self.assertTrue(responses[1]["ok"])
+        self.assertEqual(responses[1]["video_container"], "mp4")
+        self.assertFalse(responses[2]["ok"])
+        self.assertEqual(popen.call_count, 2)
+        self.assertEqual(
+            popen.call_args_list[0].args[0],
+            [
+                "/tmp/fake-shortcut",
+                "--format-selector", "bestaudio/best",
+                "--convert-format", "wav",
+                "--convert-sample-rate", "48000",
+                "--convert-channels", "2",
+                "--convert-bit-depth", "24",
+                "audio",
+                "https://www.youtube.com/watch?v=x1",
+            ],
+        )
+        self.assertEqual(
+            popen.call_args_list[1].args[0],
+            [
+                "/tmp/fake-shortcut",
+                "--format-selector", "313+251/best",
+                "--video-container", "mp4",
+                "video",
+                "https://www.youtube.com/watch?v=x2",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
