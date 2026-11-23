@@ -38,7 +38,7 @@ function testManifest() {
   assert.equal(manifest.browser_specific_settings.gecko.id, 'huginn-downloader@lakis01.github.io');
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, '115.0');
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, { required: ['none'] });
-  assert.equal(manifest.version, '2.5.9', 'manifest version is 2.5.9');
+  assert.equal(manifest.version, '2.5.10', 'manifest version is 2.5.10');
   assert.deepEqual(manifest.browser_action.default_icon, {
     16: 'icons/huginn-logo.svg',
     32: 'icons/huginn-logo.svg',
@@ -79,7 +79,7 @@ function testReadmeBrandAndSetupGuidance() {
     assert.ok(fs.existsSync(path.join(ROOT, shot)), `${shot} exists on disk`);
   }
   assert.ok(!readme.includes('predates the v2.5.1 rebrand'), 'stale pre-rebrand screenshot disclaimer is removed');
-  assert.ok(readme.includes('huginn-companion_2.5.9_all.deb'), 'README points Linux package examples to 2.5.9');
+  assert.ok(readme.includes('huginn-companion_2.5.10_all.deb'), 'README points Linux package examples to 2.5.10');
   assert.ok(
     normalizedReadme.includes('in parallel') && normalizedReadme.includes('without waiting for'),
     'README explains that multiple downloads can run in parallel without waiting'
@@ -1028,7 +1028,7 @@ function createPopupFixture(pingResponse) {
         }
         return pingResponse;
       },
-      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.9' }),
+      getManifest: () => ({ version: pingResponse._manifestVersion || '2.5.10' }),
     },
   };
   const context = {
@@ -1114,7 +1114,7 @@ async function testPopupUpdateNote() {
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(fx.elements.get('statusText').textContent, 'Not connected');
     assert.equal(fx.elements.get('companionStateText').textContent, 'Not found');
-    assert.equal(fx.elements.get('extensionVersionText').textContent, '2.5.9');
+    assert.equal(fx.elements.get('extensionVersionText').textContent, '2.5.10');
     assert.equal(fx.elements.get('depsLine').hidden, true, 'tool chips hidden without a companion');
   }
 }
@@ -1855,7 +1855,7 @@ async function testPopupVersionBadgeAndThreads() {
   const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const fx = createPopupFixture({
     ok: true,
-    version: '2.5.9',
+    version: '2.5.10',
     cpu_threads: 12,
     recommended_threads: 10,
     effective_threads: 10,
@@ -1873,8 +1873,8 @@ async function testPopupVersionBadgeAndThreads() {
   assert.equal(fx.elements.get('ytdlpVersionLine').hidden, false);
   assert.equal(fx.elements.get('ytdlpVersionText').textContent, '2026.11.01');
   assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Up to date');
-  assert.equal(fx.elements.get('extensionVersionText').textContent, '2.5.9', 'extension version has its own status cell');
-  assert.equal(fx.elements.get('companionVersionText').textContent, '2.5.9', 'companion version has its own status cell');
+  assert.equal(fx.elements.get('extensionVersionText').textContent, '2.5.10', 'extension version has its own status cell');
+  assert.equal(fx.elements.get('companionVersionText').textContent, '2.5.10', 'companion version has its own status cell');
   assert.equal(fx.elements.get('companionStateText').textContent, 'Connected');
   assert.equal(fx.elements.get('extensionStateText').textContent, 'In sync');
   assert.equal(fx.elements.get('depFfmpeg').textContent, 'FFmpeg');
@@ -2227,7 +2227,7 @@ async function testPopupSimpleAdvancedDedicatedVideosAndShowCut() {
   }
   const fx = createPopupFixture({
     ok: true,
-    version: '2.5.9',
+    version: '2.5.10',
     config: { audio_format: 'best', auto_tag: true, rsgain: false },
     deps: { yt_dlp: true, ffmpeg: true, rsgain: true },
     yt_dlp_status: { outdated: false },
