@@ -56,9 +56,163 @@ function queryParam(name) {
 function setVisible(connected) {
   $('connectedView').hidden = !connected;
   $('setupView').hidden = connected;
-  const dot = $('statusDot');
-  dot.classList.toggle('ok', connected);
-  dot.classList.toggle('bad', !connected);
+  if ($('modeSwitch')) $('modeSwitch').hidden = !connected;
+}
+
+function setState(el, state) {
+  if (el && typeof el.setAttribute === 'function') el.setAttribute('data-state', state);
+}
+
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function setTitle(el, title) {
+  if (!el || typeof el.setAttribute !== 'function') return;
+  if (title) el.setAttribute('title', title);
+  else if (typeof el.removeAttribute === 'function') el.removeAttribute('title');
+}
+
+// Numeric dotted-version compare: -1 when a < b, 0 when equal, 1 when a > b.
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const pb = String(b).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+// Last known component state, so a late live yt-dlp check can re-derive
+// the overall health pill without another ping.
+const statusModel = {
+  connected: null,
+  companionVersion: null,
+  deps: null,
+  ytdlp: null,
+};
+
+function renderHealth() {
+  const pill = $('healthPill');
+  if (statusModel.connected === null) {
+    setState(pill, 'pending');
+    setText('statusText', 'Checking...');
+    setTitle(pill, 'Contacting the local companion');
+    return;
+  }
+  if (!statusModel.connected) {
+    setState(pill, 'bad');
+    setText('statusText', 'Not connected');
+    setTitle(pill, 'The local companion did not answer');
+    return;
+  }
+  const issues = [];
+  const deps = statusModel.deps || {};
+  const missing = [];
+  if (deps.yt_dlp === false) missing.push('yt-dlp');
+  if (deps.ffmpeg === false) missing.push('FFmpeg');
+  if (missing.length) issues.push({ label: 'Missing tools', detail: `Not found: ${missing.join(', ')}` });
+  const ytdlp = statusModel.ytdlp;
+  if (ytdlp && ytdlp.outdated) issues.push({ label: 'Update yt-dlp', detail: 'A newer yt-dlp release is available' });
+  const extensionVersion = getExtensionVersion(null);
+  if (extensionVersion && statusModel.companionVersion &&
+      compareVersions(extensionVersion, statusModel.companionVersion) !== 0) {
+    issues.push({ label: 'Version mismatch', detail: 'Extension and companion versions differ' });
+  }
+  if (issues.length) {
+    setState(pill, 'warn');
+    setText('statusText', issues[0].label);
+    setTitle(pill, issues.map((issue) => issue.detail).join('; '));
+  } else {
+    setState(pill, 'ok');
+    setText('statusText', 'Ready');
+    setTitle(pill, 'Companion connected, tools found, yt-dlp current');
+  }
+}
+
+function renderComponents() {
+  const extensionVersion = getExtensionVersion(null);
+  setText('extensionVersionText', extensionVersion || 'unknown');
+  const extensionCell = $('extensionCell');
+  const companionCell = $('companionCell');
+
+  if (statusModel.connected === null) {
+    setState(companionCell, 'pending');
+    setText('companionStateText', 'Checking');
+    setState(extensionCell, 'neutral');
+    setText('extensionStateText', 'Installed');
+    setTitle(extensionCell, '');
+    return;
+  }
+  if (!statusModel.connected) {
+    setState(companionCell, 'bad');
+    setText('companionVersionText', '\u2013');
+    setText('companionStateText', 'Not found');
+    setState(extensionCell, 'neutral');
+    setText('extensionStateText', 'Installed');
+    setTitle(extensionCell, '');
+    return;
+  }
+
+  const companionVersion = statusModel.companionVersion;
+  setState(companionCell, 'ok');
+  setText('companionVersionText', companionVersion || 'unknown');
+  setText('companionStateText', 'Connected');
+
+  if (!extensionVersion || !companionVersion) {
+    setState(extensionCell, 'neutral');
+    setText('extensionStateText', 'Installed');
+    setTitle(extensionCell, '');
+    return;
+  }
+  const order = compareVersions(extensionVersion, companionVersion);
+  if (order === 0) {
+    setState(extensionCell, 'ok');
+    setText('extensionStateText', 'In sync');
+    setTitle(extensionCell, '');
+  } else {
+    setState(extensionCell, 'warn');
+    setText('extensionStateText', order > 0 ? 'Companion older' : 'Extension older');
+    setTitle(
+      extensionCell,
+      order > 0
+        ? 'Update the companion (re-run the installer or upgrade the package).'
+        : 'Update the browser extension to match the companion.',
+    );
+  }
+}
+
+function renderDeps(deps) {
+  const row = $('depsLine');
+  if (!row) return;
+  if (!deps) {
+    row.hidden = true;
+    return;
+  }
+  row.hidden = false;
+  const tools = [
+    ['depFfmpeg', 'ffmpeg', 'FFmpeg', 'bad', 'FFmpeg missing', 'Required for merging, conversion and cover art'],
+    ['depRsgain', 'rsgain', 'rsgain', 'off', 'rsgain not installed', 'Optional: only needed for ReplayGain'],
+  ];
+  for (const [id, key, label, missingState, missingLabel, missingTitle] of tools) {
+    const el = $(id);
+    if (!el) continue;
+    if (deps[key] === true) {
+      setState(el, 'ok');
+      el.textContent = label;
+      setTitle(el, `${label} found`);
+    } else if (deps[key] === false) {
+      setState(el, missingState);
+      el.textContent = missingLabel;
+      setTitle(el, missingTitle);
+    } else {
+      setState(el, 'pending');
+      el.textContent = label;
+      setTitle(el, '');
+    }
+  }
 }
 
 function expandHome(value) {
@@ -227,31 +381,41 @@ function pushConfig() {
 }
 
 function renderUpdateNote(status) {
-  const versionLine = $('ytdlpVersionLine');
+  statusModel.ytdlp = status || null;
+  const cell = $('ytdlpVersionLine');
   const versionText = $('ytdlpVersionText');
   const versionBadge = $('ytdlpVersionBadge');
-  if (versionLine) {
-    if (status && status.installed) {
-      versionLine.hidden = false;
-      if (versionText) {
-        versionText.textContent = `yt-dlp ${status.installed}`;
-      }
-      if (status.outdated && status.latest && typeof versionLine.setAttribute === 'function') {
-        versionLine.setAttribute('title', `Installed ${status.installed}, latest ${status.latest}`);
-      }
-      if (versionBadge) {
-        versionBadge.hidden = false;
-        versionBadge.textContent = status.outdated ? 'Outdated' : 'Up to date';
-        if (versionBadge.classList) {
-          versionBadge.classList.toggle('bad', Boolean(status.outdated));
-          versionBadge.classList.toggle('ok', !status.outdated);
-        }
-      }
+  if (status && status.installed) {
+    if (versionText) versionText.textContent = status.installed;
+    if (status.outdated) {
+      setState(cell, 'warn');
+      if (versionBadge) versionBadge.textContent = 'Update available';
+      setTitle(cell, status.latest
+        ? `Installed ${status.installed}, latest ${status.latest}`
+        : `Installed ${status.installed}${typeof status.age_days === 'number' ? `, ${status.age_days} days old` : ''}`);
     } else {
-      versionLine.hidden = true;
-      if (versionBadge) versionBadge.hidden = true;
+      setState(cell, 'ok');
+      if (versionBadge) versionBadge.textContent = 'Up to date';
+      setTitle(cell, status.latest
+        ? `Latest release ${status.latest}`
+        : 'Recent release (latest version not checked online)');
     }
+  } else {
+    if (versionText) versionText.textContent = '\u2013';
+    const missing = statusModel.deps && statusModel.deps.yt_dlp === false;
+    if (statusModel.connected === null) {
+      setState(cell, 'pending');
+      if (versionBadge) versionBadge.textContent = 'Checking';
+    } else if (missing) {
+      setState(cell, 'bad');
+      if (versionBadge) versionBadge.textContent = 'Not found';
+    } else {
+      setState(cell, 'neutral');
+      if (versionBadge) versionBadge.textContent = statusModel.connected ? 'Unknown' : 'Needs companion';
+    }
+    setTitle(cell, '');
   }
+  renderHealth();
 
   const note = $('ytdlpUpdateNote');
   if (!note) return;
@@ -266,15 +430,15 @@ function renderUpdateNote(status) {
   const hint = status.update_hint || 'yt-dlp -U';
   let summary;
   if (latest) {
-    summary = `Installed ${installed}, latest ${latest}.`;
+    summary = `yt-dlp ${latest} is available (installed ${installed}). Update with:`;
   } else if (typeof age === 'number') {
-    summary = `Installed ${installed}, ${age} days old.`;
+    summary = `Installed yt-dlp ${installed} is ${age} days old. Update with:`;
   } else {
-    summary = `Installed ${installed}.`;
+    summary = `Installed yt-dlp ${installed} is out of date. Update with:`;
   }
   const textEl = $('ytdlpUpdateText');
-  if (textEl) textEl.textContent = `yt-dlp is out of date. ${summary}`;
-  else note.textContent = `yt-dlp is out of date. ${summary} Update with: ${hint}`;
+  if (textEl) textEl.textContent = summary;
+  else note.textContent = `${summary} ${hint}`;
   const hintEl = $('ytdlpUpdateHint');
   if (hintEl) hintEl.textContent = hint;
 }
@@ -323,10 +487,11 @@ function renderConnected(response) {
   setVisible(true);
   updateDownloadPresets(response);
   lastDeps = response.deps || null;
-  const companionVersion = response.version || 'unknown';
-  const extensionVersion = getExtensionVersion(companionVersion);
-  $('statusText').textContent =
-    `Connected (extension ${extensionVersion}, companion ${companionVersion})`;
+  statusModel.connected = true;
+  statusModel.companionVersion = response.version || null;
+  statusModel.deps = response.deps || null;
+  renderComponents();
+  renderDeps(statusModel.deps);
   const config = response.config || {};
   applyUiMode(config.ui_mode);
   notifyExtensionConfig(config);
@@ -377,13 +542,6 @@ function renderConnected(response) {
   $('effectiveVideoDir').textContent = effectiveVideo
     ? `Saving videos to ${effectiveVideo}${response.ytdlp_config_exists && config.video_download_dir == null ? '' : ' (project video folder)'}`
     : 'Video folder follows your yt-dlp config.';
-  const deps = response.deps || {};
-  const missing = Object.entries(deps)
-    .filter(([, ok]) => !ok)
-    .map(([name]) => name);
-  $('depsLine').textContent = missing.length
-    ? `Missing tools: ${missing.join(', ')}`
-    : 'Tools ready: yt-dlp, ffmpeg, rsgain.';
   renderUpdateNote(response.yt_dlp_status);
   if (response.yt_dlp_status && response.yt_dlp_status.installed && !response.yt_dlp_status.latest) {
     refreshLiveYtdlpUpdate();
@@ -392,17 +550,24 @@ function renderConnected(response) {
 
 function renderDisconnected() {
   setVisible(false);
-  const extensionVersion = getExtensionVersion(null);
-  $('statusText').textContent = extensionVersion
-    ? `Companion not connected (extension ${extensionVersion})`
-    : 'Companion not connected';
+  statusModel.connected = false;
+  statusModel.companionVersion = null;
+  statusModel.deps = null;
+  renderComponents();
+  renderDeps(null);
   if ($('installCmd')) $('installCmd').textContent = INSTALL_CMD;
   renderUpdateNote(null);
 }
 
+function renderChecking() {
+  statusModel.connected = null;
+  renderComponents();
+  renderUpdateNote(statusModel.ytdlp);
+}
+
 async function refresh() {
   const api = ext();
-  $('statusText').textContent = 'Checking companion connection...';
+  renderChecking();
   if (!api) {
     renderDisconnected();
     return;
@@ -450,23 +615,44 @@ function currentVideoFolderValue() {
   return expandHome(VIDEO_PRESETS[key] !== undefined ? VIDEO_PRESETS[key] : null);
 }
 
-async function copyInstallCommand() {
-  const note = $('copyNote');
+async function copyText(text, onDone) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(INSTALL_CMD);
+      await navigator.clipboard.writeText(text);
     } else {
       const area = document.createElement('textarea');
-      area.value = INSTALL_CMD;
+      area.value = text;
       document.body.appendChild(area);
       area.select();
       document.execCommand('copy');
       area.remove();
     }
-    note.textContent = 'Copied. Run it in the project folder, then retry.';
+    onDone(true);
   } catch (_error) {
-    note.textContent = 'Copy failed. Type the command above by hand.';
+    onDone(false);
   }
+}
+
+async function copyInstallCommand() {
+  const note = $('copyNote');
+  await copyText(INSTALL_CMD, (ok) => {
+    note.textContent = ok
+      ? 'Copied. Run it in the project folder, then retry.'
+      : 'Copy failed. Type the command above by hand.';
+  });
+}
+
+async function copyUpdateCommand() {
+  const button = $('ytdlpUpdateCopy');
+  const hint = $('ytdlpUpdateHint');
+  const text = hint && hint.textContent ? hint.textContent : 'yt-dlp -U';
+  await copyText(text, (ok) => {
+    if (!button) return;
+    button.textContent = ok ? 'Copied' : 'Copy failed';
+    setTimeout(() => {
+      button.textContent = 'Copy';
+    }, 1600);
+  });
 }
 
 function main() {
@@ -600,6 +786,7 @@ function main() {
   }
   $('copyBtn').addEventListener('click', copyInstallCommand);
   $('retryBtn').addEventListener('click', refresh);
+  if ($('ytdlpUpdateCopy')) $('ytdlpUpdateCopy').addEventListener('click', copyUpdateCommand);
 
   refresh();
 }

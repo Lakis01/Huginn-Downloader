@@ -445,15 +445,12 @@ function handlePillMessage(message, _sender, sendResponse) {
   return result;
 }
 
-async function setupMenus() {
-  const menus = menusApi();
-  if (!menus) return;
-  try {
-    if (menus.removeAll) await menus.removeAll();
-  } catch (_error) {
-    // Fresh install has nothing to remove; continue to creation.
-  }
-  const items = [
+// Menu lifecycle: Firefox persists non-persistent event-page menus on disk
+// per extension version and drops them on version bump. Calling create()
+// without clearing existing menus restores any missing item while leaving
+// persisted menus (and open context menus) untouched, like Play in MPV.
+function menuDefinitions() {
+  return [
     {
       id: 'ytdl-root',
       title: 'Huginn Downloader',
@@ -483,50 +480,28 @@ async function setupMenus() {
       icons: { 16: 'icons/cut.svg', 32: 'icons/cut.svg' },
     },
   ];
+}
+
+function setupMenus() {
+  const menus = menusApi();
+  if (!menus) return;
+  const api = ext();
+  // Reading lastError marks a duplicate-id failure on persisted items as handled.
+  const settle = () => {
+    if (api && api.runtime) void api.runtime.lastError;
+  };
   const supportsMenuIcons = Boolean(typeof browser !== 'undefined' && browser && browser.menus);
-  for (const item of items) {
+  for (const item of menuDefinitions()) {
     const menuItem = supportsMenuIcons
       ? item
       : (({ icons: _icons, ...rest }) => rest)(item);
     try {
-      const created = menus.create(menuItem);
-      if (created && typeof created.catch === 'function') {
-        await created.catch(async () => {
-          // A stale persisted menu can block creation; update instead.
-          try {
-            if (menus.update) await menus.update(item.id, menuItem);
-          } catch (_updateError) {
-            // Menu still stands; nothing to repair.
-          }
-        });
-      }
+      const result = menus.create(menuItem, settle);
+      if (result && typeof result.catch === 'function') result.catch(settle);
     } catch (_error) {
-      try {
-        if (menus.update) await menus.update(item.id, menuItem);
-      } catch (_updateError) {
-        // Menu still stands; nothing to repair.
-      }
+      // Duplicate id from a persisted menu: the existing item stays untouched.
     }
   }
-}
-
-function handleTabUpdated(tabId, changeInfo, tab) {
-  if (!changeInfo || changeInfo.status !== 'complete') return;
-  const tabUrl = (tab && tab.url) || changeInfo.url || '';
-  if (!isYouTubeUrl(tabUrl)) return;
-  const api = ext();
-  if (!api || !api.tabs || typeof api.tabs.sendMessage !== 'function') return;
-  hydrateConfigFromHost().then((cfg) => {
-    try {
-      const res = api.tabs.sendMessage(tabId, {
-        type: 'ytdl-config-updated',
-        config: { ...cfg },
-      });
-      if (res && typeof res.catch === 'function') res.catch(() => {});
-    } catch (_error) {
-      // Tab may not have content script ready yet.
-    }
-  });
 }
 
 function attachListeners() {
@@ -540,45 +515,10 @@ function attachListeners() {
   if (api && api.runtime && api.runtime.onMessage) {
     api.runtime.onMessage.addListener(handlePillMessage);
   }
-  if (api && api.tabs && api.tabs.onUpdated) {
-    api.tabs.onUpdated.addListener(handleTabUpdated);
-  }
-}
-
-async function reinjectOpenYouTubeTabs() {
-  const api = ext();
-  if (!api || !api.tabs || typeof api.tabs.query !== 'function') return;
-  let tabs;
-  try {
-    tabs = await api.tabs.query({ url: ['*://*.youtube.com/*', '*://youtube.com/*'] });
-  } catch (_error) {
-    return;
-  }
-  if (!Array.isArray(tabs)) return;
-  for (const tab of tabs) {
-    if (!tab || !tab.id) continue;
-    if (tab.url && !isYouTubeUrl(tab.url)) continue;
-    await ensureContentScriptLoaded(tab.id).catch(() => false);
-    try {
-      const res = api.tabs.sendMessage(tab.id, {
-        type: 'ytdl-config-updated',
-        config: { ...currentConfig },
-      });
-      if (res && typeof res.catch === 'function') res.catch(() => {});
-    } catch (_error) {
-      // Ignore unreachable tabs.
-    }
-  }
 }
 
 async function handleInstalledOrStartup() {
-  await setupMenus();
-  await hydrateConfigFromHost();
-  await reinjectOpenYouTubeTabs();
-}
-
-async function handleStartupOnly() {
-  await setupMenus();
+  setupMenus();
   await hydrateConfigFromHost();
 }
 
@@ -591,7 +531,7 @@ function attachHooks() {
     api.runtime.onInstalled.addListener(handleInstalledOrStartup);
   }
   if (api.runtime.onStartup) {
-    api.runtime.onStartup.addListener(handleStartupOnly);
+    api.runtime.onStartup.addListener(handleInstalledOrStartup);
   }
 }
 

@@ -10,91 +10,121 @@
   <header class="app-header">
     <div class="brand-row">
       <img src="icons/huginn-logo.svg" alt="" class="brand-logo" width="28" height="28">
-      <div class="brand-text">
-        <div class="title-row">
-          <h1>Huginn Downloader</h1>
-          <span class="ytdlp-chip" id="ytdlpVersionLine" hidden>
-            <span id="ytdlpVersionText"></span>
-            <span class="badge" id="ytdlpVersionBadge" hidden></span>
-          </span>
-        </div>
-        <p class="status" role="status">
-          <span class="dot" id="statusDot" aria-hidden="true"></span>
-          <span id="statusText">Checking companion connection...</span>
-        </p>
+      <h1>Huginn Downloader</h1>
+      <p class="health" id="healthPill" data-state="pending" role="status">
+        <span class="dot" id="statusDot" aria-hidden="true"></span>
+        <span id="statusText">Checking...</span>
+      </p>
+      <div class="mode-switch" id="modeSwitch" role="group" aria-label="Interface mode" hidden>
+        <button type="button" id="uiModeSimple" class="mode-btn is-active" data-mode="simple" aria-pressed="true">Simple</button>
+        <button type="button" id="uiModeAdvanced" class="mode-btn" data-mode="advanced" aria-pressed="false">Advanced</button>
       </div>
     </div>
+
+    <section class="status-card" aria-label="Component status">
+      <dl class="status-grid">
+        <div class="status-cell" id="ytdlpVersionLine" data-state="pending">
+          <dt>yt-dlp</dt>
+          <dd class="status-value" id="ytdlpVersionText">&ndash;</dd>
+          <dd class="status-state" id="ytdlpVersionBadge">Checking</dd>
+        </div>
+        <div class="status-cell" id="extensionCell" data-state="neutral">
+          <dt>Extension</dt>
+          <dd class="status-value" id="extensionVersionText">&ndash;</dd>
+          <dd class="status-state" id="extensionStateText">Installed</dd>
+        </div>
+        <div class="status-cell" id="companionCell" data-state="pending">
+          <dt>Companion</dt>
+          <dd class="status-value" id="companionVersionText">&ndash;</dd>
+          <dd class="status-state" id="companionStateText">Checking</dd>
+        </div>
+      </dl>
+
+      <div class="update-note" id="ytdlpUpdateNote" hidden>
+        <p id="ytdlpUpdateText"></p>
+        <div class="cmd-row">
+          <code class="cmd" id="ytdlpUpdateHint"></code>
+          <button type="button" class="copy-btn" id="ytdlpUpdateCopy">Copy</button>
+        </div>
+      </div>
+
+      <div class="tools" id="depsLine" hidden>
+        <span class="tools-label">Tools</span>
+        <span class="tool" id="depFfmpeg" data-state="pending">FFmpeg</span>
+        <span class="tool" id="depRsgain" data-state="pending">rsgain</span>
+      </div>
+    </section>
   </header>
 
   <section id="connectedView" hidden>
-    <div class="mode-switch" role="group" aria-label="Interface mode">
-      <button type="button" id="uiModeSimple" class="mode-btn is-active" data-mode="simple" aria-pressed="true">Simple</button>
-      <button type="button" id="uiModeAdvanced" class="mode-btn" data-mode="advanced" aria-pressed="false">Advanced</button>
-    </div>
     <p class="mode-hint" id="advancedModeNote" data-advanced-only="true" hidden>
       Advanced mode opens the graphical stream, codec, and FFmpeg format picker before Audio and Video downloads.
     </p>
 
-    <div class="update-note" id="ytdlpUpdateNote" hidden>
-      <h2>yt-dlp update available</h2>
-      <p id="ytdlpUpdateText"></p>
-      <code class="cmd" id="ytdlpUpdateHint"></code>
-    </div>
-
     <div class="section">
       <div class="section-head">Format &amp; quality</div>
 
-      <label for="audioFormat" class="field-label">Audio format</label>
-      <select id="audioFormat" class="select" aria-label="Audio format">
-        <option value="best">Native (Opus / m4a)</option>
-        <option value="mp3">MP3</option>
-        <option value="m4a">M4A / AAC (transcode if not natively available)</option>
-        <option value="ogg">Ogg Vorbis</option>
-        <option value="flac">FLAC</option>
-        <option value="opus">Opus (transcode if not natively available)</option>
-      </select>
-      <div id="mp3QualityRow" class="sub-row" hidden>
-        <label for="mp3Quality" class="sub-label">MP3 quality</label>
-        <select id="mp3Quality" class="select" aria-label="MP3 quality">
-          <option value="V0">V0 (~245 kbps VBR — Recommended)</option>
-          <option value="320k">320 kbps CBR (maximum size)</option>
-          <option value="V2">V2 (~190 kbps VBR — balanced)</option>
-          <option value="V5">V5 (~130 kbps VBR — compact / speech)</option>
+      <div class="field-row">
+        <label for="audioFormat" class="field-label">Audio format</label>
+        <select id="audioFormat" class="select" aria-label="Audio format">
+          <option value="best">Native (Opus / m4a)</option>
+          <option value="mp3">MP3</option>
+          <option value="m4a">M4A / AAC (transcode if not natively available)</option>
+          <option value="ogg">Ogg Vorbis</option>
+          <option value="flac">FLAC</option>
+          <option value="opus">Opus (transcode if not natively available)</option>
         </select>
+      </div>
+      <div id="mp3QualityRow" class="sub-row" hidden>
+        <div class="field-row">
+          <label for="mp3Quality" class="sub-label">MP3 quality</label>
+          <select id="mp3Quality" class="select" aria-label="MP3 quality">
+            <option value="V0">V0 (~245 kbps VBR — Recommended)</option>
+            <option value="320k">320 kbps CBR (maximum size)</option>
+            <option value="V2">V2 (~190 kbps VBR — balanced)</option>
+            <option value="V5">V5 (~130 kbps VBR — compact / speech)</option>
+          </select>
+        </div>
       </div>
       <p class="note" id="formatNote"></p>
 
-      <label for="videoQuality" class="field-label">Default video quality</label>
-      <select id="videoQuality" class="select" aria-label="Default video quality">
-        <option value="best">Best available (unlimited)</option>
-        <option value="2160">Best, up to 4K (2160p)</option>
-        <option value="1440">Best, up to 1440p (QHD)</option>
-        <option value="1080">Best, up to 1080p (Full HD)</option>
-        <option value="720">Best, up to 720p (HD)</option>
-        <option value="480">Best, up to 480p (SD)</option>
-      </select>
+      <div class="field-row">
+        <label for="videoQuality" class="field-label">Default video quality</label>
+        <select id="videoQuality" class="select" aria-label="Default video quality">
+          <option value="best">Best available (unlimited)</option>
+          <option value="2160">Best, up to 4K (2160p)</option>
+          <option value="1440">Best, up to 1440p (QHD)</option>
+          <option value="1080">Best, up to 1080p (Full HD)</option>
+          <option value="720">Best, up to 720p (HD)</option>
+          <option value="480">Best, up to 480p (SD)</option>
+        </select>
+      </div>
       <p class="note" id="videoQualityNote"></p>
 
       <div id="videoCodecGroup" class="advanced-field" data-advanced-only="true" hidden>
-        <label for="videoCodec" class="field-label">Preferred video codec</label>
-        <select id="videoCodec" class="select" aria-label="Preferred video codec">
-          <option value="auto">Auto (best compression: AV1 &gt; VP9 &gt; H.265 &gt; H.264)</option>
-          <option value="av1">AV1 (highest compression)</option>
-          <option value="vp9">VP9 (WebM / broad support)</option>
-          <option value="h265">H.265 / HEVC (generic sites)</option>
-          <option value="h264">H.264 / AVC (maximum compatibility)</option>
-          <option value="vp8">VP8 (legacy fallback)</option>
-        </select>
+        <div class="field-row">
+          <label for="videoCodec" class="field-label">Preferred video codec</label>
+          <select id="videoCodec" class="select" aria-label="Preferred video codec">
+            <option value="auto">Auto (best compression: AV1 &gt; VP9 &gt; H.265 &gt; H.264)</option>
+            <option value="av1">AV1 (highest compression)</option>
+            <option value="vp9">VP9 (WebM / broad support)</option>
+            <option value="h265">H.265 / HEVC (generic sites)</option>
+            <option value="h264">H.264 / AVC (maximum compatibility)</option>
+            <option value="vp8">VP8 (legacy fallback)</option>
+          </select>
+        </div>
         <p class="note" id="videoCodecNote">YouTube serves AV1, VP9, and H.264; H.265 applies where provided. Max resolution overrides codec preference.</p>
       </div>
 
       <div id="channelGroup" class="advanced-field" data-advanced-only="true" hidden>
-        <label for="channelMode" class="field-label">Channels</label>
-        <select id="channelMode" class="select" aria-label="Channels">
-          <option value="stereo">Stereo</option>
-          <option value="ask">Ask each time</option>
-          <option value="mono">Mono</option>
-        </select>
+        <div class="field-row">
+          <label for="channelMode" class="field-label">Channels</label>
+          <select id="channelMode" class="select" aria-label="Channels">
+            <option value="stereo">Stereo</option>
+            <option value="ask">Ask each time</option>
+            <option value="mono">Mono</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -127,18 +157,20 @@
       </label>
       <p class="warn-note" id="rsgainMissingNote" hidden></p>
 
-      <label for="postprocessThreads" class="field-label">Post-processing threads</label>
-      <select id="postprocessThreads" class="select" aria-label="Post-processing threads">
-        <option value="0">Auto (max available - 2)</option>
-        <option value="1">1 thread (sequential)</option>
-        <option value="2">2 threads</option>
-        <option value="4">4 threads</option>
-        <option value="6">6 threads</option>
-        <option value="8">8 threads</option>
-        <option value="10">10 threads</option>
-        <option value="12">12 threads</option>
-        <option value="16">16 threads</option>
-      </select>
+      <div class="field-row">
+        <label for="postprocessThreads" class="field-label">Post-processing threads</label>
+        <select id="postprocessThreads" class="select" aria-label="Post-processing threads">
+          <option value="0">Auto (max available - 2)</option>
+          <option value="1">1 thread (sequential)</option>
+          <option value="2">2 threads</option>
+          <option value="4">4 threads</option>
+          <option value="6">6 threads</option>
+          <option value="8">8 threads</option>
+          <option value="10">10 threads</option>
+          <option value="12">12 threads</option>
+          <option value="16">16 threads</option>
+        </select>
+      </div>
       <p class="note" id="threadsNote">Runs tagging, artwork, and ReplayGain in parallel within one terminal after batch downloads.</p>
 
       <label class="toggle">
@@ -158,13 +190,15 @@
     <div class="section">
       <div class="section-head">Folders &amp; routing</div>
 
-      <label for="downloadFolder" class="field-label">Download folder</label>
-      <select id="downloadFolder" class="select" aria-label="Download folder">
-        <option value="keep">Keep yt-dlp config</option>
-        <option value="music">Music folder</option>
-        <option value="downloads">Downloads folder</option>
-        <option value="custom">Custom folder</option>
-      </select>
+      <div class="field-row">
+        <label for="downloadFolder" class="field-label">Download folder</label>
+        <select id="downloadFolder" class="select" aria-label="Download folder">
+          <option value="keep">Keep yt-dlp config</option>
+          <option value="music">Music folder</option>
+          <option value="downloads">Downloads folder</option>
+          <option value="custom">Custom folder</option>
+        </select>
+      </div>
       <input type="text" id="customDir" class="path" placeholder="/home/user/Music/Youtube" aria-label="Custom download folder" hidden>
       <p class="note" id="effectiveDir"></p>
 
@@ -174,13 +208,15 @@
         <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       </label>
       <div id="videoFolderRow" class="sub-row" hidden>
-        <label for="videoDownloadFolder" class="sub-label">Video folder</label>
-        <select id="videoDownloadFolder" class="select" aria-label="Video download folder">
-          <option value="keep">Keep yt-dlp config</option>
-          <option value="videos">Videos folder</option>
-          <option value="downloads">Downloads folder</option>
-          <option value="custom">Custom folder</option>
-        </select>
+        <div class="field-row">
+          <label for="videoDownloadFolder" class="sub-label">Video folder</label>
+          <select id="videoDownloadFolder" class="select" aria-label="Video download folder">
+            <option value="keep">Keep yt-dlp config</option>
+            <option value="videos">Videos folder</option>
+            <option value="downloads">Downloads folder</option>
+            <option value="custom">Custom folder</option>
+          </select>
+        </div>
         <input type="text" id="customVideoDir" class="path" placeholder="/home/user/Videos/Youtube" aria-label="Custom video folder" hidden>
         <p class="note" id="effectiveVideoDir"></p>
       </div>
@@ -191,15 +227,15 @@
         <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       </label>
       <div id="longAudioRow" class="sub-row" hidden>
-        <label for="longAudioMinutes" class="sub-label">Longer than (minutes)</label>
-        <input type="number" id="longAudioMinutes" class="path" min="1" step="1" value="30" aria-label="Long audio threshold in minutes">
+        <div class="field-row">
+          <label for="longAudioMinutes" class="sub-label">Longer than (minutes)</label>
+          <input type="number" id="longAudioMinutes" class="path path-num" min="1" step="1" value="30" aria-label="Long audio threshold in minutes">
+        </div>
         <label for="longAudioDir" class="sub-label">Long audio folder</label>
         <input type="text" id="longAudioDir" class="path" placeholder="~/Podcasts" aria-label="Long audio folder">
         <p class="note">Presets: ~/Podcasts or ~/Audiobooks, or type a custom path.</p>
       </div>
     </div>
-
-    <p class="deps-footer" id="depsLine"></p>
   </section>
 
   <section id="setupView" hidden>

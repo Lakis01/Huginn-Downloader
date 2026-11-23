@@ -23,6 +23,14 @@ download those programs.
    `firefox-youtube-downloader@lakis01.github.io` ID). Keep `gecko.id` constant
    once your Listed AMO store page is created so updates seamlessly go to the
    same listing.
+
+   > **ID change = new AMO add-on.** AMO binds every add-on to its GUID for
+   > life; a name change is fine, an ID change is not. The legacy add-on
+   > (dashboard slug `804876058bfd4ecea544`, versions up to 2.5.2) belongs to
+   > `firefox-youtube-downloader@lakis01.github.io`, so uploading a
+   > `huginn-downloader@lakis01.github.io` build there fails with an ID
+   > mismatch. Publish Huginn versions to the add-on that owns the new ID
+   > (created by the first 2.5.9 signing), not to the legacy page.
 4. Run the repository checks in `README.md` and build the deterministic package:
 
    ```sh
@@ -256,8 +264,9 @@ version first and include a concise changelog.
   perform downloads locally. This describes the software architecture, not a
   legal conclusion: using an external backend or presenting a frontend does
   not by itself decide copyright or anti-circumvention liability.
-- **Use the Huginn Downloader brand consistently.** The existing AMO add-on ID
-  stays unchanged so the release updates the same listing. Describe YouTube as
+- **Use the Huginn Downloader brand consistently.** Releases go to the AMO
+  add-on that owns `huginn-downloader@lakis01.github.io`; the legacy
+  `firefox-youtube-downloader@` add-on receives no further versions. Describe YouTube as
   a compatible site rather than implying affiliation with YouTube or Google.
 - **Why `--channel=unlisted` signed `.xpi`s on GitHub Releases are still
   subject to Mozilla policy.** Unlisted signing produces a Mozilla signature

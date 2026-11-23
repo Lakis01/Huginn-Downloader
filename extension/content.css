@@ -98,8 +98,9 @@ html[dark] [data-ytdl-controls] button:focus-visible {
 
 [data-ytdl-playlist-dialog] {
   margin-top: 12px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
   background: #f2f2f2;
   background: rgba(0, 0, 0, 0.05);
   color: var(--yt-spec-text-primary, #0f0f0f);
@@ -110,9 +111,22 @@ html[dark] [data-ytdl-controls] button:focus-visible {
 }
 
 html[dark] [data-ytdl-playlist-dialog] {
+  border-color: rgba(255, 255, 255, 0.12);
   background: #272727;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--yt-spec-text-primary, #f1f1f1);
+}
+
+[data-ytdl-playlist-dialog][data-ytdl-dialog-embedded="true"] {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+html[dark] [data-ytdl-playlist-dialog][data-ytdl-dialog-embedded="true"] {
+  background: transparent;
 }
 
 [data-ytdl-dialog-header] {
@@ -123,7 +137,7 @@ html[dark] [data-ytdl-playlist-dialog] {
 }
 
 [data-ytdl-dialog-title] {
-  font-weight: 500;
+  font-weight: 600;
   font-size: 14px;
 }
 
@@ -133,6 +147,21 @@ html[dark] [data-ytdl-playlist-dialog] {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+[data-ytdl-playlist-details] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+html[dark] [data-ytdl-playlist-details] {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(15, 15, 15, 0.45);
 }
 
 [data-ytdl-playlist-dialog] button {
@@ -169,21 +198,33 @@ html[dark] [data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist"] {
   color: #0f0f0f;
 }
 
+[data-ytdl-playlist-dialog] button[data-ytdl-details-toggle="true"][data-expanded="true"],
+[data-ytdl-panel-bar] button[data-ytdl-details-toggle="true"][data-expanded="true"] {
+  background: rgba(6, 95, 212, 0.14);
+  color: #065fd4;
+}
+
+html[dark] [data-ytdl-playlist-dialog] button[data-ytdl-details-toggle="true"][data-expanded="true"],
+html[dark] [data-ytdl-panel-bar] button[data-ytdl-details-toggle="true"][data-expanded="true"] {
+  background: rgba(62, 166, 255, 0.22);
+  color: #3ea6ff;
+}
+
 [data-ytdl-playlist-items] {
-  flex: 1 1 220px;
-  min-width: 180px;
+  flex: 1 1 200px;
+  min-width: 160px;
   height: 32px;
   padding: 0 10px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.9);
   color: #0f0f0f;
   font: 400 13px/18px Roboto, Arial, sans-serif;
 }
 
 html[dark] [data-ytdl-playlist-items] {
-  border-color: rgba(255, 255, 255, 0.24);
-  background: rgba(0, 0, 0, 0.35);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.45);
   color: #f1f1f1;
 }
 
@@ -204,24 +245,63 @@ html[dark] [data-ytdl-playlist-error] {
 }
 
 [data-ytdl-playlist-list] {
-  max-height: 180px;
+  max-height: 220px;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 4px;
-  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 html[dark] [data-ytdl-playlist-list] {
-  border-top-color: rgba(255, 255, 255, 0.16);
+  border-top-color: rgba(255, 255, 255, 0.12);
 }
 
 [data-ytdl-dialog-item] {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
   cursor: pointer;
+}
+
+[data-ytdl-dialog-item]:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+html[dark] [data-ytdl-dialog-item]:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-ytdl-dialog-item][data-checked="false"] {
+  opacity: 0.55;
+}
+
+[data-ytdl-item-num] {
+  flex: 0 0 auto;
+  min-width: 28px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.07);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+html[dark] [data-ytdl-item-num] {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-ytdl-item-title] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
 }
 
 [data-ytdl-side-check] {
@@ -231,6 +311,7 @@ html[dark] [data-ytdl-playlist-list] {
   justify-content: center;
   margin-inline: 8px 4px;
   padding: 4px;
+  border-radius: 8px;
   cursor: pointer;
   z-index: 2;
 }
@@ -240,6 +321,7 @@ html[dark] [data-ytdl-playlist-list] {
   width: 16px;
   height: 16px;
   margin: 0;
+  flex: 0 0 16px;
   cursor: pointer;
   accent-color: #065fd4;
 }
@@ -250,7 +332,8 @@ html[dark] [data-ytdl-dialog-item] input {
 }
 
 [data-ytdl-controls] button[hidden],
-[data-ytdl-playlist-dialog] [hidden] {
+[data-ytdl-playlist-dialog] [hidden],
+[data-ytdl-playlist-details][hidden] {
   display: none;
 }
 
@@ -272,7 +355,7 @@ html[dark] [data-ytdl-playlist-dialog][data-ytdl-dialog-floating="true"] {
 [data-ytdl-dialog-footer] {
   display: flex;
   justify-content: flex-end;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 [data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist-submit"] {
@@ -297,69 +380,91 @@ html[dark] [data-ytdl-playlist-dialog] button[data-ytdl-scope="playlist-submit"]
   position: sticky;
   top: 0;
   z-index: 3;
+  grid-column: 1 / -1;
+  flex: 1 0 100%;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: rgba(242, 242, 242, 0.97);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: #0f0f0f;
+  font: 400 12.5px/18px Roboto, Arial, sans-serif;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+
+html[dark] [data-ytdl-panel-bar] {
+  background: rgba(34, 34, 34, 0.97);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f1f1f1;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+[data-ytdl-panel-top] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+[data-ytdl-panel-actions] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
-  margin-bottom: 6px;
-  border-radius: 10px;
-  background: rgba(242, 242, 242, 0.96);
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  color: #0f0f0f;
-  font: 400 12px/16px Roboto, Arial, sans-serif;
-}
-
-html[dark] [data-ytdl-panel-bar] {
-  background: rgba(39, 39, 39, 0.96);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #f1f1f1;
 }
 
 [data-ytdl-panel-title] {
-  font-weight: 500;
-  margin-right: auto;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
-[data-ytdl-panel-bar] button {
+[data-ytdl-panel-bar] [data-ytdl-panel-actions] button {
   appearance: none;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 11px;
   border: 0;
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.08);
   color: inherit;
   font: 500 12px/16px Roboto, Arial, sans-serif;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-html[dark] [data-ytdl-panel-bar] button {
+html[dark] [data-ytdl-panel-bar] [data-ytdl-panel-actions] button {
   background: rgba(255, 255, 255, 0.14);
 }
 
-[data-ytdl-panel-bar] button:hover {
+[data-ytdl-panel-bar] [data-ytdl-panel-actions] button:hover {
   background: rgba(0, 0, 0, 0.14);
 }
 
-html[dark] [data-ytdl-panel-bar] button:hover {
+html[dark] [data-ytdl-panel-bar] [data-ytdl-panel-actions] button:hover {
   background: rgba(255, 255, 255, 0.22);
 }
 
-[data-ytdl-panel-bar] button[data-ytdl-panel-download] {
+[data-ytdl-panel-bar] [data-ytdl-panel-actions] button[data-ytdl-panel-download] {
   background: #065fd4;
   color: #ffffff;
 }
 
-[data-ytdl-panel-bar] button[data-ytdl-panel-download]:hover {
+[data-ytdl-panel-bar] [data-ytdl-panel-actions] button[data-ytdl-panel-download]:hover {
   background: #0553ba;
 }
 
-html[dark] [data-ytdl-panel-bar] button[data-ytdl-panel-download] {
+html[dark] [data-ytdl-panel-bar] [data-ytdl-panel-actions] button[data-ytdl-panel-download] {
   background: #3ea6ff;
   color: #0f0f0f;
 }
 
-html[dark] [data-ytdl-panel-bar] button[data-ytdl-panel-download]:hover {
+html[dark] [data-ytdl-panel-bar] [data-ytdl-panel-actions] button[data-ytdl-panel-download]:hover {
   background: #65b8ff;
 }
 
@@ -374,28 +479,10 @@ html[dark] [data-ytdl-panel-bar] button[data-ytdl-panel-download]:hover {
   background: rgba(0, 0, 0, 0.55);
 }
 
-[data-ytdl-context-card] {
-  width: min(440px, 100%);
-  padding: 18px 20px;
-  border-radius: 14px;
-  background: #ffffff;
-  color: #0f0f0f;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
-  font: 400 13px/18px Roboto, Arial, sans-serif;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-html[dark] [data-ytdl-context-card] {
-  background: #212121;
-  color: #f1f1f1;
-}
-
 [data-ytdl-context-title] {
   margin: 0;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 [data-ytdl-context-desc] {
@@ -451,26 +538,55 @@ html[dark] [data-ytdl-context-actions] button[data-ytdl-context-action="select"]
   margin-block: 4px;
 }
 
-[data-ytdl-panel-bar] {
-  grid-column: 1 / -1;
-  flex: 1 0 100%;
-  width: 100%;
-  box-sizing: border-box;
-}
-
 [data-ytdl-side-check][data-ytdl-channel-check="true"] {
   margin: 0 0 6px;
   padding: 4px 10px;
   border-radius: 14px;
+  border: 1px solid rgba(6, 95, 212, 0.28);
   gap: 6px;
-  background: rgba(0, 0, 0, 0.06);
-  color: #0f0f0f;
-  font: 500 12px/16px Roboto, Arial, sans-serif;
+  background: rgba(6, 95, 212, 0.1);
+  color: #065fd4;
+  font: 600 12px/16px Roboto, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
   align-self: flex-start;
+  transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
 }
 
 html[dark] [data-ytdl-side-check][data-ytdl-channel-check="true"] {
-  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(62, 166, 255, 0.32);
+  background: rgba(62, 166, 255, 0.14);
+  color: #3ea6ff;
+}
+
+[data-ytdl-side-check][data-ytdl-channel-check="true"][data-checked="false"] {
+  border-color: rgba(0, 0, 0, 0.14);
+  background: rgba(0, 0, 0, 0.05);
+  color: #606060;
+}
+
+html[dark] [data-ytdl-side-check][data-ytdl-channel-check="true"][data-checked="false"] {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #aaaaaa;
+}
+
+[data-ytdl-context-card] {
+  width: min(440px, 100%);
+  padding: 18px 20px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 14px;
+  background: #ffffff;
+  color: #0f0f0f;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  font: 400 13px/18px Roboto, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+html[dark] [data-ytdl-context-card] {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #212121;
   color: #f1f1f1;
 }
 
@@ -490,6 +606,7 @@ html[dark] [data-ytdl-side-check][data-ytdl-channel-check="true"] {
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   padding: 18px 20px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 16px;
   background: #ffffff;
   color: #0f0f0f;
@@ -501,6 +618,7 @@ html[dark] [data-ytdl-side-check][data-ytdl-channel-check="true"] {
 }
 
 html[dark] [data-ytdl-format-card] {
+  border-color: rgba(255, 255, 255, 0.12);
   background: #212121;
   color: #f1f1f1;
 }

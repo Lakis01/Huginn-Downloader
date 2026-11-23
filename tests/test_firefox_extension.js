@@ -143,8 +143,9 @@ function testBackgroundStatic() {
   assert.ok(src.includes('icons/audio.svg'), 'audio item uses audio icon');
   assert.ok(src.includes('icons/video.svg'), 'video item uses video icon');
   assert.ok(src.includes('icons/cut.svg'), 'cut item uses cut icon');
-  assert.ok(src.includes('removeAll'), 'menu setup clears stale persisted menus (always present like Play in MPV)');
-  assert.ok(src.includes('removeAll'), 'menu setup clears stale persisted menus before creating');
+  assert.ok(!src.includes('removeAll'), 'menu setup never calls removeAll (menus persist across wakes like Play in MPV)');
+  assert.ok(/\nsetupMenus\(\);/.test(src), 'top-level wake path restores missing menus non-destructively');
+  assert.ok(!src.includes('tabs.onUpdated'), 'no tabs.onUpdated listener churning the event page');
   assert.ok(created_items_omit_patterns(src), 'menu creation omits URL pattern properties');
   assert.ok(!src.includes('onShown'), 'no menus.onShown listener (static patterns avoid preview race)');
   assert.ok(src.includes('MENU_CONTEXTS') || src.includes("'selection'"), 'menu contexts include selection');
@@ -347,12 +348,27 @@ async function testBackgroundStaticMenus() {
 }
 
 async function testBackgroundRemoveAllOrdering() {
-  const { created, menuOrder } = runBackgroundFixture();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.ok(menuOrder.length >= 5, 'removeAll plus four creates recorded');
-  assert.equal(menuOrder[0], 'removeAll', 'menus.removeAll() completes before any menu creation');
-  assert.deepEqual(menuOrder.slice(1, 5), ['create:ytdl-root', 'create:ytdl-audio', 'create:ytdl-video', 'create:ytdl-cut'], 'four menus created sequentially after removal');
-  assert.equal(created.length, 4, 'four menu definitions created');
+  const { created, menuOrder, fireInstalled, fireStartup } = runBackgroundFixture();
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  await tick();
+  // Plain wake, install, and startup all register missing menus without removeAll().
+  assert.ok(!menuOrder.includes('removeAll'), 'background wake never calls menus.removeAll()');
+  assert.deepEqual(menuOrder.slice(0, 4), ['create:ytdl-root', 'create:ytdl-audio', 'create:ytdl-video', 'create:ytdl-cut'], 'wake creates items in parent-first order');
+  assert.equal(created.length, 4, 'four menu definitions created on wake');
+
+  menuOrder.length = 0;
+  fireInstalled();
+  await tick();
+  await tick();
+  assert.ok(!menuOrder.includes('removeAll'), 'onInstalled never strips existing menus with removeAll()');
+  assert.deepEqual(menuOrder.slice(0, 4), ['create:ytdl-root', 'create:ytdl-audio', 'create:ytdl-video', 'create:ytdl-cut'], 'onInstalled creates menus in parent-first order');
+
+  menuOrder.length = 0;
+  fireStartup();
+  await tick();
+  await tick();
+  assert.ok(!menuOrder.includes('removeAll'), 'onStartup never strips existing menus with removeAll()');
+  assert.deepEqual(menuOrder.slice(0, 4), ['create:ytdl-root', 'create:ytdl-audio', 'create:ytdl-video', 'create:ytdl-cut'], 'onStartup creates menus in parent-first order');
 }
 
 async function testBackgroundSrcAndFrameFallbacks() {
@@ -1070,6 +1086,37 @@ async function testPopupUpdateNote() {
     const combined = `${fx.elements.get('ytdlpUpdateText').textContent} ${fx.elements.get('ytdlpUpdateHint').textContent}`;
     assert.ok(combined.includes('400') || combined.includes('2023.01.01'), 'note shows age in days when latest is null');
   }
+  {
+    // Outdated yt-dlp plus a companion that lags the extension.
+    const fx = createPopupFixture({
+      ok: true,
+      version: '2.5.8',
+      _manifestVersion: '2.5.10',
+      config: {},
+      deps: { yt_dlp: true, ffmpeg: false, rsgain: false },
+      yt_dlp_status: {
+        outdated: true, installed: '2026.10.01', latest: '2026.11.15', age_days: 50, update_hint: 'yt-dlp -U',
+      },
+    });
+    fx.triggerReady();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Update available');
+    assert.equal(fx.elements.get('extensionStateText').textContent, 'Companion older', 'version mismatch is called out');
+    assert.equal(fx.elements.get('statusText').textContent, 'Missing tools', 'missing FFmpeg outranks other warnings');
+    assert.equal(fx.elements.get('depFfmpeg').textContent, 'FFmpeg missing');
+    assert.equal(fx.elements.get('depRsgain').textContent, 'rsgain not installed');
+    assert.ok(fx.elements.get('ytdlpUpdateText').textContent.includes('2026.11.15'), 'note names the latest release');
+  }
+  {
+    // Companion missing: the board still reports the extension version.
+    const fx = createPopupFixture({ ok: false });
+    fx.triggerReady();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(fx.elements.get('statusText').textContent, 'Not connected');
+    assert.equal(fx.elements.get('companionStateText').textContent, 'Not found');
+    assert.equal(fx.elements.get('extensionVersionText').textContent, '2.5.9');
+    assert.equal(fx.elements.get('depsLine').hidden, true, 'tool chips hidden without a companion');
+  }
 }
 
 async function testPopupAudioFormatAndRsgainGuard() {
@@ -1520,6 +1567,15 @@ function testContentPlaylistCardsAndWatchPrompt() {
 
     const dialog = fx.document.querySelector('[data-ytdl-playlist-dialog="true"]');
     assert.ok(dialog, 'playlist prompt dialog mounted');
+    const details = dialog.querySelector('[data-ytdl-playlist-details="true"]');
+    assert.ok(details, 'detailed range/list container mounted');
+    assert.equal(details.hidden, true, 'detailed list and range view is collapsed by default');
+    const detailsToggle = dialog.querySelector('[data-ytdl-details-toggle="true"]');
+    assert.ok(detailsToggle, 'details toggle button present');
+    assert.equal(detailsToggle.getAttribute('aria-expanded'), 'false');
+    detailsToggle.dispatchEvent({ type: 'click', target: detailsToggle, bubbles: true });
+    assert.equal(details.hidden, false, 'clicking details toggle expands range & track list');
+    assert.equal(detailsToggle.getAttribute('aria-expanded'), 'true');
     const panelBar = panel.querySelector('[data-ytdl-panel-bar="true"]');
     assert.ok(panelBar, 'side playlist panel mounts batch control bar');
     const panelDlBtn = panelBar.querySelector('[data-ytdl-panel-download="true"]');
@@ -1744,6 +1800,15 @@ function testContentPlaylistCardsAndWatchPrompt() {
     assert.equal(fx.sentMessages.length, 0, 'clicking channel Audio opens graphical item selection');
     const panelBar = contents.querySelector('[data-ytdl-panel-bar="true"]');
     assert.ok(panelBar, 'channel grid mounts batch toolbar');
+    const embeddedDialog = panelBar.querySelector('[data-ytdl-dialog-embedded="true"]');
+    assert.ok(embeddedDialog, 'channel view embeds range/list drawer inside panelBar instead of a floating modal');
+    assert.equal(fx.document.querySelector('[data-ytdl-dialog-floating="true"]'), null, 'no redundant floating modal over channel grid');
+    const channelDetails = embeddedDialog.querySelector('[data-ytdl-playlist-details="true"]');
+    assert.equal(channelDetails.hidden, true, 'channel range & track list starts hidden by default');
+    const panelDetailsBtn = panelBar.querySelector('[data-ytdl-details-toggle="true"]');
+    assert.ok(panelDetailsBtn, 'panel bar has expandable Range & list toggle');
+    panelDetailsBtn.dispatchEvent({ type: 'click', target: panelDetailsBtn, bubbles: true });
+    assert.equal(channelDetails.hidden, false, 'clicking Range & list toggle expands details inside panelBar');
     const channelChecks = contents.querySelectorAll('[data-ytdl-channel-check="true"]');
     assert.equal(channelChecks.length, 3, 'checkboxes appear next to all channel video cards');
     const dialogItems = fx.document.querySelectorAll('[data-ytdl-dialog-item="true"]');
@@ -1804,10 +1869,16 @@ async function testPopupVersionBadgeAndThreads() {
   fx.triggerReady();
   await tick(30);
 
-  assert.equal(fx.elements.get('statusText').textContent, 'Connected (extension 2.5.9, companion 2.5.9)');
+  assert.equal(fx.elements.get('statusText').textContent, 'Ready', 'health pill summarises a healthy stack');
   assert.equal(fx.elements.get('ytdlpVersionLine').hidden, false);
-  assert.equal(fx.elements.get('ytdlpVersionText').textContent, 'yt-dlp 2026.11.01');
+  assert.equal(fx.elements.get('ytdlpVersionText').textContent, '2026.11.01');
   assert.equal(fx.elements.get('ytdlpVersionBadge').textContent, 'Up to date');
+  assert.equal(fx.elements.get('extensionVersionText').textContent, '2.5.9', 'extension version has its own status cell');
+  assert.equal(fx.elements.get('companionVersionText').textContent, '2.5.9', 'companion version has its own status cell');
+  assert.equal(fx.elements.get('companionStateText').textContent, 'Connected');
+  assert.equal(fx.elements.get('extensionStateText').textContent, 'In sync');
+  assert.equal(fx.elements.get('depFfmpeg').textContent, 'FFmpeg');
+  assert.equal(fx.elements.get('depsLine').hidden, false, 'tool chips shown when connected');
   assert.equal(autoOpt.textContent, 'Auto (10 of 12 threads, max - 2)');
   assert.equal(threadsEl.value, '0');
 

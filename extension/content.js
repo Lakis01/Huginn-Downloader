@@ -23,7 +23,7 @@
     'yt-page-header-view-model',
     '#page-header',
   ].join(', ');
-  const CARD_SELECTOR = [
+  const CARD_SELECTORS = [
     'ytd-rich-item-renderer',
     'ytd-video-renderer',
     'ytd-grid-video-renderer',
@@ -43,7 +43,11 @@
     'ytmusic-responsive-list-item-renderer',
     'ytd-video-preview',
     '#video-preview',
-  ].join(', ');
+  ];
+  const CARD_SELECTOR = CARD_SELECTORS.join(', ');
+  const CARD_NON_PREVIEW_SELECTORS = CARD_SELECTORS.filter(
+    (sel) => sel !== 'ytd-video-preview' && sel !== '#video-preview',
+  );
 
   const MODES = [
     { mode: 'audio', label: 'Audio', aria: 'Download audio', icon: 'audio' },
@@ -480,16 +484,16 @@
 
     const sideCheckboxes = [];
     const dialogCheckboxes = [];
+    const detailsToggleButtons = [];
+    let detailsExpanded = false;
     let emptySelection = false;
+    let panelBar = null;
     let panelDownloadBtn = null;
     let footerSubmitBtn = null;
 
     const dialog = document.createElement('div');
     dialog.setAttribute('data-ytdl-playlist-dialog', 'true');
     dialog.setAttribute('data-ytdl-dialog-mode', mode);
-    if (!canAttachWatchDialog) {
-      dialog.setAttribute('data-ytdl-dialog-floating', 'true');
-    }
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-label', 'Playlist download options');
 
@@ -537,11 +541,25 @@
     playlistBtn.setAttribute('type', 'button');
     playlistBtn.setAttribute('data-ytdl-scope', 'playlist');
 
+    const dialogDetailsBtn = document.createElement('button');
+    dialogDetailsBtn.setAttribute('type', 'button');
+    dialogDetailsBtn.setAttribute('data-ytdl-details-toggle', 'true');
+    dialogDetailsBtn.setAttribute('aria-expanded', 'false');
+    dialogDetailsBtn.setAttribute('data-expanded', 'false');
+    dialogDetailsBtn.textContent = 'Range & list';
+    detailsToggleButtons.push(dialogDetailsBtn);
+
     if (canAttachWatchDialog && isWatchRoute()) {
       actionsRow.appendChild(singleBtn);
     }
     actionsRow.appendChild(playlistBtn);
+    actionsRow.appendChild(dialogDetailsBtn);
     dialog.appendChild(actionsRow);
+
+    const detailsEl = document.createElement('div');
+    detailsEl.setAttribute('data-ytdl-playlist-details', 'true');
+    detailsEl.setAttribute('hidden', '');
+    detailsEl.hidden = true;
 
     const itemsRow = document.createElement('div');
     itemsRow.setAttribute('data-ytdl-items-row', 'true');
@@ -569,13 +587,29 @@
     itemsRow.appendChild(itemsInput);
     itemsRow.appendChild(selectAllBtn);
     itemsRow.appendChild(selectNoneBtn);
-    dialog.appendChild(itemsRow);
+    detailsEl.appendChild(itemsRow);
+    dialog.appendChild(detailsEl);
 
     const errorNote = document.createElement('p');
     errorNote.setAttribute('data-ytdl-playlist-error', 'true');
     errorNote.setAttribute('hidden', '');
     errorNote.hidden = true;
     dialog.appendChild(errorNote);
+
+    const toggleDetails = () => {
+      detailsExpanded = !detailsExpanded;
+      detailsEl.hidden = !detailsExpanded;
+      if (detailsExpanded) {
+        detailsEl.removeAttribute('hidden');
+      } else {
+        detailsEl.setAttribute('hidden', '');
+      }
+      for (const btn of detailsToggleButtons) {
+        btn.setAttribute('aria-expanded', detailsExpanded ? 'true' : 'false');
+        btn.setAttribute('data-expanded', detailsExpanded ? 'true' : 'false');
+      }
+    };
+    dialogDetailsBtn.addEventListener('click', toggleDetails);
 
     const hideError = () => {
       errorNote.textContent = '';
@@ -623,6 +657,14 @@
       if (panelDownloadBtn) panelDownloadBtn.textContent = labelText;
     };
 
+    const syncLabelCheckedAttrs = () => {
+      for (const box of [...sideCheckboxes, ...dialogCheckboxes]) {
+        if (box.parentNode && typeof box.parentNode.setAttribute === 'function') {
+          box.parentNode.setAttribute('data-checked', box.checked ? 'true' : 'false');
+        }
+      }
+    };
+
     const syncInputFromCheckboxes = () => {
       const checkedIndices = [];
       const seen = new Set();
@@ -644,6 +686,7 @@
         emptySelection = false;
         itemsInput.value = formatPlaylistItemsSpec(checkedIndices);
       }
+      syncLabelCheckedAttrs();
       updateDownloadButtonLabels();
     };
 
@@ -652,6 +695,7 @@
         const idx = Number.parseInt(box.getAttribute('data-ytdl-item-index') || '', 10);
         if (idx === targetIdx) box.checked = isChecked;
       }
+      syncLabelCheckedAttrs();
     };
 
     const handleSelectAll = () => {
@@ -659,6 +703,7 @@
       hideError();
       for (const box of [...sideCheckboxes, ...dialogCheckboxes]) box.checked = true;
       itemsInput.value = '';
+      syncLabelCheckedAttrs();
       updateDownloadButtonLabels();
     };
 
@@ -667,12 +712,14 @@
       hideError();
       for (const box of [...sideCheckboxes, ...dialogCheckboxes]) box.checked = false;
       itemsInput.value = '';
+      syncLabelCheckedAttrs();
       updateDownloadButtonLabels();
     };
 
     const handlePlaylistSubmit = () => {
       const parsed = parsePlaylistItemsSpec(itemsInput.value, maxIndex);
       if (!parsed.valid) {
+        if (!detailsExpanded) toggleDetails();
         showError('Invalid yt-dlp playlist syntax. Examples: 1-5, 8, 1:5:2, -3::1');
         return;
       }
@@ -693,14 +740,21 @@
     const seenDialogIndices = new Set();
 
     if (panelItems.length > 0 && panelItems[0].renderer && panelItems[0].renderer.parentNode) {
-      const panelBar = document.createElement('div');
+      panelBar = document.createElement('div');
       panelBar.setAttribute('data-ytdl-panel-bar', 'true');
       for (const evtName of ['click', 'pointerdown', 'mousedown']) {
         panelBar.addEventListener(evtName, stopInteractivePropagation);
       }
+
+      const panelTop = document.createElement('div');
+      panelTop.setAttribute('data-ytdl-panel-top', 'true');
+
       const panelTitle = document.createElement('span');
       panelTitle.setAttribute('data-ytdl-panel-title', 'true');
-      panelTitle.textContent = `Huginn batch (${mode}):`;
+      panelTitle.textContent = `Huginn batch (${mode})`;
+
+      const panelActions = document.createElement('div');
+      panelActions.setAttribute('data-ytdl-panel-actions', 'true');
 
       const panelSelectAllBtn = document.createElement('button');
       panelSelectAllBtn.setAttribute('type', 'button');
@@ -720,6 +774,18 @@
         handleDeselectAll();
       });
 
+      const panelDetailsBtn = document.createElement('button');
+      panelDetailsBtn.setAttribute('type', 'button');
+      panelDetailsBtn.setAttribute('data-ytdl-details-toggle', 'true');
+      panelDetailsBtn.setAttribute('aria-expanded', 'false');
+      panelDetailsBtn.setAttribute('data-expanded', 'false');
+      panelDetailsBtn.textContent = 'Range & list';
+      panelDetailsBtn.addEventListener('click', (evt) => {
+        stopInteractivePropagation(evt);
+        toggleDetails();
+      });
+      detailsToggleButtons.push(panelDetailsBtn);
+
       panelDownloadBtn = document.createElement('button');
       panelDownloadBtn.setAttribute('type', 'button');
       panelDownloadBtn.setAttribute('data-ytdl-panel-download', 'true');
@@ -734,14 +800,20 @@
       panelCloseBtn.textContent = 'Cancel';
       panelCloseBtn.addEventListener('click', (evt) => {
         stopInteractivePropagation(evt);
+        clearPendingPlaylistSelect();
         closePlaylistPrompt();
       });
 
-      panelBar.appendChild(panelTitle);
-      panelBar.appendChild(panelSelectAllBtn);
-      panelBar.appendChild(panelDeselectAllBtn);
-      panelBar.appendChild(panelDownloadBtn);
-      panelBar.appendChild(panelCloseBtn);
+      panelActions.appendChild(panelSelectAllBtn);
+      panelActions.appendChild(panelDeselectAllBtn);
+      panelActions.appendChild(panelDetailsBtn);
+      panelActions.appendChild(panelDownloadBtn);
+      panelActions.appendChild(panelCloseBtn);
+
+      panelTop.appendChild(panelTitle);
+      panelTop.appendChild(panelActions);
+      panelBar.appendChild(panelTop);
+
       const firstParent = panelItems[0].renderer.parentNode;
       if (
         firstParent.parentNode &&
@@ -757,6 +829,7 @@
     for (const item of panelItems) {
       const sideLabel = document.createElement('label');
       sideLabel.setAttribute('data-ytdl-side-check', 'true');
+      sideLabel.setAttribute('data-checked', 'true');
       if (item.isGridCard) sideLabel.setAttribute('data-ytdl-channel-check', 'true');
       sideLabel.setAttribute('title', `Include item ${item.itemIndex} in batch download`);
       const sideCheckbox = document.createElement('input');
@@ -776,7 +849,7 @@
       sideLabel.appendChild(sideCheckbox);
       if (item.isGridCard) {
         const badgeText = document.createElement('span');
-        badgeText.textContent = `Select #${item.itemIndex}`;
+        badgeText.textContent = `#${item.itemIndex}`;
         sideLabel.appendChild(badgeText);
       }
       item.renderer.insertBefore(sideLabel, item.renderer.children[0] || null);
@@ -786,6 +859,8 @@
         seenDialogIndices.add(item.itemIndex);
         const dialogLabel = document.createElement('label');
         dialogLabel.setAttribute('data-ytdl-dialog-item', 'true');
+        dialogLabel.setAttribute('data-checked', 'true');
+        dialogLabel.setAttribute('title', `${item.itemIndex}. ${item.title}`);
         const dialogCheckbox = document.createElement('input');
         dialogCheckbox.setAttribute('type', 'checkbox');
         dialogCheckbox.setAttribute('data-ytdl-dialog-checkbox', 'true');
@@ -795,9 +870,14 @@
           setIndexChecked(item.itemIndex, Boolean(dialogCheckbox.checked));
           syncInputFromCheckboxes();
         });
+        const itemNum = document.createElement('span');
+        itemNum.setAttribute('data-ytdl-item-num', 'true');
+        itemNum.textContent = `#${item.itemIndex}`;
         const itemText = document.createElement('span');
-        itemText.textContent = `${item.itemIndex}. ${item.title}`;
+        itemText.setAttribute('data-ytdl-item-title', 'true');
+        itemText.textContent = item.title;
         dialogLabel.appendChild(dialogCheckbox);
+        dialogLabel.appendChild(itemNum);
         dialogLabel.appendChild(itemText);
         listEl.appendChild(dialogLabel);
         dialogCheckboxes.push(dialogCheckbox);
@@ -805,7 +885,7 @@
     }
 
     if (panelItems.length > 0) {
-      dialog.appendChild(listEl);
+      detailsEl.appendChild(listEl);
       const footer = document.createElement('div');
       footer.setAttribute('data-ytdl-dialog-footer', 'true');
       footerSubmitBtn = document.createElement('button');
@@ -813,7 +893,7 @@
       footerSubmitBtn.setAttribute('data-ytdl-scope', 'playlist-submit');
       footerSubmitBtn.addEventListener('click', handlePlaylistSubmit);
       footer.appendChild(footerSubmitBtn);
-      dialog.appendChild(footer);
+      detailsEl.appendChild(footer);
     }
 
     itemsInput.addEventListener('input', () => {
@@ -828,6 +908,7 @@
         const idx = Number.parseInt(box.getAttribute('data-ytdl-item-index') || '', 10);
         box.checked = parsed.all || parsed.indices.has(idx);
       }
+      syncLabelCheckedAttrs();
       updateDownloadButtonLabels();
     });
 
@@ -846,7 +927,15 @@
 
     if (canAttachWatchDialog) {
       metadata.insertBefore(dialog, topRow.nextSibling || null);
+    } else if (panelBar) {
+      dialog.setAttribute('data-ytdl-dialog-embedded', 'true');
+      header.hidden = true;
+      header.setAttribute('hidden', '');
+      actionsRow.hidden = true;
+      actionsRow.setAttribute('hidden', '');
+      panelBar.appendChild(dialog);
     } else {
+      dialog.setAttribute('data-ytdl-dialog-floating', 'true');
       const host = document.body || document.documentElement;
       if (host) host.appendChild(dialog);
     }
@@ -1219,9 +1308,9 @@
   function findCardsUnderCoordinates(clientX, clientY) {
     if (typeof clientX !== 'number' || typeof clientY !== 'number') return [];
     const matched = [];
-    for (const selector of ['yt-lockup-view-model', 'ytd-playlist-renderer', 'ytd-grid-playlist-renderer', 'ytd-compact-playlist-renderer']) {
+    for (const selector of CARD_NON_PREVIEW_SELECTORS) {
       for (const el of document.querySelectorAll(selector)) {
-        if (typeof el.getBoundingClientRect !== 'function') continue;
+        if (matched.includes(el) || typeof el.getBoundingClientRect !== 'function') continue;
         try {
           const rect = el.getBoundingClientRect();
           if (
